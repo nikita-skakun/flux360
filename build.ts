@@ -33,7 +33,7 @@ Example:
   process.exit(0);
 }
 
-const toCamelCase = (str: string): string => str.replace(/-([a-z])/g, g => g[1].toUpperCase());
+const toCamelCase = (str: string): string => str.replace(/-([a-z])/g, (_match, ch) => (ch ? ch.toUpperCase() : ""));
 
 const parseValue = (value: string): any => {
   if (value === "true") return true;
@@ -48,7 +48,8 @@ const parseValue = (value: string): any => {
 };
 
 function parseArgs(): Partial<Bun.BuildConfig> {
-  const config: Partial<Bun.BuildConfig> = {};
+  // Use a looser indexable type since flags can be arbitrary keys like "minify.whitespace"
+  const config: Record<string, any> = {};
   const args = process.argv.slice(2);
 
   for (let i = 0; i < args.length; i++) {
@@ -81,9 +82,10 @@ function parseArgs(): Partial<Bun.BuildConfig> {
     key = toCamelCase(key);
 
     if (key.includes(".")) {
-      const [parentKey, childKey] = key.split(".");
-      config[parentKey] = config[parentKey] || {};
-      config[parentKey][childKey] = parseValue(value);
+      const [parentKey, childKey] = key.split(".") as [string, string];
+      // ensure parent is an object
+      if (!config[parentKey] || typeof config[parentKey] !== "object") config[parentKey] = {};
+      (config[parentKey] as Record<string, any>)[childKey] = parseValue(value);
     } else {
       config[key] = parseValue(value);
     }

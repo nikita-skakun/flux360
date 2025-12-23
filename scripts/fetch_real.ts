@@ -7,9 +7,9 @@ async function main() {
   const username = process.env.TRACCAR_USER;
   const password = process.env.TRACCAR_PASS;
   const token = process.env.TRACCAR_TOKEN;
-  const deviceId = process.env.TRACCAR_DEVICE_ID || "1";
-  const from = process.env.TRACCAR_FROM || new Date(Date.now() - 60 * 60 * 1000 * 6).toISOString(); // default 1 hour ago
-  const to = process.env.TRACCAR_TO || new Date().toISOString();
+  const deviceId = process.env.TRACCAR_DEVICE_ID || "4";
+  const from = process.env.TRACCAR_FROM || new Date("2025-12-13T12:28:50").toISOString();
+  const to = process.env.TRACCAR_TO || new Date("2025-12-13T15:51:40").toISOString();
 
   const opts: any = { baseUrl };
   if (token) opts.auth = { type: "token", token };

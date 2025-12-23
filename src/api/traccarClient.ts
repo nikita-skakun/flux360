@@ -17,7 +17,7 @@ export type NormalizedPosition = {
   accuracy: number; // meters
   timestamp: number; // epoch ms
   source?: string; // optional source tag (protocol/device)
-  raw?: any; // original payload
+  raw?: unknown; // original payload
 };
 
 function buildAuthHeader(auth?: TraccarAuth) {
@@ -32,38 +32,45 @@ function buildAuthHeader(auth?: TraccarAuth) {
   return undefined;
 }
 
-function parseTimestampFromRecord(r: any): number | undefined {
+function parseTimestampFromRecord(r: unknown): number | undefined {
   // Traccar may return a number of fields for times. Prefer `time` or `deviceTime` or `fixTime` etc.
+  if (!r || typeof r !== "object") return undefined;
+  const obj = r as Record<string, unknown>;
   const candidates = ["time", "timestamp", "deviceTime", "fixTime", "serverTime", "fixtime", "timeServer"];
   for (const k of candidates) {
-    if (r[k] != null) {
-      // numeric (ms) or ISO string
-      if (typeof r[k] === "number") return r[k];
-      const parsed = Date.parse(r[k]);
+    const v = obj[k];
+    if (v == null) continue;
+    if (typeof v === "number") return v;
+    if (typeof v === "string") {
+      const parsed = Date.parse(v);
       if (!Number.isNaN(parsed)) return parsed;
+      const n = Number(v);
+      if (!Number.isNaN(n)) return n;
     }
   }
-  // older Traccar might use `deviceId` and timing in other fields; fallback to `id` as ms (unlikely)
   return undefined;
 }
 
-export function normalizePosition(raw: any, defaultAccuracy = 50): NormalizedPosition | null {
-  if (!raw) return null;
-  const lat = raw.latitude ?? raw.lat ?? raw.latDeg ?? raw.y;
-  const lon = raw.longitude ?? raw.lon ?? raw.lng ?? raw.x;
+export function normalizePosition(raw: unknown, defaultAccuracy = 50): NormalizedPosition | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const lat = typeof obj.latitude === "number" ? obj.latitude : typeof obj.lat === "number" ? obj.lat : typeof obj.latDeg === "number" ? obj.latDeg : typeof obj.y === "number" ? obj.y : undefined;
+  const lon = typeof obj.longitude === "number" ? obj.longitude : typeof obj.lon === "number" ? obj.lon : typeof obj.lng === "number" ? obj.lng : typeof obj.x === "number" ? obj.x : undefined;
   if (typeof lat !== "number" || typeof lon !== "number") return null;
 
-  const ts = parseTimestampFromRecord(raw) ?? Date.now();
-  const accuracy = raw.accuracy ?? raw.precision ?? defaultAccuracy;
-  const source = raw.protocol ?? raw.source ?? `${raw.deviceId ?? "unknown"}`;
+  const ts = parseTimestampFromRecord(obj) ?? Date.now();
+  const accuracyRaw = obj.accuracy ?? obj.precision;
+  const accuracy = typeof accuracyRaw === "number" ? accuracyRaw : defaultAccuracy;
+  const srcRaw = obj.protocol ?? obj.source ?? obj.deviceId;
+  const source = typeof srcRaw === "string" ? srcRaw : typeof srcRaw === "number" ? String(srcRaw) : undefined;
 
   return {
     lat,
     lon,
-    accuracy: typeof accuracy === "number" ? accuracy : defaultAccuracy,
+    accuracy,
     timestamp: ts,
     source,
-    raw,
+    raw: obj,
   };
 }
 
@@ -76,13 +83,15 @@ export async function fetchPositions(
 ): Promise<NormalizedPosition[]> {
   const fetcher = opts.fetchImpl ?? fetch;
   const base = opts.baseUrl.replace(/\/+$/, "");
-  const q: Record<string, string> = {
+  const paramsBase: Record<string, string> = {
     deviceId: String(deviceId),
     from: from.toISOString(),
-    ...params,
   };
-  if (to) q.to = to.toISOString();
-  const qs = new URLSearchParams(q as any).toString();
+  if (to) paramsBase.to = to.toISOString();
+  for (const [k, v] of Object.entries(params)) {
+    paramsBase[k] = String(v);
+  }
+  const qs = new URLSearchParams(paramsBase).toString();
   const url = `${base}/positions?${qs}`;
 
   const headers: Record<string, string> = {
@@ -97,14 +106,17 @@ export async function fetchPositions(
     throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
   }
 
-  const json = await res.json().catch(() => null);
-  if (!Array.isArray(json)) {
-    // Some Traccar versions return an object { data: [...] }
-    if (json && Array.isArray(json.data)) return json.data.map((p: any) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
-    throw new Error("Unexpected Traccar response format: expected JSON array");
+  const json: unknown = await res.json().catch(() => null);
+  if (Array.isArray(json)) {
+    return json.map((p) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
   }
-
-  return json.map((p: any) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
+  if (json && typeof json === "object") {
+    const obj = json as Record<string, unknown>;
+    if (Array.isArray(obj.data)) {
+      return obj.data.map((p) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
+    }
+  }
+  throw new Error("Unexpected Traccar response format: expected JSON array");
 }
 
 export default {

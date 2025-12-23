@@ -1,61 +1,84 @@
 import { Card, CardContent } from "@/components/ui/card";
 import "./index.css";
 import { useEffect, useState } from "react";
-import { CanvasView } from "./ui/CanvasView";
+import MapView from "./ui/MapView";
 import { TimelineSlider } from "./ui/TimelineSlider";
+import type { ComponentUI } from "@/ui/types";
 import { degreesToMeters } from "./util/geo";
-import MixtureEngine from "./engine/mixture";
+import { measurementCovFromAccuracy } from "@/util/gaussian";
 
 export function App() {
-  const [engine] = useState(() => new MixtureEngine());
+  type DevPosition = { lat: number; lon: number; accuracy?: number; timestamp: number; source?: string; raw?: unknown };
+  type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
+  type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
+
   const [timelineIndex, setTimelineIndex] = useState(0);
-  const [snapshots, setSnapshots] = useState<any[]>([]);
-  const [center, setCenter] = useState<{ x: number; y: number } | null>(null);
-  const [worldBounds, setWorldBounds] = useState<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [refLat, setRefLat] = useState<number | null>(null);
+  const [refLon, setRefLon] = useState<number | null>(null);
+  const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
 
   useEffect(() => {
     async function loadData() {
       try {
         // Try loaded dev data from local dev server endpoint
         const res = await fetch('/api/dev-data/positions');
-        if (!res.ok) throw new Error('no dev data');
-        const positions = await res.json();
-        if (!Array.isArray(positions) || positions.length === 0) return;
+        if (!res.ok) throw new Error("no dev data");
+        const positionsRaw = await res.json();
+        if (!Array.isArray(positionsRaw) || positionsRaw.length === 0) return;
+        const positions = positionsRaw.filter((p): p is DevPosition => !!p && typeof p === "object" && typeof (p as Record<string, unknown>).lat === "number" && typeof (p as Record<string, unknown>).lon === "number" && typeof (p as Record<string, unknown>).timestamp === "number");
+        if (positions.length === 0) return;
 
-        // Convert to measurements and run engine; first convert to meter coordinates for bounds
-        engine.reset();
-        const refLat = positions[0].lat;
-        const refLon = positions[0].lon;
+        // Convert to measurements and build simple snapshots (UI-only)
+        const first = positions[0];
+        if (!first) return;
+        const baseLat = first.lat;
+        const baseLon = first.lon;
+        setRefLat(baseLat);
+        setRefLon(baseLon);
+
         // Convert all positions into meters and compute world bounds (min/max)
-        const metersPos = positions.map((p: any) => ({
-          lat: p.lat,
-          lon: p.lon,
-          accuracy: p.accuracy,
-          timestamp: p.timestamp,
-          source: p.source,
-          ...degreesToMeters(p.lat, p.lon, refLat, refLon),
-        }));
-        setCenter(null); // leave center null so CanvasView fitToBounds uses worldBounds
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-        for (const mp of metersPos) {
-          minX = Math.min(minX, mp.x);
-          maxX = Math.max(maxX, mp.x);
-          minY = Math.min(minY, mp.y);
-          maxY = Math.max(maxY, mp.y);
-        }
-        const worldBounds = { minX, minY, maxX, maxY };
+        const metersPos = positions.map((p) => {
+          const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
+          return {
+            lat: p.lat,
+            lon: p.lon,
+            accuracy: p.accuracy ?? 50,
+            timestamp: p.timestamp,
+            source: p.source,
+            x,
+            y,
+          };
+        });
 
-        for (const p of metersPos) {
-          const { x, y } = { x: p.x, y: p.y };
-          const cov: [number, number, number] = p.accuracy
-            ? [p.accuracy * p.accuracy, 0, p.accuracy * p.accuracy]
-            : [100, 0, 100];
-          engine.predictAll();
-          engine.updateWithMeasurement({ mean: [x, y], cov, timestamp: p.timestamp, source: p.source });
-        }
-        const arr = engine.timeline.asArray();
+        const initialBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+        const worldBounds = metersPos.reduce(
+          (acc, mp) => ({
+            minX: Math.min(acc.minX, mp.x),
+            minY: Math.min(acc.minY, mp.y),
+            maxX: Math.max(acc.maxX, mp.x),
+            maxY: Math.max(acc.maxY, mp.y),
+          }),
+          initialBounds
+        );
+
+        // Build simple per-position snapshots so the UI can step through positions
+        const arr: Snapshot[] = metersPos.map((p) => ({
+          timestamp: p.timestamp,
+          data: {
+            components: [
+              {
+                mean: [p.x, p.y] as [number, number],
+                cov: measurementCovFromAccuracy(p.accuracy),
+                weight: 1,
+                source: p.source,
+              },
+            ],
+          },
+        }));
         setSnapshots(arr);
-        setTimelineIndex(Math.max(0, arr.length - 1));
+        // Timeline slider values: 0 = hidden, 1..N => snapshot index 0..N-1
+        setTimelineIndex(arr.length);
         // store world bounds somewhere (pass into CanvasView via state)
         setWorldBounds(worldBounds);
       } catch (e) {
@@ -63,33 +86,37 @@ export function App() {
       }
     }
     loadData();
-  }, [engine]);
+  }, []);
 
-  const frame = snapshots[timelineIndex]?.data ?? { components: [] };
+  const frame = timelineIndex > 0 ? snapshots[timelineIndex - 1]?.data ?? { components: [] } : { components: [] };
 
   return (
-    <div className="container mx-auto p-8 text-center relative z-10">
-        <div className="flex justify-center items-center gap-8 mb-8">
-          <h1 className="text-center text-5xl font-bold">Traccar Mixture POC</h1>
-        </div>
-
-      <Card className="bg-card/50 backdrop-blur-sm border-muted">
-        <CardContent className="pt-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-              <CanvasView components={frame.components} refMeters={center ?? { x: 0, y: 0 }} worldBounds={worldBounds} />
-            </div>
-            <div className="text-left">
-            
-              <div className="mb-4">
-                <TimelineSlider
-                  length={snapshots.length}
-                  index={timelineIndex}
-                  onChange={(i) => setTimelineIndex(i)}
-                />
-              </div>
-              <p className="text-sm">Snapshots: {snapshots.length}</p>
-            </div>
+    <div className="min-h-screen flex items-center justify-center p-8">
+      <Card className="bg-card/50 backdrop-blur-sm border-muted w-[90vw] h-[90vh] overflow-hidden mx-auto">
+        <CardContent className="pt-6 h-full flex flex-col">
+          <div className="flex justify-center items-center gap-8 mb-2">
+            <h1 className="text-center text-3xl sm:text-5xl font-bold">Traccar UI POC</h1>
+          </div>
+          <div className="flex-1 h-full">
+            <MapView
+              components={frame.components}
+              refLat={refLat}
+              refLon={refLon}
+              worldBounds={worldBounds}
+              height="100%"
+              overlay={
+                <div className="flex flex-col gap-2">
+                  <div className="w-full">
+                    <TimelineSlider
+                      length={snapshots.length}
+                      index={timelineIndex}
+                      onChange={(i) => setTimelineIndex(i)}
+                    />
+                    <p className="text-sm mt-2">Snapshots: {snapshots.length} <span className="text-xs opacity-80">(0 hides all)</span></p>
+                  </div>
+                </div>
+              }
+            />
           </div>
         </CardContent>
       </Card>

@@ -1,11 +1,12 @@
 import React, { useRef, useEffect } from "react";
-import type { Component as GComponent } from "../engine/mixture";
-import { eigenDecomposition } from "../engine/gaussian";
+import type { ComponentUI } from "@/ui/types";
+import { eigenDecomposition } from "@/util/gaussian";
+import type { Cov2 } from "@/util/gaussian";
 
 type Props = {
   width?: number;
   height?: number;
-  components: GComponent[];
+  components: ComponentUI[];
   refMeters?: { x: number; y: number }; // reference coordinate (meters) for centering
   zoom?: number; // pixels per meter
   fitToBounds?: boolean; // if true, zoom to fit all components
@@ -21,8 +22,7 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
+    // transparent background so the underlying map can show through
 
     // compute bounding box to auto-scale and center components if refMeters/zoom not provided
     const defaultCenterX = 0;
@@ -30,13 +30,32 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
     let cx = width / 2;
     let cy = height / 2;
     let localZoom = zoom ?? 1;
+    // normalize components for calculations (mean/cov/weight)
+    const processed = components.map((c) => {
+      const mean: [number, number] =
+        Array.isArray(c.mean) && c.mean.length === 2 && typeof c.mean[0] === "number" && typeof c.mean[1] === "number"
+          ? (c.mean as [number, number])
+          : [0, 0];
+      const cov: Cov2 =
+        Array.isArray(c.cov) && c.cov.length === 3 && c.cov.every((n) => typeof n === "number")
+          ? (c.cov as Cov2)
+          : typeof c.accuracy === "number"
+          ? [c.accuracy * c.accuracy, 0, c.accuracy * c.accuracy]
+          : [100, 0, 100];
+      const weight = typeof c.weight === "number" ? c.weight : 1;
+      return { ...c, mean, cov, weight };
+    });
+
+    let anchorX = refMeters?.x ?? 0;
+    let anchorY = refMeters?.y ?? 0;
+
     if (fitToBounds || !refMeters || typeof zoom !== "number") {
-      if (components.length > 0) {
+      if (processed.length > 0) {
         let minX = Number.POSITIVE_INFINITY;
         let minY = Number.POSITIVE_INFINITY;
         let maxX = Number.NEGATIVE_INFINITY;
         let maxY = Number.NEGATIVE_INFINITY;
-        for (const c of components) {
+        for (const c of processed) {
           minX = Math.min(minX, c.mean[0]);
           maxX = Math.max(maxX, c.mean[0]);
           minY = Math.min(minY, c.mean[1]);
@@ -54,22 +73,24 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
         const pad = 0.86; // leave some padding
         // Compute maximum radius from covariances so a very large uncertainty doesn't blow up the zoom
         let maxRadiusMeters = 0;
-        for (const c of components) {
+        for (const c of processed) {
           try {
-            const { lambda1, lambda2 } = eigenDecomposition(c.cov as any);
+            const { lambda1, lambda2 } = eigenDecomposition(c.cov);
             const r = Math.sqrt(Math.max(lambda1, lambda2));
             if (r > maxRadiusMeters) maxRadiusMeters = r;
           } catch (e) {
-            // ignore
+            // ignore invalid covariance
           }
         }
-        const minWorldWidth = Math.max(widthMeters, heightMeters);
-        localZoom = Math.min(width * pad / minWorldWidth, height * pad / minWorldWidth);
+        // Compute scale independently for X and Y to preserve aspect ratio
+        const xScale = (width * pad) / widthMeters;
+        const yScale = (height * pad) / heightMeters;
+        localZoom = Math.min(xScale, yScale);
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
         // Determine anchor: if fitToBounds, center on bounding center; otherwise use refMeters or 0.
-        const anchorX = fitToBounds ? centerX : refMeters?.x ?? 0;
-        const anchorY = fitToBounds ? centerY : refMeters?.y ?? 0;
+        anchorX = fitToBounds ? centerX : refMeters?.x ?? 0;
+        anchorY = fitToBounds ? centerY : refMeters?.y ?? 0;
         cx = width / 2;
         cy = height / 2;
       } else {
@@ -81,22 +102,20 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       cy = height / 2;
     }
 
-    for (const c of components) {
-      const anchorX = fitToBounds ? (refMeters?.x ?? 0) ?? 0 : refMeters?.x ?? 0;
-      const anchorY = fitToBounds ? (refMeters?.y ?? 0) ?? 0 : refMeters?.y ?? 0;
+    const palette = ["#5B8CFF", "#60D394", "#FFD36E", "#FF8560", "#C77DFF", "#60C6FF"];
+    for (const [idx, c] of processed.entries()) {
       const x = cx + (c.mean[0] - anchorX) * localZoom;
       const y = cy - (c.mean[1] - anchorY) * localZoom; // y flip
       // eigen-decompose covariance to get axis lengths and rotation
-      const { lambda1, lambda2, angle } = eigenDecomposition(c.cov as any);
+      const { lambda1, lambda2, angle } = eigenDecomposition(c.cov);
       const a = Math.sqrt(Math.max(1e-6, lambda1)) * localZoom; // avoid zero sizes
       const b = Math.sqrt(Math.max(1e-6, lambda2)) * localZoom;
 
       ctx.save();
       ctx.globalAlpha = Math.max(0.05, Math.min(1, c.weight));
       // Color palette by source/index
-      const palette = ["#5B8CFF", "#60D394", "#FFD36E", "#FF8560", "#C77DFF", "#60C6FF"];
-      const color = palette[(components.indexOf(c) % palette.length)];
-      ctx.fillStyle = `${color}`;
+      const color = palette[idx % palette.length] ?? "#5B8CFF";
+      ctx.fillStyle = color;
       ctx.globalAlpha = Math.max(0.06, Math.min(0.95, c.weight));
       // Draw rotated ellipse fill
       ctx.beginPath();
@@ -105,8 +124,7 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       // Draw border for ellipse
       ctx.globalAlpha = Math.max(0.2, Math.min(1, c.weight));
       ctx.lineWidth = 2;
-      if (color)
-        ctx.strokeStyle = color;
+      ctx.strokeStyle = color;
       ctx.stroke();
       // Draw the mean as a small dot so movement is always visible
       ctx.beginPath();
@@ -119,7 +137,7 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
     }
   }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds]);
 
-  return <canvas ref={canvasRef} width={width} height={height} />;
+  return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 };
 
 export default CanvasView;

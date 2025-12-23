@@ -1,6 +1,6 @@
 # ARCHITECTURE
 
-This document describes the initial structure and tasks for a proof of concept that reads tracker data from a Traccar server, runs a small Gaussian mixture engine, and visualizes probability clouds in a React application. The repository starts as the default Bun + React template and can be reorganized freely.
+This document describes the initial structure and tasks for a proof of concept that reads tracker data from a Traccar server and visualizes probability clouds in a React application. The repository starts as the default Bun + React template and can be reorganized freely.
 
 ## Goal
 
