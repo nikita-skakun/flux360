@@ -102,6 +102,13 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       cy = height / 2;
     }
 
+    const hexToRgba = (h: string, a: number) => {
+      const hex = h.replace("#", "");
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const bb = parseInt(hex.substring(4, 6), 16);
+      return `rgba(${r}, ${g}, ${bb}, ${a})`;
+    };
     const palette = ["#5B8CFF", "#60D394", "#FFD36E", "#FF8560", "#C77DFF", "#60C6FF"];
     for (const [idx, c] of processed.entries()) {
       const x = cx + (c.mean[0] - anchorX) * localZoom;
@@ -112,19 +119,20 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       const b = Math.sqrt(Math.max(1e-6, lambda2)) * localZoom;
 
       ctx.save();
-      ctx.globalAlpha = Math.max(0.05, Math.min(1, c.weight));
       // Color palette by source/index
       const color = palette[idx % palette.length] ?? "#5B8CFF";
-      ctx.fillStyle = color;
-      ctx.globalAlpha = Math.max(0.06, Math.min(0.95, c.weight));
+      const weightAlpha = Math.max(0.06, Math.min(1, c.weight));
+      const fillAlpha = Math.max(0.04, Math.min(0.6, weightAlpha * 0.5));
+      const strokeAlpha = Math.max(0.12, Math.min(0.9, weightAlpha * 0.9));
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = hexToRgba(color, fillAlpha);
       // Draw rotated ellipse fill
       ctx.beginPath();
       ctx.ellipse(x, y, a, b, angle, 0, Math.PI * 2);
       ctx.fill();
-      // Draw border for ellipse
-      ctx.globalAlpha = Math.max(0.2, Math.min(1, c.weight));
+      // Draw border for ellipse (slightly more opaque)
       ctx.lineWidth = 2;
-      ctx.strokeStyle = color;
+      ctx.strokeStyle = hexToRgba(color, strokeAlpha);
       ctx.stroke();
       // Draw the mean as a small dot so movement is always visible
       ctx.beginPath();
