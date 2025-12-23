@@ -43,7 +43,9 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
           ? [c.accuracy * c.accuracy, 0, c.accuracy * c.accuracy]
           : [100, 0, 100];
       const weight = typeof c.weight === "number" ? c.weight : 1;
-      return { ...c, mean, cov, weight };
+      const isEstimate = !!(c as any).estimate;
+      const isRaw = !!(c as any).raw;
+      return { ...c, mean, cov, weight, isEstimate, isRaw };
     });
 
     let anchorX = refMeters?.x ?? 0;
@@ -122,23 +124,32 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       // Color palette by source/index
       const color = palette[idx % palette.length] ?? "#5B8CFF";
       const weightAlpha = Math.max(0.06, Math.min(1, c.weight));
-      const fillAlpha = Math.max(0.04, Math.min(0.6, weightAlpha * 0.5));
-      const strokeAlpha = Math.max(0.12, Math.min(0.9, weightAlpha * 0.9));
+      let fillAlpha = Math.max(0.04, Math.min(0.6, weightAlpha * 0.5));
+      let strokeAlpha = Math.max(0.12, Math.min(0.9, weightAlpha * 0.9));
+
+      // Subtle emphasis for estimates; raw points are a bit fainter
+      if (c.isEstimate) {
+        fillAlpha = Math.max(fillAlpha, 0.06);
+        strokeAlpha = Math.max(strokeAlpha, 0.25);
+      } else if (c.isRaw) {
+        fillAlpha = Math.min(fillAlpha, 0.36);
+      }
+
       ctx.globalAlpha = 1;
       ctx.fillStyle = hexToRgba(color, fillAlpha);
       // Draw rotated ellipse fill
       ctx.beginPath();
       ctx.ellipse(x, y, a, b, angle, 0, Math.PI * 2);
       ctx.fill();
-      // Draw border for ellipse (slightly more opaque)
-      ctx.lineWidth = 2;
+      // Draw border for ellipse
+      ctx.lineWidth = c.isEstimate ? 3 : 2;
       ctx.strokeStyle = hexToRgba(color, strokeAlpha);
       ctx.stroke();
-      // Draw the mean as a small dot so movement is always visible
+      // Draw the mean as a small dot so movement is always visible (bigger for estimates)
       ctx.beginPath();
       ctx.globalAlpha = 1;
-      ctx.fillStyle = "#222";
-      const dotSize = Math.max(2, Math.min(6, Math.round(4 * localZoom)));
+      ctx.fillStyle = c.isEstimate ? "#000" : "#222";
+      const dotSize = Math.max(2, Math.min(6, Math.round((c.isEstimate ? 6 : 4) * localZoom)));
       ctx.arc(x, y, dotSize, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();

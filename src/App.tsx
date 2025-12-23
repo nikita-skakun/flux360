@@ -13,11 +13,13 @@ export function App() {
   type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
   const [timelineTime, setTimelineTime] = useState<number | null>(null);
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+  const [rawSnapshots, setRawSnapshots] = useState<Snapshot[]>([]);
+  const [engineSnapshots, setEngineSnapshots] = useState<Snapshot[]>([]);
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
-  const [showMarkers, setShowMarkers] = useState(true);
+  const [showRaw, setShowRaw] = useState(true);
+  const [showEstimates, setShowEstimates] = useState(true);
   const [showAllPast, setShowAllPast] = useState(false);
 
   useEffect(() => {
@@ -64,8 +66,8 @@ export function App() {
           initialBounds
         );
 
-        // Build simple per-position snapshots so the UI can step through positions
-        const arr: Snapshot[] = metersPos.map((p) => ({
+        // Build raw per-position snapshots (history of measurements)
+        const rawArr: Snapshot[] = metersPos.map((p) => ({
           timestamp: p.timestamp,
           data: {
             components: [
@@ -74,13 +76,40 @@ export function App() {
                 cov: measurementCovFromAccuracy(p.accuracy),
                 weight: 1,
                 source: p.source,
+                lat: p.lat,
+                lon: p.lon,
+                raw: true,
               },
             ],
           },
         }));
-        setSnapshots(arr);
-        // default timeline time to the latest snapshot
-        setTimelineTime(arr[arr.length - 1]?.timestamp ?? Date.now());
+        setRawSnapshots(rawArr);
+
+        // Convert to engine measurements and run the engine (estimates)
+        const measurements = metersPos.map((p) => ({
+          mean: [p.x, p.y] as [number, number],
+          cov: measurementCovFromAccuracy(p.accuracy),
+          timestamp: p.timestamp,
+          source: p.source,
+          accuracy: p.accuracy,
+          lat: p.lat,
+          lon: p.lon,
+        }));
+
+        const { Engine } = await import("@/engine/engine");
+        const engine = new Engine();
+        const engineSnapRaw = engine.processMeasurements(measurements);
+        // mark estimate components for optional styling
+        const engineSnap: Snapshot[] = engineSnapRaw.map((s) => ({
+          timestamp: s.timestamp,
+          data: {
+            components: s.data.components.map((c) => ({ ...c, estimate: true })),
+          },
+        }));
+        setEngineSnapshots(engineSnap);
+
+        // default timeline time to the latest raw snapshot (history should be raw)
+        setTimelineTime(rawArr[rawArr.length - 1]?.timestamp ?? engineSnap[engineSnap.length - 1]?.timestamp ?? Date.now());
         // store world bounds somewhere (pass into CanvasView via state)
         setWorldBounds(worldBounds);
       } catch (e) {
@@ -91,23 +120,49 @@ export function App() {
   }, []);
 
   let frame = { components: [] as ComponentUI[] };
-  if (showMarkers && timelineTime != null && snapshots.length > 0) {
+  if (timelineTime != null) {
     if (showAllPast) {
-      // show all snapshots with timestamp <= timelineTime
-      const comps = snapshots.filter((s) => s.timestamp <= timelineTime).flatMap((s) => s.data.components);
-      frame = { components: comps };
+      // When showing history, display raw measurement history (if enabled), and optionally show the latest estimate at that time
+      const rawComps = showRaw ? rawSnapshots.filter((s) => s.timestamp <= timelineTime).flatMap((s) => s.data.components) : [];
+      let engineComps: ComponentUI[] = [];
+      if (showEstimates) {
+        let selectedEngine: Snapshot | null = null;
+        for (let i = engineSnapshots.length - 1; i >= 0; i--) {
+          const s = engineSnapshots[i];
+          if (!s) continue;
+          if (s.timestamp <= timelineTime) {
+            selectedEngine = s;
+            break;
+          }
+        }
+        engineComps = selectedEngine?.data.components ?? [];
+      }
+      frame = { components: [...rawComps, ...engineComps] };
     } else {
-      // show the most recent snapshot before or at timelineTime
-      let selected: Snapshot | null = null;
-      for (let i = snapshots.length - 1; i >= 0; i--) {
-        const s = snapshots[i];
+      // Show most recent raw and/or engine snapshot before or at timelineTime
+      let selectedRaw: Snapshot | null = null;
+      for (let i = rawSnapshots.length - 1; i >= 0; i--) {
+        const s = rawSnapshots[i];
         if (!s) continue;
         if (s.timestamp <= timelineTime) {
-          selected = s;
+          selectedRaw = s;
           break;
         }
       }
-      frame = selected?.data ?? { components: [] };
+      let selectedEngine: Snapshot | null = null;
+      for (let i = engineSnapshots.length - 1; i >= 0; i--) {
+        const s = engineSnapshots[i];
+        if (!s) continue;
+        if (s.timestamp <= timelineTime) {
+          selectedEngine = s;
+          break;
+        }
+      }
+      const comps: ComponentUI[] = [
+        ...(showRaw ? selectedRaw?.data.components ?? [] : []),
+        ...(showEstimates ? selectedEngine?.data.components ?? [] : []),
+      ];
+      frame = { components: comps };
     }
   }
 
@@ -129,15 +184,18 @@ export function App() {
                 <div className="flex flex-col gap-2">
                   <div className="w-full">
                     <TimelineSlider
-                      snapshots={snapshots}
-                      time={timelineTime ?? (snapshots[snapshots.length - 1]?.timestamp ?? Date.now())}
+                      snapshots={rawSnapshots}
+                      time={timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now())}
                       onChange={(t) => setTimelineTime(t)}
                     />
                     <div className="flex items-center gap-4 mt-2">
-                      <p className="text-sm">Snapshots: {snapshots.length}</p>
                       <label className="flex items-center text-sm">
-                        <input type="checkbox" className="mr-2" checked={showMarkers} onChange={(e) => setShowMarkers(e.target.checked)} />
-                        Show Markers
+                        <input type="checkbox" className="mr-2" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
+                        Show Raw
+                      </label>
+                      <label className="flex items-center text-sm">
+                        <input type="checkbox" className="mr-2" checked={showEstimates} onChange={(e) => setShowEstimates(e.target.checked)} />
+                        Show Estimates
                       </label>
                       <label className="flex items-center text-sm">
                         <input type="checkbox" className="mr-2" checked={showAllPast} onChange={(e) => setShowAllPast(e.target.checked)} />

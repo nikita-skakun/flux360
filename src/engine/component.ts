@@ -1,0 +1,147 @@
+import type { Cov2 } from "@/util/gaussian";
+
+export type Vec2 = [number, number];
+
+export type Measurement = {
+  mean: Vec2;
+  cov: Cov2;
+  timestamp?: number;
+  source?: string;
+  accuracy?: number;
+  raw?: unknown;
+  lat?: number;
+  lon?: number;
+};
+
+export type ComponentState = {
+  mean: Vec2;
+  cov: Cov2;
+  consistency: number; // 0..1
+  source?: string;
+};
+
+// Small 2x2 matrix helpers operating on Cov2 = [a, b, c] representing [[a, b], [b, c]]
+function addCov(a: Cov2, b: Cov2): Cov2 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function subCov(a: Cov2, b: Cov2): Cov2 {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function mulCovScalar(a: Cov2, s: number): Cov2 {
+  return [a[0] * s, a[1] * s, a[2] * s];
+}
+
+function detCov(a: Cov2): number {
+  return a[0] * a[2] - a[1] * a[1];
+}
+
+function invertCov(a: Cov2): Cov2 {
+  const d = detCov(a);
+  if (!isFinite(d) || Math.abs(d) < 1e-12) {
+    // return a large covariance to indicate near-singular
+    return [1e12, 0, 1e12];
+  }
+  const inv = 1 / d;
+  return [a[2] * inv, -a[1] * inv, a[0] * inv];
+}
+
+function mulCovVec(a: Cov2, v: Vec2): Vec2 {
+  const [a00, a01, a11] = a;
+  return [a00 * v[0] + a01 * v[1], a01 * v[0] + a11 * v[1]];
+}
+
+function mulMatMat(a: Cov2, b: Cov2): Cov2 {
+  // (2x2)*(2x2)
+  const a00 = a[0];
+  const a01 = a[1];
+  const a11 = a[2];
+  const b00 = b[0];
+  const b01 = b[1];
+  const b11 = b[2];
+  const r00 = a00 * b00 + a01 * b01;
+  const r01 = a00 * b01 + a01 * b11;
+  const r11 = a01 * b01 + a11 * b11;
+  return [r00, r01, r11];
+}
+
+function symmetric(c: Cov2): Cov2 {
+  // force symmetry
+  return [c[0], (c[1] + c[1]) / 2, c[2]];
+}
+
+export class Component implements ComponentState {
+  mean: Vec2;
+  cov: Cov2;
+  consistency: number;
+  source?: string;
+
+  constructor(mean: Vec2, cov: Cov2, consistency = 0.9, source?: string) {
+    this.mean = [mean[0], mean[1]];
+    this.cov = symmetric(cov);
+    this.consistency = Math.max(0, Math.min(1, consistency));
+    this.source = source;
+  }
+
+  clone(): Component {
+    return new Component([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.consistency, this.source);
+  }
+
+  // Mahalanobis squared distance between this component and a measurement
+  mahalanobis2(m: Measurement): number {
+    const r: Vec2 = [m.mean[0] - this.mean[0], m.mean[1] - this.mean[1]];
+    const S = addCov(this.cov, m.cov);
+    const Si = invertCov(S);
+    const Si_r = mulCovVec(Si, r);
+    return r[0] * Si_r[0] + r[1] * Si_r[1];
+  }
+
+  // A simple log-likelihood proxy (not normalized) for comparing measurements
+  logLikelihood(m: Measurement): number {
+    const d2 = this.mahalanobis2(m);
+    const S = addCov(this.cov, m.cov);
+    const determinant = Math.max(1e-12, detCov(S));
+    return -0.5 * d2 - 0.5 * Math.log(determinant);
+  }
+
+  // Kalman-style update with optional gainScale between 0 (no update) and 1 (full Kalman gain)
+  kalmanUpdate(m: Measurement, gainScale = 1): void {
+    // P = this.cov, R = m.cov, S = P + R
+    const P = this.cov;
+    const R = m.cov;
+    const S = addCov(P, R);
+    const Si = invertCov(S);
+
+    // K = P * S^{-1}
+    // compute K (2x2) as P * Si
+    const K = mulMatMat(P, Si);
+    // scale K
+    const Kscaled: Cov2 = mulCovScalar(K, gainScale);
+
+    // residual z - mean
+    const r: Vec2 = [m.mean[0] - this.mean[0], m.mean[1] - this.mean[1]];
+    // mean += K * r  (K is 2x2)
+    const delta = mulCovVec(Kscaled, r);
+    this.mean = [this.mean[0] + delta[0], this.mean[1] + delta[1]];
+
+    // Joseph form: P_new = (I - K) P (I - K)^T + K R K^T
+    // compute (I-K) as matrix; rather than building full matrices we'll compute via formula
+    // compute A = (I - K)
+    // (I-K) * P => we can compute via mat sub
+    const IminusK = [1 - Kscaled[0], -Kscaled[1], 1 - Kscaled[2]] as Cov2;
+
+    // A P A^T
+    const APA = mulMatMat(mulMatMat(IminusK, P), IminusK);
+    // K R K^T  (K scaled is Kscaled)
+    const K_R = mulMatMat(Kscaled, R);
+    const KRKT = mulMatMat(K_R, Kscaled);
+
+    const newP = addCov(APA, KRKT);
+    // ensure symmetry and numeric stability
+    this.cov = symmetric(newP);
+
+    // shrink consistency slightly for large updates to avoid overfitting
+    this.consistency = Math.max(0, Math.min(1, this.consistency));
+  }
+}
