@@ -11,6 +11,8 @@ export type Measurement = {
   raw?: unknown;
   lat?: number;
   lon?: number;
+  // optional motion hints
+  speed?: number; // meters/second if available
 };
 
 export type ComponentState = {
@@ -18,6 +20,9 @@ export type ComponentState = {
   cov: Cov2;
   consistency: number; // 0..1
   source?: string;
+  // optional metadata
+  spawnedDuringMovement?: boolean;
+  createdAt?: number;
 };
 
 // Small 2x2 matrix helpers operating on Cov2 = [a, b, c] representing [[a, b], [b, c]]
@@ -76,16 +81,25 @@ export class Component implements ComponentState {
   cov: Cov2;
   consistency: number;
   source?: string;
+  // whether this component was spawned while the device/motion indicated movement
+  spawnedDuringMovement?: boolean;
+  // timestamp (ms) when this component was created
+  createdAt?: number;
 
   constructor(mean: Vec2, cov: Cov2, consistency = 0.9, source?: string) {
     this.mean = [mean[0], mean[1]];
     this.cov = symmetric(cov);
     this.consistency = Math.max(0, Math.min(1, consistency));
     this.source = source;
+    this.spawnedDuringMovement = false;
+    this.createdAt = Date.now();
   }
 
   clone(): Component {
-    return new Component([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.consistency, this.source);
+    const c = new Component([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.consistency, this.source);
+    c.spawnedDuringMovement = this.spawnedDuringMovement;
+    c.createdAt = this.createdAt;
+    return c;
   }
 
   // Mahalanobis squared distance between this component and a measurement

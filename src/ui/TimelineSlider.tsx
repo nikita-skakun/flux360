@@ -32,19 +32,69 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, ste
   const clamped = Math.min(Math.max(time, minTime), maxTime);
   const formatted = new Date(clamped).toLocaleString();
 
+  // compute previous and next snapshot timestamps relative to current clamped time
+  const sortedTimes = times.slice().sort((a, b) => a - b);
+  let prevTime: number | null = null;
+  for (let i = sortedTimes.length - 1; i >= 0; i--) {
+    if (sortedTimes[i] < clamped) {
+      prevTime = sortedTimes[i];
+      break;
+    }
+  }
+  let nextTime: number | null = null;
+  for (let i = 0; i < sortedTimes.length; i++) {
+    if (sortedTimes[i] > clamped) {
+      nextTime = sortedTimes[i];
+      break;
+    }
+  }
+
   return (
     <div className="flex flex-col">
-      <div className="relative w-full">
-        <input
-          aria-label="Timeline"
-          type="range"
-          min={minTime}
-          max={maxTime}
-          step={step}
-          value={clamped}
-          onChange={(e) => onChange(Number(e.target.value))}
-          className="timeline-range w-full relative z-10"
-        />
+      <div className="flex items-center gap-2 h-8">
+        <button
+          type="button"
+          title="Previous report"
+          aria-label="Previous report"
+          disabled={prevTime == null}
+          onClick={() => prevTime != null && onChange(prevTime)}
+          className="h-8 px-2 rounded border bg-white text-sm hover:bg-gray-100 disabled:opacity-40 flex items-center justify-center leading-none"
+        >
+          ‹
+        </button>
+
+        <div className="relative flex-1 flex items-center">
+          <input
+            aria-label="Timeline"
+            type="range"
+            min={minTime}
+            max={maxTime}
+            step={step}
+            value={clamped}
+            onChange={(e) => onChange(Number(e.target.value))}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                if (prevTime != null) onChange(prevTime);
+              } else if (e.key === "ArrowRight") {
+                e.preventDefault();
+                if (nextTime != null) onChange(nextTime);
+              }
+            }}
+            className="timeline-range w-full relative z-10"
+          />
+        </div>
+
+        <button
+          type="button"
+          title="Next report"
+          aria-label="Next report"
+          disabled={nextTime == null}
+          onClick={() => nextTime != null && onChange(nextTime)}
+          className="h-8 px-2 rounded border bg-white text-sm hover:bg-gray-100 disabled:opacity-40 flex items-center justify-center leading-none"
+        >
+          ›
+        </button>
       </div>
 
       <div className="flex justify-between items-center text-xs mt-1">

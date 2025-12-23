@@ -8,8 +8,8 @@ async function main() {
   const password = process.env.TRACCAR_PASS;
   const token = process.env.TRACCAR_TOKEN;
   const deviceId = process.env.TRACCAR_DEVICE_ID || "4";
-  const from = process.env.TRACCAR_FROM || new Date("2025-12-13T12:28:50").toISOString();
-  const to = process.env.TRACCAR_TO || new Date("2025-12-13T15:51:40").toISOString();
+  const from = process.env.TRACCAR_FROM || new Date("2025-12-14T00:00:00").toISOString();
+  const to = process.env.TRACCAR_TO || new Date("2025-12-24T23:59:59").toISOString();
 
   const opts: any = { baseUrl };
   if (token) opts.auth = { type: "token", token };

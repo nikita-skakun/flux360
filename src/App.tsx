@@ -5,7 +5,7 @@ import MapView from "./ui/MapView";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import type { ComponentUI } from "@/ui/types";
 import { degreesToMeters } from "./util/geo";
-import { measurementCovFromAccuracy } from "@/util/gaussian";
+import { measurementCovFromAccuracy, eigenDecomposition } from "@/util/gaussian";
 
 export function App() {
   type DevPosition = { lat: number; lon: number; accuracy?: number; timestamp: number; source?: string; raw?: unknown };
@@ -44,6 +44,9 @@ export function App() {
         // Convert all positions into meters and compute world bounds (min/max)
         const metersPos = positions.map((p) => {
           const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
+          const raw = (p as any).raw;
+          // Prefer derived speed (computed from displacement) over device-reported speed
+          const speed = typeof raw?.speed === "number" ? raw.speed : undefined;
           return {
             lat: p.lat,
             lon: p.lon,
@@ -52,8 +55,27 @@ export function App() {
             source: p.source,
             x,
             y,
+            speed,
           };
         });
+
+        // Compute derived speeds for raw reports based on displacement / dt (overrides device speed)
+        for (let i = 0; i < metersPos.length; i++) {
+          const cur = metersPos[i] as any;
+          const prev = metersPos[i - 1] as any | undefined;
+          if (prev && typeof cur.timestamp === "number" && typeof prev.timestamp === "number") {
+            const dt = (cur.timestamp - prev.timestamp) / 1000;
+            if (dt > 0) {
+              const dx = cur.x - prev.x;
+              const dy = cur.y - prev.y;
+              cur.speed = Math.sqrt(dx * dx + dy * dy) / dt;
+            } else {
+              cur.speed = cur.speed ?? 0;
+            }
+          } else {
+            cur.speed = cur.speed ?? 0;
+          }
+        }
 
         const initialBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
         const worldBounds = metersPos.reduce(
@@ -79,6 +101,7 @@ export function App() {
                 lat: p.lat,
                 lon: p.lon,
                 raw: true,
+                speed: p.speed,
               },
             ],
           },
@@ -94,18 +117,48 @@ export function App() {
           accuracy: p.accuracy,
           lat: p.lat,
           lon: p.lon,
+          speed: p.speed,
         }));
 
         const { Engine } = await import("@/engine/engine");
         const engine = new Engine();
-        const engineSnapRaw = engine.processMeasurements(measurements);
-        // mark estimate components for optional styling
-        const engineSnap: Snapshot[] = engineSnapRaw.map((s) => ({
-          timestamp: s.timestamp,
-          data: {
-            components: s.data.components.map((c) => ({ ...c, estimate: true })),
-          },
-        }));
+        // Ensure measurements are sorted the same way the engine expects
+        const measurementsSorted = measurements.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        const engineSnapRaw = engine.processMeasurements(measurementsSorted);
+        // mark estimate components for optional styling and compute metadata (accuracy in meters, action, speed)
+        const engineSnap: Snapshot[] = engineSnapRaw.map((s, idx) => {
+          const m = measurementsSorted[idx];
+          const prevM = measurementsSorted[idx - 1];
+          const comps = s.data.components.map((c: any) => {
+            const { lambda1, lambda2 } = eigenDecomposition(c.cov);
+            const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
+
+            // Prefer mixture's movement confidence if available
+            let action = (c.action as string | undefined) ?? "still";
+
+            // compute a display speed if possible (meters/second) from device or derived from consecutive measurements
+            let displaySpeed: number | undefined = undefined;
+            if (typeof m?.speed === "number") {
+              displaySpeed = m.speed;
+            } else if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
+              const dt = (m.timestamp - prevM.timestamp) / 1000;
+              if (dt > 0) {
+                const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
+                const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
+                displaySpeed = Math.sqrt(dx * dx + dy * dy) / dt;
+              }
+            }
+
+            // fallback movement detection when mixture didn't supply an action
+            if (!c.action && typeof displaySpeed === "number") {
+              const speedThreshold = 0.5; // m/s (fallback threshold)
+              if (displaySpeed > speedThreshold) action = "moving";
+            }
+
+            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed };
+          });
+          return { timestamp: s.timestamp, data: { components: comps } };
+        });
         setEngineSnapshots(engineSnap);
 
         // default timeline time to the latest raw snapshot (history should be raw)
@@ -119,50 +172,26 @@ export function App() {
     loadData();
   }, []);
 
+  // helper to find the most recent snapshot before or at a given time
+  function findLatestSnapshotBeforeOrAt(snaps: Snapshot[], time: number): Snapshot | null {
+    for (let i = snaps.length - 1; i >= 0; i--) {
+      const s = snaps[i];
+      if (!s) continue;
+      if (s.timestamp <= time) return s;
+    }
+    return null;
+  }
+
   let frame = { components: [] as ComponentUI[] };
   if (timelineTime != null) {
     if (showAllPast) {
-      // When showing history, display raw measurement history (if enabled), and optionally show the latest estimate at that time
       const rawComps = showRaw ? rawSnapshots.filter((s) => s.timestamp <= timelineTime).flatMap((s) => s.data.components) : [];
-      let engineComps: ComponentUI[] = [];
-      if (showEstimates) {
-        let selectedEngine: Snapshot | null = null;
-        for (let i = engineSnapshots.length - 1; i >= 0; i--) {
-          const s = engineSnapshots[i];
-          if (!s) continue;
-          if (s.timestamp <= timelineTime) {
-            selectedEngine = s;
-            break;
-          }
-        }
-        engineComps = selectedEngine?.data.components ?? [];
-      }
+      const engineComps = showEstimates ? findLatestSnapshotBeforeOrAt(engineSnapshots, timelineTime)?.data.components ?? [] : [];
       frame = { components: [...rawComps, ...engineComps] };
     } else {
-      // Show most recent raw and/or engine snapshot before or at timelineTime
-      let selectedRaw: Snapshot | null = null;
-      for (let i = rawSnapshots.length - 1; i >= 0; i--) {
-        const s = rawSnapshots[i];
-        if (!s) continue;
-        if (s.timestamp <= timelineTime) {
-          selectedRaw = s;
-          break;
-        }
-      }
-      let selectedEngine: Snapshot | null = null;
-      for (let i = engineSnapshots.length - 1; i >= 0; i--) {
-        const s = engineSnapshots[i];
-        if (!s) continue;
-        if (s.timestamp <= timelineTime) {
-          selectedEngine = s;
-          break;
-        }
-      }
-      const comps: ComponentUI[] = [
-        ...(showRaw ? selectedRaw?.data.components ?? [] : []),
-        ...(showEstimates ? selectedEngine?.data.components ?? [] : []),
-      ];
-      frame = { components: comps };
+      const selectedRawComps = showRaw ? findLatestSnapshotBeforeOrAt(rawSnapshots, timelineTime)?.data.components ?? [] : [];
+      const selectedEngineComps = showEstimates ? findLatestSnapshotBeforeOrAt(engineSnapshots, timelineTime)?.data.components ?? [] : [];
+      frame = { components: [...selectedRawComps, ...selectedEngineComps] };
     }
   }
 

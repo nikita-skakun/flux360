@@ -45,7 +45,8 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       const weight = typeof c.weight === "number" ? c.weight : 1;
       const isEstimate = !!(c as any).estimate;
       const isRaw = !!(c as any).raw;
-      return { ...c, mean, cov, weight, isEstimate, isRaw };
+      const isTransient = !!(c as any).spawnedDuringMovement;
+      return { ...c, mean, cov, weight, isEstimate, isRaw, isTransient };
     });
 
     let anchorX = refMeters?.x ?? 0;
@@ -135,6 +136,12 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
         fillAlpha = Math.min(fillAlpha, 0.36);
       }
 
+      // Transient components spawned during movement should be drawn more faintly
+      if ((c as any).isTransient) {
+        fillAlpha = Math.min(fillAlpha, 0.12);
+        strokeAlpha = Math.min(strokeAlpha, 0.28);
+      }
+
       ctx.globalAlpha = 1;
       ctx.fillStyle = hexToRgba(color, fillAlpha);
       // Draw rotated ellipse fill
@@ -145,14 +152,61 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       ctx.lineWidth = c.isEstimate ? 3 : 2;
       ctx.strokeStyle = hexToRgba(color, strokeAlpha);
       ctx.stroke();
-      // Draw the mean as a small dot so movement is always visible (bigger for estimates)
-      ctx.beginPath();
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = c.isEstimate ? "#000" : "#222";
       const dotSize = Math.max(2, Math.min(6, Math.round((c.isEstimate ? 6 : 4) * localZoom)));
-      ctx.arc(x, y, dotSize, 0, Math.PI * 2);
-      ctx.fill();
       ctx.restore();
+
+      // Draw label for estimates: accuracy in meters and estimated action (still/moving)
+      if (c.isEstimate) {
+        const accuracyMeters = typeof (c as any).accuracyMeters === "number" ? (c as any).accuracyMeters : Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
+        const action = typeof (c as any).action === "string" ? (c as any).action : "still";
+        // if moving and we have a speed, include it in the label (speed in km/h)
+        const speedVal = typeof (c as any).speed === "number" ? (c as any).speed : undefined;
+        let label = `${accuracyMeters}m • ${action}`;
+        if (action === "moving" && typeof speedVal === "number") {
+          const kmh = speedVal * 3.6;
+          const speedText = kmh < 10 ? `${kmh.toFixed(1)} km/h` : `${Math.round(kmh)} km/h`;
+          label = `${accuracyMeters}m • ${speedText}`;
+        }
+        const paddingX = 8;
+        const paddingY = 4;
+        const fontSize = 12;
+        ctx.font = `${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+        ctx.textBaseline = "middle";
+        ctx.textAlign = "left";
+        const textWidth = ctx.measureText(label).width;
+        let rectX = x + dotSize + 8;
+        let rectY = y - (fontSize + paddingY * 2) / 2;
+        const rectW = textWidth + paddingX * 2 + 14; // extra space for bullet
+        const rectH = fontSize + paddingY * 2;
+
+        // Keep label inside canvas boundaries — clamp to visible area even when the ellipse is off-screen
+        const minX = 2;
+        const maxX = Math.max(minX, width - rectW - 2);
+        if (rectX + rectW > width) rectX = x - dotSize - 8 - rectW;
+        // clamp to [minX, maxX]
+        rectX = Math.min(Math.max(rectX, minX), maxX);
+        if (rectY < 0) rectY = 2;
+        if (rectY + rectH > height) rectY = height - rectH - 2;
+
+        // Draw background
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.fillRect(rectX, rectY, rectW, rectH);
+        ctx.strokeStyle = "rgba(0,0,0,0.08)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rectX + 0.5, rectY + 0.5, rectW - 1, rectH - 1);
+
+        // Small colored bullet indicating motion
+        const bulletX = rectX + paddingX;
+        const bulletY = rectY + rectH / 2;
+        ctx.beginPath();
+        ctx.fillStyle = action === "moving" ? "#34D399" : "#9CA3AF";
+        ctx.arc(bulletX, bulletY, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw text (offset to account for bullet)
+        ctx.fillStyle = "#111";
+        ctx.fillText(label, rectX + paddingX + 10 + 2, rectY + rectH / 2);
+      }
     }
   }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds]);
 

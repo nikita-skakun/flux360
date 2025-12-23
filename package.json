@@ -7,7 +7,9 @@
     "dev": "bun --hot src/index.tsx",
     "start": "NODE_ENV=production bun src/index.tsx",
     "build": "bun run build.ts",
-    "fetch:real": "bun run scripts/fetch_real.ts"
+    "fetch:real": "bun run scripts/fetch_real.ts",
+    "test:run": "bun run test/run_all.ts",
+    "test:verbose": "VERBOSE=1 bun run test/run_all.ts"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.8",

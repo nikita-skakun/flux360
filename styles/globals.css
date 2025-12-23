@@ -150,6 +150,9 @@
   background: transparent;
   height: 18px;
   overflow: visible;
+  display: block;
+  margin: 0;
+  padding: 0;
 }
 .timeline-range:focus{ outline: none; }
 
