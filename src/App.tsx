@@ -12,11 +12,13 @@ export function App() {
   type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
   type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
-  const [timelineIndex, setTimelineIndex] = useState(0);
+  const [timelineTime, setTimelineTime] = useState<number | null>(null);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
+  const [showMarkers, setShowMarkers] = useState(true);
+  const [showAllPast, setShowAllPast] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -77,8 +79,8 @@ export function App() {
           },
         }));
         setSnapshots(arr);
-        // Timeline slider values: 0 = hidden, 1..N => snapshot index 0..N-1
-        setTimelineIndex(arr.length);
+        // default timeline time to the latest snapshot
+        setTimelineTime(arr[arr.length - 1]?.timestamp ?? Date.now());
         // store world bounds somewhere (pass into CanvasView via state)
         setWorldBounds(worldBounds);
       } catch (e) {
@@ -88,7 +90,26 @@ export function App() {
     loadData();
   }, []);
 
-  const frame = timelineIndex > 0 ? snapshots[timelineIndex - 1]?.data ?? { components: [] } : { components: [] };
+  let frame = { components: [] as ComponentUI[] };
+  if (showMarkers && timelineTime != null && snapshots.length > 0) {
+    if (showAllPast) {
+      // show all snapshots with timestamp <= timelineTime
+      const comps = snapshots.filter((s) => s.timestamp <= timelineTime).flatMap((s) => s.data.components);
+      frame = { components: comps };
+    } else {
+      // show the most recent snapshot before or at timelineTime
+      let selected: Snapshot | null = null;
+      for (let i = snapshots.length - 1; i >= 0; i--) {
+        const s = snapshots[i];
+        if (!s) continue;
+        if (s.timestamp <= timelineTime) {
+          selected = s;
+          break;
+        }
+      }
+      frame = selected?.data ?? { components: [] };
+    }
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
@@ -108,11 +129,21 @@ export function App() {
                 <div className="flex flex-col gap-2">
                   <div className="w-full">
                     <TimelineSlider
-                      length={snapshots.length}
-                      index={timelineIndex}
-                      onChange={(i) => setTimelineIndex(i)}
+                      snapshots={snapshots}
+                      time={timelineTime ?? (snapshots[snapshots.length - 1]?.timestamp ?? Date.now())}
+                      onChange={(t) => setTimelineTime(t)}
                     />
-                    <p className="text-sm mt-2">Snapshots: {snapshots.length} <span className="text-xs opacity-80">(0 hides all)</span></p>
+                    <div className="flex items-center gap-4 mt-2">
+                      <p className="text-sm">Snapshots: {snapshots.length}</p>
+                      <label className="flex items-center text-sm">
+                        <input type="checkbox" className="mr-2" checked={showMarkers} onChange={(e) => setShowMarkers(e.target.checked)} />
+                        Show Markers
+                      </label>
+                      <label className="flex items-center text-sm">
+                        <input type="checkbox" className="mr-2" checked={showAllPast} onChange={(e) => setShowAllPast(e.target.checked)} />
+                        Show History
+                      </label>
+                    </div>
                   </div>
                 </div>
               }

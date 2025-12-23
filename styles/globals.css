@@ -142,3 +142,44 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Timeline slider specific styles (scope to .timeline-range) */
+.timeline-range{
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  height: 18px;
+  overflow: visible;
+}
+.timeline-range:focus{ outline: none; }
+
+.timeline-range::-webkit-slider-runnable-track{
+  height: 6px;
+  background: var(--input);
+  border-radius: 9999px;
+}
+
+.timeline-range::-webkit-slider-thumb{
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: white;
+  border: 2px solid var(--ring);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  margin-top: calc((6px - 18px) / 2);
+}
+
+.timeline-range::-moz-range-track{
+  height: 6px;
+  background: var(--input);
+  border-radius: 9999px;
+}
+
+.timeline-range::-moz-range-thumb{
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: white;
+  border: 2px solid var(--ring);
+}
