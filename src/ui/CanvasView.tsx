@@ -19,14 +19,10 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const ctx = canvas.getContext("2d")!;
     ctx.clearRect(0, 0, width, height);
     // transparent background so the underlying map can show through
 
-    // compute bounding box to auto-scale and center components if refMeters/zoom not provided
-    const defaultCenterX = 0;
-    const defaultCenterY = 0;
     let cx = width / 2;
     let cy = height / 2;
     let localZoom = zoom ?? 1;
@@ -113,102 +109,232 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       return `rgba(${r}, ${g}, ${bb}, ${a})`;
     };
     const palette = ["#5B8CFF", "#60D394", "#FFD36E", "#FF8560", "#C77DFF", "#60C6FF"];
-    for (const [idx, c] of processed.entries()) {
+    // Prepare draw items with geometry and visual metadata
+    const drawItems = processed.map((c, idx) => {
       const x = cx + (c.mean[0] - anchorX) * localZoom;
       const y = cy - (c.mean[1] - anchorY) * localZoom; // y flip
-      // eigen-decompose covariance to get axis lengths and rotation
       const { lambda1, lambda2, angle } = eigenDecomposition(c.cov);
-      const a = Math.sqrt(Math.max(1e-6, lambda1)) * localZoom; // avoid zero sizes
+      const a = Math.sqrt(Math.max(1e-6, lambda1)) * localZoom;
       const b = Math.sqrt(Math.max(1e-6, lambda2)) * localZoom;
-
-      ctx.save();
-      // Color palette by source/index
       const color = palette[idx % palette.length] ?? "#5B8CFF";
       const weightAlpha = Math.max(0.06, Math.min(1, c.weight));
       let fillAlpha = Math.max(0.04, Math.min(0.6, weightAlpha * 0.5));
       let strokeAlpha = Math.max(0.12, Math.min(0.9, weightAlpha * 0.9));
-
-      // Subtle emphasis for estimates; raw points are a bit fainter
       if (c.isEstimate) {
         fillAlpha = Math.max(fillAlpha, 0.06);
         strokeAlpha = Math.max(strokeAlpha, 0.25);
       } else if (c.isRaw) {
         fillAlpha = Math.min(fillAlpha, 0.36);
       }
-
-      // Transient components spawned during movement should be drawn more faintly
       if ((c as any).isTransient) {
         fillAlpha = Math.min(fillAlpha, 0.12);
         strokeAlpha = Math.min(strokeAlpha, 0.28);
       }
-
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = hexToRgba(color, fillAlpha);
-      // Draw rotated ellipse fill
-      ctx.beginPath();
-      ctx.ellipse(x, y, a, b, angle, 0, Math.PI * 2);
-      ctx.fill();
-      // Draw border for ellipse
-      ctx.lineWidth = c.isEstimate ? 3 : 2;
-      ctx.strokeStyle = hexToRgba(color, strokeAlpha);
-      ctx.stroke();
       const dotSize = Math.max(2, Math.min(6, Math.round((c.isEstimate ? 6 : 4) * localZoom)));
-      ctx.restore();
+      return { idx, c, x, y, a, b, angle, color, fillAlpha, strokeAlpha, dotSize, lambda1, lambda2 };
+    });
 
-      // Draw label for estimates: accuracy in meters and estimated action (still/moving)
-      if (c.isEstimate) {
+    // Draw ellipses sorted so that larger radii are drawn first (smaller radii on top)
+    drawItems.sort((u, v) => Math.max(v.a, v.b) - Math.max(u.a, u.b));
+
+    let rafId: number | null = null;
+    let destroyed = false;
+
+    function rectsIntersect(r1: { x: number; y: number; w: number; h: number }, r2: { x: number; y: number; w: number; h: number }) {
+      return !(r1.x + r1.w < r2.x || r1.x > r2.x + r2.w || r1.y + r1.h < r2.y || r1.y > r2.y + r2.h);
+    }
+
+    function render(now?: number) {
+      if (destroyed) return;
+      now = now ?? performance.now();
+      ctx.clearRect(0, 0, width, height);
+
+      // draw ellipses
+      for (const item of drawItems) {
+        const { x, y, a, b, angle, color, fillAlpha, strokeAlpha, c } = item;
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = hexToRgba(color, fillAlpha);
+        ctx.beginPath();
+        ctx.ellipse(x, y, a, b, angle, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = c.isEstimate ? 3 : 2;
+        ctx.strokeStyle = hexToRgba(color, strokeAlpha);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+// central device dot is now drawn on the label (moved from device center)
+    // no center dot is drawn here.
+
+      // Now prepare labels and place them to avoid collisions (radial candidate search)
+      const placedRects: { x: number; y: number; w: number; h: number }[] = [];
+
+      for (const item of drawItems) {
+        const { x, y, a, b, dotSize, c, lambda1, lambda2 } = item;
+        if (!c.isEstimate) continue;
         const accuracyMeters = typeof (c as any).accuracyMeters === "number" ? (c as any).accuracyMeters : Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
         const action = typeof (c as any).action === "string" ? (c as any).action : "still";
-        // if moving and we have a speed, include it in the label (speed in km/h)
         const speedVal = typeof (c as any).speed === "number" ? (c as any).speed : undefined;
-        let label = `${accuracyMeters}m • ${action}`;
+        // remove dot separator from label; use the swatch as the device dot instead
+        let label = `${accuracyMeters}m ${action}`;
         if (action === "moving" && typeof speedVal === "number") {
           const kmh = speedVal * 3.6;
           const speedText = kmh < 10 ? `${kmh.toFixed(1)} km/h` : `${Math.round(kmh)} km/h`;
-          label = `${accuracyMeters}m • ${speedText}`;
+          label = `${accuracyMeters}m ${speedText}`;
         }
+
+        const deviceName = String((c as any).deviceName ?? (c as any).device ?? (c as any).source ?? "");
         const paddingX = 8;
         const paddingY = 4;
         const fontSize = 12;
+        const deviceFontSize = 11;
+
+        // measure widths
         ctx.font = `${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
-        ctx.textBaseline = "middle";
-        ctx.textAlign = "left";
-        const textWidth = ctx.measureText(label).width;
-        let rectX = x + dotSize + 8;
-        let rectY = y - (fontSize + paddingY * 2) / 2;
-        const rectW = textWidth + paddingX * 2 + 14; // extra space for bullet
-        const rectH = fontSize + paddingY * 2;
+        const labelWidth = ctx.measureText(label).width;
+        ctx.font = `${deviceFontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+        const deviceWidth = deviceName ? ctx.measureText(deviceName).width : 0;
 
-        // Keep label inside canvas boundaries — clamp to visible area even when the ellipse is off-screen
-        const minX = 2;
-        const maxX = Math.max(minX, width - rectW - 2);
-        if (rectX + rectW > width) rectX = x - dotSize - 8 - rectW;
-        // clamp to [minX, maxX]
-        rectX = Math.min(Math.max(rectX, minX), maxX);
-        if (rectY < 0) rectY = 2;
-        if (rectY + rectH > height) rectY = height - rectH - 2;
+        // swatch size uses the scaled dot size from the device; add a small gap so bottom-row label doesn't touch the swatch
+        const swatchRadius = Math.max(3, Math.round(dotSize));
+        const iconsGap = 4; // small gap between swatch and bottom label text
+        const leftIconsWidth = swatchRadius * 2 + iconsGap;
 
-        // Draw background
+        const textWidth = Math.max(labelWidth + 14, deviceWidth);
+        const rectW = textWidth + paddingX * 2 + leftIconsWidth;
+        const extraNameTop = 4; // additional top padding for device name
+        const deviceAreaH = deviceName ? deviceFontSize + paddingY + extraNameTop : 0;
+        const labelAreaH = fontSize + paddingY * 2;
+        const rectH = deviceAreaH + labelAreaH;
+
+        const ellipseMargin = 4;
+        const ellipseRect = { x: x - a - ellipseMargin, y: y - b - ellipseMargin, w: 2 * a + ellipseMargin * 2, h: 2 * b + ellipseMargin * 2 };
+
+        // generate radial candidate positions
+        const baseOffset = Math.max(8, Math.round(dotSize) + 8);
+        const maxSteps = 6;
+        const angles = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, Math.PI];
+
+        let bestCandidate: { x: number; y: number; conflicts: number; dist: number } | null = null;
+
+        for (let step = 0; step <= maxSteps; step++) {
+          const r = baseOffset + step * (rectH + 6);
+          for (const angle of angles) {
+            const dx = r * Math.cos(angle);
+            const dy = r * Math.sin(angle);
+            let candidateX = dx >= 0 ? x + dx : x + dx - rectW;
+            let candidateY = y + dy - rectH / 2;
+            // clamp to canvas
+            candidateX = Math.min(Math.max(candidateX, 2), Math.max(2, width - rectW - 2));
+            candidateY = Math.min(Math.max(candidateY, 2), Math.max(2, height - rectH - 2));
+
+            // skip candidates overlapping the ellipse area
+            if (rectsIntersect({ x: candidateX, y: candidateY, w: rectW, h: rectH }, ellipseRect)) continue;
+
+            // count conflicts against already placed label rects
+            let conflicts = 0;
+            for (const rct of placedRects) {
+              if (rectsIntersect({ x: candidateX, y: candidateY, w: rectW, h: rectH }, rct)) conflicts++;
+            }
+
+            const dist = Math.hypot(candidateX - (x - rectW / 2), candidateY - (y - rectH / 2));
+
+            if (conflicts === 0) {
+              bestCandidate = { x: candidateX, y: candidateY, conflicts: 0, dist };
+              break; // ideal candidate
+            }
+
+            if (!bestCandidate || conflicts < bestCandidate.conflicts || (conflicts === bestCandidate.conflicts && dist < bestCandidate.dist)) {
+              bestCandidate = { x: candidateX, y: candidateY, conflicts, dist };
+            }
+          }
+          if (bestCandidate && bestCandidate.conflicts === 0) break;
+        }
+
+        let finalRect = null as { x: number; y: number; w: number; h: number } | null;
+        if (bestCandidate) {
+          finalRect = { x: bestCandidate.x, y: bestCandidate.y, w: rectW, h: rectH };
+        } else {
+          // fallback to right side clamped
+          let rectX = x + baseOffset;
+          if (rectX + rectW > width) rectX = x - baseOffset - rectW;
+          rectX = Math.min(Math.max(rectX, 2), Math.max(2, width - rectW - 2));
+          const rectY = Math.min(Math.max(y - rectH / 2, 2), Math.max(2, height - rectH - 2));
+          finalRect = { x: rectX, y: rectY, w: rectW, h: rectH };
+        }
+
+        // draw label with color swatch
+        const candidateRect = finalRect;
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.fillRect(rectX, rectY, rectW, rectH);
+        ctx.fillRect(candidateRect.x, candidateRect.y, candidateRect.w, candidateRect.h);
         ctx.strokeStyle = "rgba(0,0,0,0.08)";
         ctx.lineWidth = 1;
-        ctx.strokeRect(rectX + 0.5, rectY + 0.5, rectW - 1, rectH - 1);
+        ctx.strokeRect(candidateRect.x + 0.5, candidateRect.y + 0.5, candidateRect.w - 1, candidateRect.h - 1);
 
-        // Small colored bullet indicating motion
-        const bulletX = rectX + paddingX;
-        const bulletY = rectY + rectH / 2;
+        // color swatch (main device dot moved from the map center)
+        const swatchX = candidateRect.x + paddingX + swatchRadius;
+        const swatchY = candidateRect.y + (deviceAreaH + labelAreaH / 2);
         ctx.beginPath();
-        ctx.fillStyle = action === "moving" ? "#34D399" : "#9CA3AF";
-        ctx.arc(bulletX, bulletY, 4, 0, Math.PI * 2);
+        ctx.fillStyle = item.color ?? "#5B8CFF";
+        ctx.arc(swatchX, swatchY, swatchRadius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.strokeStyle = "rgba(0,0,0,0.06)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
 
-        // Draw text (offset to account for bullet)
+        // pulse border if moving (draw around the label swatch)
+        const isMoving = (c as any).action === "moving" || (typeof (c as any).speed === "number" && (c as any).speed > 0.5);
+        let pulse = 0;
+        if (isMoving) {
+          const period = 800; // ms
+          pulse = 0.5 + 0.5 * Math.sin((now as number) * (2 * Math.PI) / period + item.idx);
+        }
+        const outerStrokeW = 1 + 3 * pulse;
+        const outerAlpha = 0.65 + 0.35 * pulse;
+        if (outerStrokeW > 0) {
+          ctx.beginPath();
+          ctx.lineWidth = outerStrokeW;
+          ctx.strokeStyle = hexToRgba(item.color ?? "#5B8CFF", outerAlpha);
+          ctx.arc(swatchX, swatchY, swatchRadius + outerStrokeW / 2 + 1, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // Draw device name and label text
+        // Place the device name flush with the left padding, while the label text sits after the swatch on the bottom row
+        const textXLabel = candidateRect.x + paddingX + leftIconsWidth;
+        const textXName = candidateRect.x + paddingX; // allow device name to sit close to label edge
+        if (deviceName) {
+          ctx.font = `${deviceFontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#333";
+          ctx.fillText(deviceName, textXName, candidateRect.y + extraNameTop + deviceFontSize / 2);
+        }
+
+        ctx.font = `${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
         ctx.fillStyle = "#111";
-        ctx.fillText(label, rectX + paddingX + 10 + 2, rectY + rectH / 2);
+        ctx.fillText(label, textXLabel, candidateRect.y + deviceAreaH + labelAreaH / 2);
+
+        placedRects.push(candidateRect);
       }
     }
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds]);
+
+    // start render loop: if any moving components, animate; else do a single frame
+      const hasMoving = drawItems.some((item) => {
+        const c = item.c as any;
+        return c?.action === "moving" || (typeof c?.speed === "number" && c.speed > 0.5);
+      });
+
+      // draw once immediately
+      render();
+      if (hasMoving) {
+        rafId = requestAnimationFrame(render);
+      }
+
+      return () => {
+        destroyed = true;
+        if (rafId != null) cancelAnimationFrame(rafId);
+      };  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 };

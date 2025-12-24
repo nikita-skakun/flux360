@@ -6,18 +6,6 @@ const server = serve({
   routes: {
     // Serve index.html for all unmatched routes.
     "/*": index,
-    "/api/dev-data/positions": {
-      async GET() {
-        try {
-          const p = `${process.cwd()}/dev-data/positions.json`;
-          const f = Bun.file(p);
-          const txt = await f.text();
-          return new Response(txt, { headers: { "Content-Type": "application/json" } });
-        } catch (e) {
-          return Response.json({ error: "positions not found" }, { status: 404 });
-        }
-      },
-    },
   },
 
   development: process.env.NODE_ENV !== "production" && {
