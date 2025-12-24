@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+import { test, expect } from "bun:test";
 
-(async () => {
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+
+test("fade", async () => {
   const { Engine } = await import("../src/engine/engine");
 
   const makeMeasurement = (x: number, y: number, t: number, accuracy = 10, speed?: number, motion?: boolean) => {
@@ -55,15 +56,6 @@
   const finalComps = final?.data.components as any[] | undefined;
   const spawnedCount = finalComps ? finalComps.filter((c) => c.spawnedDuringMovement).length : 0;
 
-  if (spawnedCount === 0) {
-    console.log(`[PASS] fade — final spawnedDuringMovement remaining: ${spawnedCount}`);
-    process.exit(0);
-  } else {
-    console.error(`[FAIL] fade — final spawnedDuringMovement remaining: ${spawnedCount}`);
-    process.exit(1);
-  }
-
-})().catch((err) => {
-  console.error(err);
-  process.exit(2);
+  expect(spawnedCount).toBe(0);
+  if (VERBOSE) console.log(`fade spawnedCount=${spawnedCount}`);
 });

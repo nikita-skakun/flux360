@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+import { test, expect } from "bun:test";
 
-(async () => {
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+
+test("moderate_uncertainty", async () => {
   const { Engine } = await import("../src/engine/engine");
 
   const makeMeasurement = (x: number, y: number, t: number, accuracy = 60, speed?: number, motion?: boolean) => {
@@ -40,15 +41,6 @@
     return distToNew < 20;
   });
 
-  if (firstClose >= 0) {
-    console.log(`[PASS] moderate_uncertainty_move — first snapshot near new location: index=${firstClose}`);
-    process.exit(0);
-  } else {
-    console.error(`[FAIL] moderate_uncertainty_move — no snapshot with best component near new location`);
-    process.exit(1);
-  }
-
-})().catch((err) => {
-  console.error(err);
-  process.exit(2);
+  expect(firstClose >= 0).toBe(true);
+  if (VERBOSE) console.log(`moderate_uncertainty firstClose=${firstClose}`);
 });

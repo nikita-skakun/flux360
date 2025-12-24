@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+import { test, expect } from "bun:test";
 
-(async () => {
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+
+test("retire", async () => {
   const { Engine } = await import("../src/engine/engine");
 
   const makeMeasurement = (x: number, y: number, t: number, accuracy = 10, speed?: number, motion?: boolean) => {
@@ -51,15 +52,6 @@
     return Math.hypot(dx, dy) > 40;
   }).length;
 
-  if (farCount === 0) {
-    console.log(`[PASS] retire — old distant components faded/removed (farCount=${farCount})`);
-    process.exit(0);
-  } else {
-    console.error(`[FAIL] retire — old distant components remain (farCount=${farCount})`);
-    process.exit(1);
-  }
-
-})().catch((err) => {
-  console.error(err);
-  process.exit(2);
+  expect(farCount).toBe(0);
+  if (VERBOSE) console.log(`retire farCount=${farCount}`);
 });

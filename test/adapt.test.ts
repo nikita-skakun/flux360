@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+import { test, expect } from "bun:test";
 
-(async () => {
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+
+test("adapt", async () => {
   const { Engine } = await import("../src/engine/engine");
 
   const makeMeasurement = (x: number, y: number, t: number, accuracy = 20, speed?: number, motion?: boolean) => {
@@ -60,14 +61,6 @@
     return distToNew < 20;
   });
 
-  if (firstClose >= 0) {
-    console.log(`[PASS] adapt — first snapshot near new location: index=${firstClose}`);
-    process.exit(0);
-  } else {
-    console.error(`[FAIL] adapt — no snapshot with best component near new location (<20m)`);
-    process.exit(1);
-  }
-})().catch((err) => {
-  console.error(err);
-  process.exit(2);
+  expect(firstClose >= 0).toBe(true);
+  if (VERBOSE) console.log(`adapt firstClose=${firstClose}`);
 });

@@ -17,6 +17,7 @@ export type NormalizedPosition = {
   accuracy: number; // meters
   timestamp: number; // epoch ms
   source?: string; // optional source tag (protocol/device)
+  deviceId?: string | number; // optional explicit device identifier when available
   raw?: unknown; // original payload
 };
 
@@ -64,12 +65,16 @@ export function normalizePosition(raw: unknown, defaultAccuracy = 50): Normalize
   const srcRaw = obj.protocol ?? obj.source ?? obj.deviceId;
   const source = typeof srcRaw === "string" ? srcRaw : typeof srcRaw === "number" ? String(srcRaw) : undefined;
 
+  const deviceIdRaw = obj.deviceId ?? obj.device ?? obj.id;
+  const deviceId = typeof deviceIdRaw === "number" || typeof deviceIdRaw === "string" ? deviceIdRaw : undefined;
+
   return {
     lat,
     lon,
     accuracy,
     timestamp: ts,
     source,
+    deviceId,
     raw: obj,
   };
 }

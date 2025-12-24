@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+import { test, expect } from "bun:test";
 
-(async () => {
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+
+test("stationary_transition", async () => {
   const { Engine } = await import("../src/engine/engine");
 
   const makeMeasurement = (x: number, y: number, t: number, accuracy = 10, speed?: number, motion?: boolean) => {
@@ -42,15 +43,6 @@
   const best = comps && comps.length ? comps.reduce((a, b) => ((a.weight ?? 0) >= (b.weight ?? 0) ? a : b)) : null;
   const action = best?.action ?? null;
 
-  if (action === 'still') {
-    console.log(`[PASS] stationary_transition — final action=still`);
-    process.exit(0);
-  } else {
-    console.error(`[FAIL] stationary_transition — final action=${String(action)}`);
-    process.exit(1);
-  }
-
-})().catch((err) => {
-  console.error(err);
-  process.exit(2);
+  expect(action).toBe('still');
+  if (VERBOSE) console.log(`stationary_transition finalAction=${String(action)}`);
 });

@@ -1,7 +1,8 @@
-#!/usr/bin/env bun
+import { test, expect } from "bun:test";
 
-(async () => {
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+
+test("false_pos", async () => {
   const { Engine } = await import("../src/engine/engine");
 
   const makeMeasurement = (x: number, y: number, t: number, accuracy = 8, speed?: number, motion?: boolean) => {
@@ -64,15 +65,6 @@
     return dist < 8;
   });
 
-  if (firstMoved >= 0) {
-    console.error(`[FAIL] false_pos — Engine moved to single outlier at index=${firstMoved}`);
-    process.exit(1);
-  } else {
-    console.log(`[PASS] false_pos — Engine did NOT move to the single outlier`);
-    process.exit(0);
-  }
-
-})().catch((err) => {
-  console.error(err);
-  process.exit(2);
+  expect(firstMoved).toBe(-1);
+  if (VERBOSE) console.log("false_pos ok");
 });
