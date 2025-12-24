@@ -27,76 +27,68 @@ export function App() {
   const LS_UI_SHOW_HISTORY = "ui:showHistory";
   const HISTORY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  const [showRaw, setShowRaw] = useState<boolean>(() => {
+  // Safe localStorage helpers
+  function safeGetItem(key: string): string | null {
     try {
-      const v = typeof window !== "undefined" ? window.localStorage.getItem(LS_UI_SHOW_RAW) : null;
-      return v == null ? true : v === "1";
+      if (typeof window === "undefined") return null;
+      return window.localStorage.getItem(key);
     } catch (e) {
-      return true;
+      return null;
     }
+  }
+  function safeSetItem(key: string, value: string | null): void {
+    try {
+      if (typeof window === "undefined") return;
+      if (value === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, value);
+    } catch (e) { }
+  }
+  function safeGetJSON<T = any>(key: string): T | null {
+    const v = safeGetItem(key);
+    if (v == null) return null;
+    try { return JSON.parse(v) as T; } catch (e) { return null; }
+  }
+
+  const [showRaw, setShowRaw] = useState<boolean>(() => {
+    const v = safeGetItem(LS_UI_SHOW_RAW);
+    return v == null ? true : v === "1";
   });
   const [showEstimates, setShowEstimates] = useState<boolean>(() => {
-    try {
-      const v = typeof window !== "undefined" ? window.localStorage.getItem(LS_UI_SHOW_ESTIMATES) : null;
-      return v == null ? true : v === "1";
-    } catch (e) {
-      return true;
-    }
+    const v = safeGetItem(LS_UI_SHOW_ESTIMATES);
+    return v == null ? true : v === "1";
   });
   const [showAllPast, setShowAllPast] = useState<boolean>(() => {
-    try {
-      const v = typeof window !== "undefined" ? window.localStorage.getItem(LS_UI_SHOW_HISTORY) : null;
-      return v == null ? false : v === "1";
-    } catch (e) {
-      return false;
-    }
+    const v = safeGetItem(LS_UI_SHOW_HISTORY);
+    return v == null ? false : v === "1";
   });
 
-  // Persist UI toggles
+  // Persist UI toggles (combined)
   useEffect(() => {
-    try {
-      if (typeof window !== "undefined") window.localStorage.setItem(LS_UI_SHOW_RAW, showRaw ? "1" : "0");
-    } catch (e) { }
-  }, [showRaw]);
-
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined") window.localStorage.setItem(LS_UI_SHOW_ESTIMATES, showEstimates ? "1" : "0");
-    } catch (e) { }
-  }, [showEstimates]);
-
-  useEffect(() => {
-    try {
-      if (typeof window !== "undefined") window.localStorage.setItem(LS_UI_SHOW_HISTORY, showAllPast ? "1" : "0");
-    } catch (e) { }
-  }, [showAllPast]);
+    safeSetItem(LS_UI_SHOW_RAW, showRaw ? "1" : "0");
+    safeSetItem(LS_UI_SHOW_ESTIMATES, showEstimates ? "1" : "0");
+    safeSetItem(LS_UI_SHOW_HISTORY, showAllPast ? "1" : "0");
+  }, [showRaw, showEstimates, showAllPast]);
 
   // Persist raw snapshots to localStorage
   // Avoid overwriting existing non-empty persisted data with an empty initial state on mount
   useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const existing = window.localStorage.getItem(LS_RAW_SNAPSHOTS);
-      if (Array.isArray(rawSnapshots) && rawSnapshots.length === 0 && existing && existing !== "[]") {
-        // Keep previously persisted non-empty snapshots and avoid clobbering them with an initial empty array
-        return;
-      }
-      window.localStorage.setItem(LS_RAW_SNAPSHOTS, JSON.stringify(rawSnapshots));
-    } catch (e) { }
+    const existing = safeGetItem(LS_RAW_SNAPSHOTS);
+    if (Array.isArray(rawSnapshots) && rawSnapshots.length === 0 && existing && existing !== "[]") {
+      // Keep previously persisted non-empty snapshots and avoid clobbering them with an initial empty array
+      return;
+    }
+    safeSetItem(LS_RAW_SNAPSHOTS, JSON.stringify(rawSnapshots));
   }, [rawSnapshots]);
 
   // Persist raw snapshots by device to localStorage (stronger per-device history persistence)
   // Avoid overwriting existing non-empty persisted per-device data with an empty initial state on mount
   useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const existing = window.localStorage.getItem(LS_RAW_BY_DEVICE);
-      if (rawSnapshotsByDevice && Object.keys(rawSnapshotsByDevice).length === 0 && existing && existing !== "{}") {
-        // Keep previously persisted non-empty by-device data and avoid clobbering it
-        return;
-      }
-      window.localStorage.setItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
-    } catch (e) { }
+    const existing = safeGetItem(LS_RAW_BY_DEVICE);
+    if (rawSnapshotsByDevice && Object.keys(rawSnapshotsByDevice).length === 0 && existing && existing !== "{}") {
+      // Keep previously persisted non-empty by-device data and avoid clobbering it
+      return;
+    }
+    safeSetItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
   }, [rawSnapshotsByDevice]);
 
   // small helpers to reduce duplication and keep logic in one place
@@ -193,75 +185,66 @@ export function App() {
       if (typeof window === "undefined") return;
 
       // Prefer the newer per-device persisted format when available
-      const storedByDevice = window.localStorage.getItem(LS_RAW_BY_DEVICE);
-      if (storedByDevice) {
-        try {
-          const parsedByDevice = JSON.parse(storedByDevice);
-          if (parsedByDevice && typeof parsedByDevice === "object") {
-            const byDevice: Record<string, Snapshot[]> = {};
-            const reconstructed: Snapshot[] = [];
-            for (const [k, arr] of Object.entries(parsedByDevice)) {
-              if (!Array.isArray(arr)) continue;
-              const re = normalizeSnapshots(
-                arr
-                  .map((snap: any) => {
-                    const comp = snap.data?.components?.[0];
-                    if (!comp) return null;
-                    return { timestamp: snap.timestamp, data: { components: [{ ...comp }] } } as Snapshot;
-                  })
-                  .filter(Boolean) as Snapshot[]
-              );
-              if (re.length > 0) {
-                byDevice[k] = re;
-                reconstructed.push(...re);
-              }
-            }
-            if (reconstructed.length === 0) return;
-            const baseLat = reconstructed[0]?.data?.components?.[0]?.lat;
-            const baseLon = reconstructed[0]?.data?.components?.[0]?.lon;
-            if (typeof baseLat !== "number" || typeof baseLon !== "number") return;
-
-            setRefLat(baseLat);
-            setRefLon(baseLon);
-            const cutoff = Date.now() - HISTORY_MS;
-
-            setRawSnapshotsByDevice((prev) => {
-              const out: Record<string, Snapshot[]> = { ...(prev ?? {}) };
-              for (const [k, arr] of Object.entries(byDevice)) {
-                const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
-                out[k] = pruneSnapshots(merged, cutoff);
-              }
-              const mergedArray = mergedArrayFromByDevice(out);
-              // Ensure timelineTime is within the retained range
-              ensureTimelineTimeWithinCutoff(mergedArray, cutoff);
-              return out;
-            });
-
-            let wb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-            for (const s of reconstructed) {
-              const m = s.data.components[0]?.mean ?? [0, 0];
-              wb.minX = Math.min(wb.minX, m[0]);
-              wb.minY = Math.min(wb.minY, m[1]);
-              wb.maxX = Math.max(wb.maxX, m[0]);
-              wb.maxY = Math.max(wb.maxY, m[1]);
-            }
-            setWorldBounds(wb);
-
-            // On reload, reset timeline to the latest persisted timestamp unconditionally
-            setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
-
-            // build engine-derived snapshots asynchronously (shared helper)
-            buildEngineSnapshotsFromByDevice(byDevice, cutoff);
+      const parsedByDevice = safeGetJSON<Record<string, any>>(LS_RAW_BY_DEVICE);
+      if (parsedByDevice && typeof parsedByDevice === "object") {
+        const byDevice: Record<string, Snapshot[]> = {};
+        const reconstructed: Snapshot[] = [];
+        for (const [k, arr] of Object.entries(parsedByDevice)) {
+          if (!Array.isArray(arr)) continue;
+          const re = normalizeSnapshots(
+            arr
+              .map((snap: any) => {
+                const comp = snap.data?.components?.[0];
+                if (!comp) return null;
+                return { timestamp: snap.timestamp, data: { components: [{ ...comp }] } } as Snapshot;
+              })
+              .filter(Boolean) as Snapshot[]
+          );
+          if (re.length > 0) {
+            byDevice[k] = re;
+            reconstructed.push(...re);
           }
-        } catch (e) {
-          // ignore parsing errors
         }
+        if (reconstructed.length === 0) return;
+        const baseLat = reconstructed[0]?.data?.components?.[0]?.lat;
+        const baseLon = reconstructed[0]?.data?.components?.[0]?.lon;
+        if (typeof baseLat !== "number" || typeof baseLon !== "number") return;
+
+        setRefLat(baseLat);
+        setRefLon(baseLon);
+        const cutoff = Date.now() - HISTORY_MS;
+
+        setRawSnapshotsByDevice((prev) => {
+          const out: Record<string, Snapshot[]> = { ...(prev ?? {}) };
+          for (const [k, arr] of Object.entries(byDevice)) {
+            const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
+            out[k] = pruneSnapshots(merged, cutoff);
+          }
+          const mergedArray = mergedArrayFromByDevice(out);
+          // Ensure timelineTime is within the retained range
+          ensureTimelineTimeWithinCutoff(mergedArray, cutoff);
+          return out;
+        });
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const s of reconstructed) {
+          const m = s.data.components[0]?.mean ?? [0, 0];
+          minX = Math.min(minX, m[0]);
+          minY = Math.min(minY, m[1]);
+          maxX = Math.max(maxX, m[0]);
+          maxY = Math.max(maxY, m[1]);
+        }
+        setWorldBounds({ minX, minY, maxX, maxY });
+
+        // On reload, reset timeline to the latest persisted timestamp unconditionally
+        setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
+
+        // build engine-derived snapshots asynchronously (shared helper)
+        buildEngineSnapshotsFromByDevice(byDevice, cutoff);
       }
 
       // Fallback to old single-array persisted snapshots (backwards compatibility)
-      const stored = window.localStorage.getItem(LS_RAW_SNAPSHOTS);
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
+      const parsed = safeGetJSON<any[]>(LS_RAW_SNAPSHOTS);
       if (!Array.isArray(parsed) || parsed.length === 0) return;
 
       const baseLat = parsed[0]?.data?.components?.[0]?.lat;
@@ -305,58 +288,31 @@ export function App() {
         return out;
       });
 
-      let wb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const s of reconstructed) {
         const m = s.data.components[0]?.mean ?? [0, 0];
-        wb.minX = Math.min(wb.minX, m[0]);
-        wb.minY = Math.min(wb.minY, m[1]);
-        wb.maxX = Math.max(wb.maxX, m[0]);
-        wb.maxY = Math.max(wb.maxY, m[1]);
+        minX = Math.min(minX, m[0]);
+        minY = Math.min(minY, m[1]);
+        maxX = Math.max(maxX, m[0]);
+        maxY = Math.max(maxY, m[1]);
       }
-      setWorldBounds(wb);
+      setWorldBounds({ minX, minY, maxX, maxY });
 
       // On reload, reset timeline to the latest persisted timestamp unconditionally
       setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
 
       // build engine-derived snapshots asynchronously (shared helper)
       buildEngineSnapshotsFromByDevice(byDevice, cutoff);
-    } catch (e) {
-      /* ignore localStorage or engine errors */
-    }
+    } catch (e) { }
   }, []);
 
   // Traccar connection settings (persisted in localStorage)
-  const [wsUrlInput, setWsUrlInput] = useState<string>(() => {
-    try {
-      return typeof window !== "undefined" ? window.localStorage.getItem("traccar:wsUrl") ?? "" : "";
-    } catch (e) {
-      return "";
-    }
-  });
-  const [tokenInput, setTokenInput] = useState<string>(() => {
-    try {
-      return typeof window !== "undefined" ? window.localStorage.getItem("traccar:token") ?? "" : "";
-    } catch (e) {
-      return "";
-    }
-  });
+  const [wsUrlInput, setWsUrlInput] = useState<string>(() => safeGetItem("traccar:wsUrl") ?? "");
+  const [tokenInput, setTokenInput] = useState<string>(() => safeGetItem("traccar:token") ?? "");
   // applied (active) settings used by the client; change these via Apply/Save
-  const [traccarWsUrl, setTraccarWsUrl] = useState<string | null>(() => {
-    try {
-      return typeof window !== "undefined" ? window.localStorage.getItem("traccar:wsUrl") ?? null : null;
-    } catch (e) {
-      return null;
-    }
-  });
-  const [traccarToken, setTraccarToken] = useState<string | null>(() => {
-    try {
-      return typeof window !== "undefined" ? window.localStorage.getItem("traccar:token") ?? null : null;
-    } catch (e) {
-      return null;
-    }
-  });
-  const clientCloseRef = useRef<() => void | null>(() => null);
-  const clientRef = useRef<any>(null);
+  const [traccarWsUrl, setTraccarWsUrl] = useState<string | null>(() => safeGetItem("traccar:wsUrl") ?? null);
+  const [traccarToken, setTraccarToken] = useState<string | null>(() => safeGetItem("traccar:token") ?? null);
+  const clientCloseRef = useRef<(() => void) | null>(null);
   const [deviceNames, setDeviceNames] = useState<Record<string, string>>({});
   // Keep a ref of device names so callbacks created inside effects can read the latest mapping
   const deviceNamesRef = useRef<Record<string, string>>(deviceNames);
@@ -390,10 +346,7 @@ export function App() {
         if (pruned.length !== arr.length) changed = true;
         out[k] = pruned;
       }
-      if (!changed) return prev;
-      const mergedArray = mergedArrayFromByDevice(out);
-      // rawSnapshots is derived from rawSnapshotsByDevice
-      return out;
+      return changed ? out : prev;
     });
 
     // Update engine-derived snapshots as well so estimates show friendly names
@@ -426,16 +379,9 @@ export function App() {
   const [wsApplyCounter, setWsApplyCounter] = useState(0);
 
   function applySettings() {
-    try {
-      if (typeof window !== "undefined") {
-        if (wsUrlInput) window.localStorage.setItem("traccar:wsUrl", wsUrlInput);
-        else window.localStorage.removeItem("traccar:wsUrl");
-        if (tokenInput) window.localStorage.setItem("traccar:token", tokenInput);
-        else window.localStorage.removeItem("traccar:token");
-      }
-    } catch (e) {
-      /* ignore localStorage errors */
-    }
+    // Persist settings safely
+    safeSetItem("traccar:wsUrl", wsUrlInput || null);
+    safeSetItem("traccar:token", tokenInput || null);
 
     setTraccarWsUrl(wsUrlInput || null);
     setTraccarToken(tokenInput || null);
@@ -456,14 +402,9 @@ export function App() {
   function clearSettings() {
     setWsUrlInput("");
     setTokenInput("");
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem("traccar:wsUrl");
-        window.localStorage.removeItem("traccar:token");
-      }
-    } catch (e) {
-      /* ignore */
-    }
+    // Clear persisted settings safely
+    safeSetItem("traccar:wsUrl", null);
+    safeSetItem("traccar:token", null);
     setTraccarWsUrl(null);
     setTraccarToken(null);
     setWsStatus("disconnected");
@@ -539,18 +480,16 @@ export function App() {
       }
     }
 
-    const initialBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-    let worldBoundsLocal = initialBounds;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const mp of metersByDevice.values()) {
       for (const p of mp) {
-        worldBoundsLocal = {
-          minX: Math.min(worldBoundsLocal.minX, p.x),
-          minY: Math.min(worldBoundsLocal.minY, p.y),
-          maxX: Math.max(worldBoundsLocal.maxX, p.x),
-          maxY: Math.max(worldBoundsLocal.maxY, p.y),
-        };
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
       }
     }
+    const worldBoundsLocal = { minX, minY, maxX, maxY };
 
     // Build raw per-position snapshots (history of measurements), keep per-device and merged lists
     const rawByDevice: Record<string, Snapshot[]> = {};
@@ -632,17 +571,24 @@ export function App() {
     setWsStatus("connecting");
     setWsError(null);
 
-    // Use Traccar realtime WebSocket for live updates
-    // The realtime client will call `onPosition` for each received normalized position
-
     let lastTimestamps: Record<string, number> = {};
     let seen = new Set<string>();
     let positionsAll: any[] = [];
-    // mapping from deviceKey -> friendly name (populated from Traccar /devices when available)
-    let localDeviceNames: Record<string, string> | null = null;
 
     function dedupeKey(p: any) {
       return `${p.deviceId ?? p.source ?? ""}:${p.timestamp}:${p.lat}:${p.lon}`;
+    }
+
+    function insertSortedByTimestamp(arr: any[], item: any) {
+      const t = item.timestamp ?? 0;
+      let lo = 0;
+      let hi = arr.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if ((arr[mid]?.timestamp ?? 0) <= t) lo = mid + 1;
+        else hi = mid;
+      }
+      arr.splice(lo, 0, item);
     }
 
     // Pre-seed positionsAll and seen with persisted snapshots so old locations are preserved
@@ -650,100 +596,19 @@ export function App() {
       if (rawSnapshots && rawSnapshots.length > 0) {
         for (const s of rawSnapshots) {
           const comp = s.data.components[0] as any;
-          // normalize persisted snapshot timestamps if needed
-          const rawTs = s.timestamp as any;
-          const ts = typeof rawTs === "number" ? (rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs) : (typeof rawTs === "string" ? (() => { const n = Number(rawTs); return !Number.isNaN(n) ? (n < 1e12 ? Math.round(n * 1000) : n) : Date.now(); })() : Date.now());
-          const p = { timestamp: ts, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
+          const p = { timestamp: s.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
           const key = dedupeKey(p);
           if (seen.has(key)) continue;
           seen.add(key);
-          positionsAll.push(p);
+          insertSortedByTimestamp(positionsAll, p);
           const deviceKey = String(comp.device ?? comp.source ?? "unknown");
           lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
         }
-        positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-        // ensure we show the latest persisted time on reload
         setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
         // Build initial UI from persisted positions
         processPositions(positionsAll);
-      } else {
-        try {
-          // Prefer the per-device persisted format when available
-          const storedByDeviceRaw = typeof window !== "undefined" ? window.localStorage.getItem(LS_RAW_BY_DEVICE) : null;
-          if (storedByDeviceRaw) {
-            try {
-              const parsedByDevice = JSON.parse(storedByDeviceRaw);
-              if (parsedByDevice && typeof parsedByDevice === "object") {
-                for (const [k, arr] of Object.entries(parsedByDevice)) {
-                  if (!Array.isArray(arr)) continue;
-                  const snaps = normalizeSnapshots(arr as any);
-                  for (const snap of snaps) {
-                    try {
-                      const comp = snap.data?.components?.[0];
-                      if (!comp) continue;
-                      const p = { timestamp: snap.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
-                      const key = dedupeKey(p);
-                      if (seen.has(key)) continue;
-                      seen.add(key);
-                      positionsAll.push(p);
-                      const deviceKey = String(comp.device ?? comp.source ?? "unknown");
-                      lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
-                    } catch (e) {
-                      // ignore malformed persisted entry
-                    }
-                  }
-                }
-                positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-                // ensure we show the latest persisted time on reload
-                setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
-                processPositions(positionsAll);
-              }
-            } catch (e) {
-              // ignore parse errors and fall back to single-array persisted snapshots
-            }
-          } else {
-            const s = typeof window !== "undefined" ? window.localStorage.getItem(LS_RAW_SNAPSHOTS) : null;
-            if (s) {
-              const parsed = JSON.parse(s);
-              if (Array.isArray(parsed)) {
-                for (const snap of parsed) {
-                  try {
-                    const comp = snap.data?.components?.[0];
-                    if (!comp) continue;
-                    // normalize timestamps that may be stored in seconds
-                    const rawTs = snap.timestamp;
-                    const ts = typeof rawTs === "number"
-                      ? rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs
-                      : typeof rawTs === "string"
-                        ? (() => { const n = Number(rawTs); return !Number.isNaN(n) ? (n < 1e12 ? Math.round(n * 1000) : n) : Date.now(); })()
-                        : Date.now();
-                    const p = { timestamp: ts, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
-                    const key = dedupeKey(p);
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-                    positionsAll.push(p);
-                    const deviceKey = String(comp.device ?? comp.source ?? "unknown");
-                    lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
-                  } catch (e) {
-                    // ignore malformed persisted entry
-                  }
-                }
-                positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-                // ensure we show the latest persisted time on reload
-                setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
-                processPositions(positionsAll);
-              }
-            }
-          }
-        } catch (e) {
-          /* ignore localStorage errors */
-        }
       }
-    } catch (e) {
-      /* ignore seeding errors */
-    }
-
-    // Use shared `processPositions` defined above (duplicate removed)
+    } catch (e) { }
 
     // close any previous client before creating a new one
     clientCloseRef.current?.();
@@ -760,9 +625,7 @@ export function App() {
             const key = dedupeKey(p);
             if (seen.has(key)) return;
             seen.add(key);
-            positionsAll.push(p);
-            // keep positions sorted
-            positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+            insertSortedByTimestamp(positionsAll, p);
             // update last timestamp per device
             const deviceKey = String(p.deviceId ?? p.source ?? "");
             lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
@@ -889,7 +752,6 @@ export function App() {
             /* ignore */
           }
         };
-        (clientRef as any).current = client;
       } catch (e) {
         console.warn("Could not initialize realtime traccar client:", e);
         setWsStatus("error");
@@ -909,12 +771,25 @@ export function App() {
 
   // helper to find the most recent snapshot before or at a given time
   function findLatestSnapshotBeforeOrAt(snaps: Snapshot[], time: number): Snapshot | null {
-    for (let i = snaps.length - 1; i >= 0; i--) {
-      const s = snaps[i];
-      if (!s) continue;
-      if (s.timestamp <= time) return s;
+    if (!Array.isArray(snaps) || snaps.length === 0) return null;
+    let lo = 0;
+    let hi = snaps.length - 1;
+    let result: Snapshot | null = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const s = snaps[mid];
+      if (!s) {
+        hi = mid - 1;
+        continue;
+      }
+      if (s.timestamp <= time) {
+        result = s;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
-    return null;
+    return result;
   }
 
   let frame = { components: [] as ComponentUI[] };
