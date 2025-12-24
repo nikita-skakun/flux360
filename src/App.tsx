@@ -1,20 +1,21 @@
 import { Card, CardContent } from "@/components/ui/card";
 import "./index.css";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import MapView from "./ui/MapView";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import type { ComponentUI } from "@/ui/types";
 import { degreesToMeters } from "./util/geo";
 import { measurementCovFromAccuracy, eigenDecomposition } from "@/util/gaussian";
-import { mergeSnapshots } from "@/lib/snapshots";
+import { mergeSnapshots, pruneSnapshots, normalizeSnapshots } from "@/lib/snapshots";
+import { computeNextTimelineTime } from "@/lib/timeline";
 
 export function App() {
   type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
   type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
   const [timelineTime, setTimelineTime] = useState<number | null>(null);
-  const [rawSnapshots, setRawSnapshots] = useState<Snapshot[]>([]);
   const [rawSnapshotsByDevice, setRawSnapshotsByDevice] = useState<Record<string, Snapshot[]>>({});
+  const rawSnapshots = useMemo(() => mergedArrayFromByDevice(rawSnapshotsByDevice), [rawSnapshotsByDevice]);
   const [engineSnapshotsByDevice, setEngineSnapshotsByDevice] = useState<Record<string, Snapshot[]>>({});
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
@@ -24,6 +25,7 @@ export function App() {
   const LS_UI_SHOW_RAW = "ui:showRaw";
   const LS_UI_SHOW_ESTIMATES = "ui:showEstimates";
   const LS_UI_SHOW_HISTORY = "ui:showHistory";
+  const HISTORY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   const [showRaw, setShowRaw] = useState<boolean>(() => {
     try {
@@ -70,18 +72,120 @@ export function App() {
   }, [showAllPast]);
 
   // Persist raw snapshots to localStorage
+  // Avoid overwriting existing non-empty persisted data with an empty initial state on mount
   useEffect(() => {
     try {
-      if (typeof window !== "undefined") window.localStorage.setItem(LS_RAW_SNAPSHOTS, JSON.stringify(rawSnapshots));
+      if (typeof window === "undefined") return;
+      const existing = window.localStorage.getItem(LS_RAW_SNAPSHOTS);
+      if (Array.isArray(rawSnapshots) && rawSnapshots.length === 0 && existing && existing !== "[]") {
+        // Keep previously persisted non-empty snapshots and avoid clobbering them with an initial empty array
+        return;
+      }
+      window.localStorage.setItem(LS_RAW_SNAPSHOTS, JSON.stringify(rawSnapshots));
     } catch (e) { }
   }, [rawSnapshots]);
 
   // Persist raw snapshots by device to localStorage (stronger per-device history persistence)
+  // Avoid overwriting existing non-empty persisted per-device data with an empty initial state on mount
   useEffect(() => {
     try {
-      if (typeof window !== "undefined") window.localStorage.setItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
+      if (typeof window === "undefined") return;
+      const existing = window.localStorage.getItem(LS_RAW_BY_DEVICE);
+      if (rawSnapshotsByDevice && Object.keys(rawSnapshotsByDevice).length === 0 && existing && existing !== "{}") {
+        // Keep previously persisted non-empty by-device data and avoid clobbering it
+        return;
+      }
+      window.localStorage.setItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
     } catch (e) { }
   }, [rawSnapshotsByDevice]);
+
+  // small helpers to reduce duplication and keep logic in one place
+  function computeDisplaySpeed(prevM: any | undefined, m: any | undefined): number | undefined {
+    if (typeof m?.speed === "number") return m.speed;
+    if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
+      const dt = (m.timestamp - prevM.timestamp) / 1000;
+      if (dt > 0) {
+        const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
+        const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
+        return Math.sqrt(dx * dx + dy * dy) / dt;
+      }
+    }
+    return undefined;
+  }
+
+  async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, any[]>, cutoff: number, nameMapLocal?: Record<string, string>): Promise<Snapshot[]> {
+    try {
+      const { Engine } = await import("@/engine/engine");
+      const engineByDevice: Record<string, Snapshot[]> = {};
+      const mergedEngine: Snapshot[] = [];
+
+      for (const [deviceKey, arr] of Object.entries(byDevice)) {
+        // Normalize a variety of possible input shapes (snapshots or simple measurement objects)
+        const measurements = ((arr ?? [])
+          .map((s: any) => {
+            if (!s) return null;
+            if (s.mean) {
+              return { mean: s.mean, cov: s.cov ?? measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, source: s.source, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
+            }
+            const c = s.data?.components?.[0];
+            if (c) return { mean: c.mean, cov: measurementCovFromAccuracy(c.accuracy), timestamp: s.timestamp, source: c.source, accuracy: c.accuracy, lat: c.lat, lon: c.lon, speed: c.speed };
+            if (s.x != null && s.y != null && typeof s.timestamp === "number") return { mean: [s.x, s.y], cov: measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, source: s.source, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
+            return null;
+          })
+          .filter(Boolean)) as any[];
+
+        measurements.sort((a: any, b: any) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+
+        if (measurements.length === 0) {
+          engineByDevice[deviceKey] = [];
+          continue;
+        }
+
+        const enginePerDevice = new Engine();
+        const engineSnapRaw = enginePerDevice.processMeasurements(measurements);
+        const deviceNameValFromMap = (nameMapLocal ?? deviceNamesRef.current) ?? {};
+
+        const engineSnap: Snapshot[] = engineSnapRaw.map((s_: any, idx: number) => {
+          const m = measurements[idx];
+          const prevM = measurements[idx - 1];
+          const comps = s_.data.components.map((c: any) => {
+            const { lambda1, lambda2 } = eigenDecomposition(c.cov);
+            const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
+            let action = (c.action as string | undefined) ?? "still";
+            const displaySpeed = computeDisplaySpeed(prevM, m);
+            if (!c.action && typeof displaySpeed === "number") {
+              const speedThreshold = 0.5;
+              if (displaySpeed > speedThreshold) action = "moving";
+            }
+            const deviceNameVal = deviceNameValFromMap?.[deviceKey];
+            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceKey, ...(deviceNameVal ? { deviceName: deviceNameVal } : {}) };
+          });
+          return { timestamp: s_.timestamp, data: { components: comps } };
+        });
+
+        engineSnap.sort((a, b) => a.timestamp - b.timestamp);
+        engineByDevice[deviceKey] = pruneSnapshots(engineSnap, cutoff);
+        mergedEngine.push(...engineByDevice[deviceKey]);
+      }
+
+      mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
+      setEngineSnapshotsByDevice(engineByDevice);
+      return pruneSnapshots(mergedEngine, cutoff);
+    } catch (e) {
+      // ignore engine errors
+      return [];
+    }
+  }
+
+  function mergedArrayFromByDevice(out: Record<string, Snapshot[]>) {
+    return Object.values(out).flat().sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  function ensureTimelineTimeWithinCutoff(mergedArray: Snapshot[], cutoff: number) {
+    setTimelineTime((prev) =>
+      prev == null ? mergedArray[mergedArray.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedArray[mergedArray.length - 1]?.timestamp ?? Date.now() : prev
+    );
+  }
 
   // Load persisted raw snapshots and build derived state (runs once on mount)
   useEffect(() => {
@@ -98,14 +202,15 @@ export function App() {
             const reconstructed: Snapshot[] = [];
             for (const [k, arr] of Object.entries(parsedByDevice)) {
               if (!Array.isArray(arr)) continue;
-              const re = arr
-                .map((snap: any) => {
-                  const comp = snap.data?.components?.[0];
-                  if (!comp) return null;
-                  return { timestamp: snap.timestamp, data: { components: [{ ...comp }] } } as Snapshot;
-                })
-                .filter(Boolean) as Snapshot[];
-              re.sort((a, b) => a.timestamp - b.timestamp);
+              const re = normalizeSnapshots(
+                arr
+                  .map((snap: any) => {
+                    const comp = snap.data?.components?.[0];
+                    if (!comp) return null;
+                    return { timestamp: snap.timestamp, data: { components: [{ ...comp }] } } as Snapshot;
+                  })
+                  .filter(Boolean) as Snapshot[]
+              );
               if (re.length > 0) {
                 byDevice[k] = re;
                 reconstructed.push(...re);
@@ -118,13 +223,17 @@ export function App() {
 
             setRefLat(baseLat);
             setRefLon(baseLon);
-            setRawSnapshots((prev) => mergeSnapshots(prev, reconstructed));
+            const cutoff = Date.now() - HISTORY_MS;
 
             setRawSnapshotsByDevice((prev) => {
-              const out: Record<string, Snapshot[]> = { ...prev };
+              const out: Record<string, Snapshot[]> = { ...(prev ?? {}) };
               for (const [k, arr] of Object.entries(byDevice)) {
-                out[k] = mergeSnapshots(out[k] ?? [], arr);
+                const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
+                out[k] = pruneSnapshots(merged, cutoff);
               }
+              const mergedArray = mergedArrayFromByDevice(out);
+              // Ensure timelineTime is within the retained range
+              ensureTimelineTimeWithinCutoff(mergedArray, cutoff);
               return out;
             });
 
@@ -138,54 +247,11 @@ export function App() {
             }
             setWorldBounds(wb);
 
-            setTimelineTime((prev) => prev ?? (reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now()));
+            // On reload, reset timeline to the latest persisted timestamp unconditionally
+            setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
 
-            // build engine-derived snapshots asynchronously
-            (async () => {
-              const { Engine } = await import("@/engine/engine");
-              const engineByDevice: Record<string, Snapshot[]> = {};
-              const mergedEngine: Snapshot[] = [];
-              for (const [deviceKey, arr] of Object.entries(byDevice)) {
-                const measurements = arr
-                  .map((s) => {
-                    const c = s.data.components[0] as any;
-                    return { mean: c.mean, cov: measurementCovFromAccuracy(c.accuracy), timestamp: s.timestamp, source: c.source, accuracy: c.accuracy, lat: c.lat, lon: c.lon, speed: c.speed };
-                  })
-                  .sort((a, b) => a.timestamp - b.timestamp);
-                const enginePerDevice = new Engine();
-                const engineSnapRaw = enginePerDevice.processMeasurements(measurements);
-                const engineSnap: Snapshot[] = engineSnapRaw.map((s_, idx) => {
-                  const m = measurements[idx];
-                  const prevM = measurements[idx - 1];
-                  const comps = s_.data.components.map((c: any) => {
-                    const { lambda1, lambda2 } = eigenDecomposition(c.cov);
-                    const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
-                    let action = (c.action as string | undefined) ?? "still";
-                    let displaySpeed: number | undefined = undefined;
-                    if (typeof m?.speed === "number") displaySpeed = m.speed;
-                    else if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
-                      const dt = (m.timestamp - prevM.timestamp) / 1000;
-                      if (dt > 0) {
-                        const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
-                        const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
-                        displaySpeed = Math.sqrt(dx * dx + dy * dy) / dt;
-                      }
-                    }
-                    if (!c.action && typeof displaySpeed === "number") {
-                      const speedThreshold = 0.5;
-                      if (displaySpeed > speedThreshold) action = "moving";
-                    }
-                    return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceKey, deviceName: undefined as any };
-                  });
-                  return { timestamp: s_.timestamp, data: { components: comps } };
-                });
-                engineSnap.sort((a, b) => a.timestamp - b.timestamp);
-                engineByDevice[deviceKey] = engineSnap;
-                mergedEngine.push(...engineSnap);
-              }
-              mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
-              setEngineSnapshotsByDevice(engineByDevice);
-            })();
+            // build engine-derived snapshots asynchronously (shared helper)
+            buildEngineSnapshotsFromByDevice(byDevice, cutoff);
           }
         } catch (e) {
           // ignore parsing errors
@@ -202,20 +268,22 @@ export function App() {
       const baseLon = parsed[0]?.data?.components?.[0]?.lon;
       if (typeof baseLat !== "number" || typeof baseLon !== "number") return;
 
-      const reconstructed: Snapshot[] = parsed
-        .map((snap: any) => {
-          const comp = snap.data?.components?.[0];
-          if (!comp) return null;
-          const { x, y } = degreesToMeters(comp.lat, comp.lon, baseLat, baseLon);
-          return { timestamp: snap.timestamp, data: { components: [{ ...comp, mean: [x, y] }] } } as Snapshot;
-        })
-        .filter(Boolean) as Snapshot[];
+      const reconstructed: Snapshot[] = normalizeSnapshots(
+        parsed
+          .map((snap: any) => {
+            const comp = snap.data?.components?.[0];
+            if (!comp) return null;
+            const { x, y } = degreesToMeters(comp.lat, comp.lon, baseLat, baseLon);
+            return { timestamp: snap.timestamp, data: { components: [{ ...comp, mean: [x, y] }] } } as Snapshot;
+          })
+          .filter(Boolean) as Snapshot[]
+      );
 
       if (reconstructed.length === 0) return;
 
       setRefLat(baseLat);
       setRefLon(baseLon);
-      setRawSnapshots((prev) => mergeSnapshots(prev, reconstructed));
+      const cutoff = Date.now() - HISTORY_MS;
 
       const byDevice: Record<string, Snapshot[]> = {};
       for (const s of reconstructed) {
@@ -227,10 +295,13 @@ export function App() {
 
       // Merge per-device histories with any existing state instead of blindly replacing
       setRawSnapshotsByDevice((prev) => {
-        const out: Record<string, Snapshot[]> = { ...prev };
+        const out: Record<string, Snapshot[]> = { ...(prev ?? {}) };
         for (const [k, arr] of Object.entries(byDevice)) {
-          out[k] = mergeSnapshots(out[k] ?? [], arr);
+          const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
+          out[k] = pruneSnapshots(merged, cutoff);
         }
+        const mergedArray = mergedArrayFromByDevice(out);
+        ensureTimelineTimeWithinCutoff(mergedArray, cutoff);
         return out;
       });
 
@@ -244,59 +315,11 @@ export function App() {
       }
       setWorldBounds(wb);
 
-      setTimelineTime((prev) => prev ?? (reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now()));
+      // On reload, reset timeline to the latest persisted timestamp unconditionally
+      setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
 
-      // build engine-derived snapshots asynchronously
-      (async () => {
-        const { Engine } = await import("@/engine/engine");
-        const engineByDevice: Record<string, Snapshot[]> = {};
-        const mergedEngine: Snapshot[] = [];
-        for (const [deviceKey, arr] of Object.entries(byDevice)) {
-          const measurements = arr
-            .map((s) => {
-              const c = s.data.components[0] as any;
-              return { mean: c.mean, cov: measurementCovFromAccuracy(c.accuracy), timestamp: s.timestamp, source: c.source, accuracy: c.accuracy, lat: c.lat, lon: c.lon, speed: c.speed };
-            })
-            .sort((a, b) => a.timestamp - b.timestamp);
-          const enginePerDevice = new Engine();
-          const engineSnapRaw = enginePerDevice.processMeasurements(measurements);
-          const engineSnap: Snapshot[] = engineSnapRaw.map((s_, idx) => {
-            const m = measurements[idx];
-            const prevM = measurements[idx - 1];
-            const comps = s_.data.components.map((c: any) => {
-              const { lambda1, lambda2 } = eigenDecomposition(c.cov);
-              const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
-
-              let action = (c.action as string | undefined) ?? "still";
-
-              let displaySpeed: number | undefined = undefined;
-              if (typeof m?.speed === "number") {
-                displaySpeed = m.speed;
-              } else if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
-                const dt = (m.timestamp - prevM.timestamp) / 1000;
-                if (dt > 0) {
-                  const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
-                  const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
-                  displaySpeed = Math.sqrt(dx * dx + dy * dy) / dt;
-                }
-              }
-
-              if (!c.action && typeof displaySpeed === "number") {
-                const speedThreshold = 0.5;
-                if (displaySpeed > speedThreshold) action = "moving";
-              }
-
-              return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceKey, deviceName: undefined as any };
-            });
-            return { timestamp: s_.timestamp, data: { components: comps } };
-          });
-          engineSnap.sort((a, b) => a.timestamp - b.timestamp);
-          engineByDevice[deviceKey] = engineSnap;
-          mergedEngine.push(...engineSnap);
-        }
-        mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
-        setEngineSnapshotsByDevice(engineByDevice);
-      })();
+      // build engine-derived snapshots asynchronously (shared helper)
+      buildEngineSnapshotsFromByDevice(byDevice, cutoff);
     } catch (e) {
       /* ignore localStorage or engine errors */
     }
@@ -335,10 +358,17 @@ export function App() {
   const clientCloseRef = useRef<() => void | null>(() => null);
   const clientRef = useRef<any>(null);
   const [deviceNames, setDeviceNames] = useState<Record<string, string>>({});
+  // Keep a ref of device names so callbacks created inside effects can read the latest mapping
+  const deviceNamesRef = useRef<Record<string, string>>(deviceNames);
+  useEffect(() => {
+    deviceNamesRef.current = deviceNames;
+  }, [deviceNames]);
 
   // Ensure device-friendly names are applied to stored snapshots when device names are discovered/updated
   useEffect(() => {
     if (!deviceNames || Object.keys(deviceNames).length === 0) return;
+
+    const cutoff = Date.now() - HISTORY_MS;
 
     // Update raw snapshots per-device to include deviceName where missing or outdated
     setRawSnapshotsByDevice((prev) => {
@@ -356,11 +386,13 @@ export function App() {
           }
           return s;
         });
-        out[k] = updated;
+        const pruned = pruneSnapshots(updated, cutoff);
+        if (pruned.length !== arr.length) changed = true;
+        out[k] = pruned;
       }
       if (!changed) return prev;
-      const mergedArray = Object.values(out).flat().sort((a, b) => a.timestamp - b.timestamp);
-      setRawSnapshots(mergedArray);
+      const mergedArray = mergedArrayFromByDevice(out);
+      // rawSnapshots is derived from rawSnapshotsByDevice
       return out;
     });
 
@@ -380,7 +412,9 @@ export function App() {
           }
           return s;
         });
-        out[k] = updated;
+        const pruned = pruneSnapshots(updated, cutoff);
+        if (pruned.length !== arr.length) changed = true;
+        out[k] = pruned;
       }
       if (!changed) return prev;
       return out;
@@ -439,7 +473,7 @@ export function App() {
 
   function processPositions(positions: any[], nameMap?: Record<string, string>) {
     if (!positions || positions.length === 0) return;
-    const nameMapLocal = nameMap ?? deviceNames;
+    const nameMapLocal = nameMap ?? deviceNamesRef.current;
     // Attach an explicit device key to each position (prefer deviceId, fallback to `source`)
     const positionsWithDevice = positions.map((p) => {
       const deviceKey = p.deviceId != null ? String(p.deviceId) : p.source ?? "unknown";
@@ -520,112 +554,64 @@ export function App() {
 
     // Build raw per-position snapshots (history of measurements), keep per-device and merged lists
     const rawByDevice: Record<string, Snapshot[]> = {};
-    const mergedRaw: Snapshot[] = [];
+    let mergedRaw: Snapshot[] = [];
     for (const [deviceKey, mp] of metersByDevice) {
-      const rawArr: Snapshot[] = mp.map((p) => ({
-        timestamp: p.timestamp,
-        data: {
-          components: [
-            {
-              mean: [p.x, p.y] as [number, number],
-              cov: measurementCovFromAccuracy(p.accuracy),
-              accuracy: p.accuracy,
-              weight: 1,
-              source: p.source,
-              lat: p.lat,
-              lon: p.lon,
-              raw: true,
-              speed: p.speed,
-              device: deviceKey,
-              deviceName: nameMapLocal?.[deviceKey] ?? undefined,
-            },
-          ],
-        },
-      }));
+      const rawArr: Snapshot[] = mp.map((p) => {
+        const deviceNameVal = nameMapLocal?.[deviceKey];
+        const comp: any = {
+          mean: [p.x, p.y] as [number, number],
+          cov: measurementCovFromAccuracy(p.accuracy),
+          accuracy: p.accuracy,
+          weight: 1,
+          source: p.source,
+          lat: p.lat,
+          lon: p.lon,
+          raw: true,
+          speed: p.speed,
+          device: deviceKey,
+          ...(deviceNameVal ? { deviceName: deviceNameVal } : {}),
+        };
+        return { timestamp: p.timestamp, data: { components: [comp] } } as Snapshot;
+      });
       rawArr.sort((a, b) => a.timestamp - b.timestamp);
       rawByDevice[deviceKey] = rawArr;
       mergedRaw.push(...rawArr);
     }
     mergedRaw.sort((a, b) => a.timestamp - b.timestamp);
 
+    const cutoff = Date.now() - HISTORY_MS;
+
     // Merge with previous snapshots **per device** to keep per-device history persistent
     setRawSnapshotsByDevice((prevByDevice) => {
+      // compute previous merged array/last timestamp so we can detect "at latest" positions
+      const prevMergedArray = mergedArrayFromByDevice(prevByDevice ?? {});
+      const prevLatest = prevMergedArray[prevMergedArray.length - 1]?.timestamp ?? null;
+
       const mergedByDevice: Record<string, Snapshot[]> = { ...(prevByDevice ?? {}) };
       for (const [deviceKey, arr] of Object.entries(rawByDevice)) {
         const existing = mergedByDevice[deviceKey] ?? [];
-        mergedByDevice[deviceKey] = mergeSnapshots(existing, arr).sort((a, b) => a.timestamp - b.timestamp);
+        const merged = mergeSnapshots(existing, arr).sort((a, b) => a.timestamp - b.timestamp);
+        mergedByDevice[deviceKey] = pruneSnapshots(merged, cutoff);
       }
       // recompute merged rawSnapshots (global list) from per-device lists
       const mergedArray = Object.values(mergedByDevice).flat().sort((a, b) => a.timestamp - b.timestamp);
-      setRawSnapshots(mergedArray);
+      const prunedMergedArray = pruneSnapshots(mergedArray, cutoff);
+      mergedRaw = prunedMergedArray;
+
+      const newLatest = prunedMergedArray[prunedMergedArray.length - 1]?.timestamp ?? null;
+      // Advance timeline to new latest if the user was already at the previous latest (or timeline unset/expired)
+      setTimelineTime((prevTime) => computeNextTimelineTime(prevTime, prevLatest, newLatest, cutoff));
+
       return mergedByDevice;
     });
 
     // Convert to engine measurements and run each device through its own Engine instance
-    const engineByDevice: Record<string, Snapshot[]> = {};
-    const mergedEngine: Snapshot[] = [];
     (async () => {
-      const { Engine } = await import("@/engine/engine");
-      for (const [deviceKey, mp] of metersByDevice) {
-        const measurements = mp.map((p) => ({
-          mean: [p.x, p.y] as [number, number],
-          cov: measurementCovFromAccuracy(p.accuracy),
-          timestamp: p.timestamp,
-          source: p.source,
-          accuracy: p.accuracy,
-          lat: p.lat,
-          lon: p.lon,
-          speed: p.speed,
-        }));
-
-        const enginePerDevice = new Engine();
-        const measurementsSorted = measurements.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-        const engineSnapRaw = enginePerDevice.processMeasurements(measurementsSorted);
-
-        const engineSnap: Snapshot[] = engineSnapRaw.map((s, idx) => {
-          const m = measurementsSorted[idx];
-          const prevM = measurementsSorted[idx - 1];
-          const comps = s.data.components.map((c: any) => {
-            const { lambda1, lambda2 } = eigenDecomposition(c.cov);
-            const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
-
-            // Prefer mixture's movement confidence if available
-            let action = (c.action as string | undefined) ?? "still";
-
-            // compute a display speed if possible (meters/second) from device or derived from consecutive measurements
-            let displaySpeed: number | undefined = undefined;
-            if (typeof m?.speed === "number") {
-              displaySpeed = m.speed;
-            } else if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
-              const dt = (m.timestamp - prevM.timestamp) / 1000;
-              if (dt > 0) {
-                const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
-                const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
-                displaySpeed = Math.sqrt(dx * dx + dy * dy) / dt;
-              }
-            }
-
-            // fallback movement detection when mixture didn't supply an action
-            if (!c.action && typeof displaySpeed === "number") {
-              const speedThreshold = 0.5; // m/s (fallback threshold)
-              if (displaySpeed > speedThreshold) action = "moving";
-            }
-
-            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceKey, deviceName: nameMapLocal?.[deviceKey] ?? undefined };
-          });
-          return { timestamp: s.timestamp, data: { components: comps } };
-        });
-
-        engineSnap.sort((a, b) => a.timestamp - b.timestamp);
-        engineByDevice[deviceKey] = engineSnap;
-        mergedEngine.push(...engineSnap);
-      }
-
-      mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
-      setEngineSnapshotsByDevice(engineByDevice);
-
+      const prunedMergedEngine = await buildEngineSnapshotsFromByDevice(Object.fromEntries(metersByDevice), cutoff, nameMapLocal);
       // default timeline time to the latest raw snapshot (history should be raw)
-      setTimelineTime(mergedRaw[mergedRaw.length - 1]?.timestamp ?? mergedEngine[mergedEngine.length - 1]?.timestamp ?? Date.now());
+      setTimelineTime((prev) =>
+        prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? prunedMergedEngine[prunedMergedEngine.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? prunedMergedEngine[prunedMergedEngine.length - 1]?.timestamp ?? Date.now() : prev
+      );
       // store world bounds somewhere (pass into CanvasView via state)
       setWorldBounds(worldBoundsLocal);
     })();
@@ -664,7 +650,10 @@ export function App() {
       if (rawSnapshots && rawSnapshots.length > 0) {
         for (const s of rawSnapshots) {
           const comp = s.data.components[0] as any;
-          const p = { timestamp: s.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
+          // normalize persisted snapshot timestamps if needed
+          const rawTs = s.timestamp as any;
+          const ts = typeof rawTs === "number" ? (rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs) : (typeof rawTs === "string" ? (() => { const n = Number(rawTs); return !Number.isNaN(n) ? (n < 1e12 ? Math.round(n * 1000) : n) : Date.now(); })() : Date.now());
+          const p = { timestamp: ts, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
           const key = dedupeKey(p);
           if (seen.has(key)) continue;
           seen.add(key);
@@ -673,31 +662,77 @@ export function App() {
           lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
         }
         positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        // ensure we show the latest persisted time on reload
+        setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
         // Build initial UI from persisted positions
         processPositions(positionsAll);
       } else {
         try {
-          const s = typeof window !== "undefined" ? window.localStorage.getItem(LS_RAW_SNAPSHOTS) : null;
-          if (s) {
-            const parsed = JSON.parse(s);
-            if (Array.isArray(parsed)) {
-              for (const snap of parsed) {
-                try {
-                  const comp = snap.data?.components?.[0];
-                  if (!comp) continue;
-                  const p = { timestamp: snap.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
-                  const key = dedupeKey(p);
-                  if (seen.has(key)) continue;
-                  seen.add(key);
-                  positionsAll.push(p);
-                  const deviceKey = String(comp.device ?? comp.source ?? "unknown");
-                  lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
-                } catch (e) {
-                  // ignore malformed persisted entry
+          // Prefer the per-device persisted format when available
+          const storedByDeviceRaw = typeof window !== "undefined" ? window.localStorage.getItem(LS_RAW_BY_DEVICE) : null;
+          if (storedByDeviceRaw) {
+            try {
+              const parsedByDevice = JSON.parse(storedByDeviceRaw);
+              if (parsedByDevice && typeof parsedByDevice === "object") {
+                for (const [k, arr] of Object.entries(parsedByDevice)) {
+                  if (!Array.isArray(arr)) continue;
+                  const snaps = normalizeSnapshots(arr as any);
+                  for (const snap of snaps) {
+                    try {
+                      const comp = snap.data?.components?.[0];
+                      if (!comp) continue;
+                      const p = { timestamp: snap.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
+                      const key = dedupeKey(p);
+                      if (seen.has(key)) continue;
+                      seen.add(key);
+                      positionsAll.push(p);
+                      const deviceKey = String(comp.device ?? comp.source ?? "unknown");
+                      lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
+                    } catch (e) {
+                      // ignore malformed persisted entry
+                    }
+                  }
                 }
+                positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+                // ensure we show the latest persisted time on reload
+                setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
+                processPositions(positionsAll);
               }
-              positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-              processPositions(positionsAll);
+            } catch (e) {
+              // ignore parse errors and fall back to single-array persisted snapshots
+            }
+          } else {
+            const s = typeof window !== "undefined" ? window.localStorage.getItem(LS_RAW_SNAPSHOTS) : null;
+            if (s) {
+              const parsed = JSON.parse(s);
+              if (Array.isArray(parsed)) {
+                for (const snap of parsed) {
+                  try {
+                    const comp = snap.data?.components?.[0];
+                    if (!comp) continue;
+                    // normalize timestamps that may be stored in seconds
+                    const rawTs = snap.timestamp;
+                    const ts = typeof rawTs === "number"
+                      ? rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs
+                      : typeof rawTs === "string"
+                        ? (() => { const n = Number(rawTs); return !Number.isNaN(n) ? (n < 1e12 ? Math.round(n * 1000) : n) : Date.now(); })()
+                        : Date.now();
+                    const p = { timestamp: ts, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
+                    const key = dedupeKey(p);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    positionsAll.push(p);
+                    const deviceKey = String(comp.device ?? comp.source ?? "unknown");
+                    lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
+                  } catch (e) {
+                    // ignore malformed persisted entry
+                  }
+                }
+                positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+                // ensure we show the latest persisted time on reload
+                setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
+                processPositions(positionsAll);
+              }
             }
           }
         } catch (e) {
@@ -708,197 +743,7 @@ export function App() {
       /* ignore seeding errors */
     }
 
-    function processPositions(positions: any[], nameMap?: Record<string, string>) {
-      if (!positions || positions.length === 0) return;
-      const nameMapLocal = nameMap ?? deviceNames;
-      // Attach an explicit device key to each position (prefer deviceId, fallback to `source`)
-      const positionsWithDevice = positions.map((p) => {
-        const deviceKey = p.deviceId != null ? String(p.deviceId) : p.source ?? "unknown";
-        return { ...p, device: deviceKey };
-      });
-
-      // Convert to measurements and build simple snapshots (UI-only)
-      const first = positionsWithDevice[0];
-      if (!first) return;
-      const baseLat = first.lat;
-      const baseLon = first.lon;
-      setRefLat(baseLat);
-      setRefLon(baseLon);
-
-      // Group positions per device and sort each device stream by timestamp
-      const posByDevice = new Map<string, any[]>();
-      for (const p of positionsWithDevice) {
-        const key = String(p.device ?? p.source ?? "unknown");
-        if (!posByDevice.has(key)) posByDevice.set(key, []);
-        posByDevice.get(key)!.push(p);
-      }
-      for (const arr of posByDevice.values()) arr.sort((a, b) => a.timestamp - b.timestamp);
-
-      // Convert all positions into meters (per-device) and compute world bounds (min/max)
-      const metersByDevice = new Map<string, any[]>();
-      for (const [deviceKey, arr] of posByDevice) {
-        const mp = arr.map((p) => {
-          const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
-          const raw = (p as any).raw;
-          const speed = typeof raw?.speed === "number" ? raw.speed : p.speed;
-          return {
-            lat: p.lat,
-            lon: p.lon,
-            accuracy: p.accuracy ?? 50,
-            timestamp: p.timestamp,
-            source: p.source,
-            x,
-            y,
-            speed,
-            device: deviceKey,
-          };
-        });
-        metersByDevice.set(deviceKey, mp);
-      }
-
-      // Compute derived speeds per device (based on consecutive measurements for the same device)
-      for (const mp of metersByDevice.values()) {
-        for (let i = 0; i < mp.length; i++) {
-          const cur = mp[i] as any;
-          const prev = mp[i - 1] as any | undefined;
-          if (prev && typeof cur.timestamp === "number" && typeof prev.timestamp === "number") {
-            const dt = (cur.timestamp - prev.timestamp) / 1000;
-            if (dt > 0) {
-              const dx = cur.x - prev.x;
-              const dy = cur.y - prev.y;
-              cur.speed = Math.sqrt(dx * dx + dy * dy) / dt;
-            } else {
-              cur.speed = cur.speed ?? 0;
-            }
-          } else {
-            cur.speed = cur.speed ?? 0;
-          }
-        }
-      }
-
-      const initialBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
-      let worldBoundsLocal = initialBounds;
-      for (const mp of metersByDevice.values()) {
-        for (const p of mp) {
-          worldBoundsLocal = {
-            minX: Math.min(worldBoundsLocal.minX, p.x),
-            minY: Math.min(worldBoundsLocal.minY, p.y),
-            maxX: Math.max(worldBoundsLocal.maxX, p.x),
-            maxY: Math.max(worldBoundsLocal.maxY, p.y),
-          };
-        }
-      }
-
-      // Build raw per-position snapshots (history of measurements), keep per-device and merged lists
-      const rawByDevice: Record<string, Snapshot[]> = {};
-      const mergedRaw: Snapshot[] = [];
-      for (const [deviceKey, mp] of metersByDevice) {
-        const rawArr: Snapshot[] = mp.map((p) => ({
-          timestamp: p.timestamp,
-          data: {
-            components: [
-              {
-                mean: [p.x, p.y] as [number, number],
-                cov: measurementCovFromAccuracy(p.accuracy),
-                accuracy: p.accuracy,
-                weight: 1,
-                source: p.source,
-                lat: p.lat,
-                lon: p.lon,
-                raw: true,
-                speed: p.speed,
-                device: deviceKey,
-                deviceName: nameMapLocal?.[deviceKey] ?? undefined,
-              },
-            ],
-          },
-        }));
-        rawArr.sort((a, b) => a.timestamp - b.timestamp);
-        rawByDevice[deviceKey] = rawArr;
-        mergedRaw.push(...rawArr);
-      }
-      mergedRaw.sort((a, b) => a.timestamp - b.timestamp);
-      // Merge per-device histories to preserve each device's location history
-      setRawSnapshotsByDevice((prevByDevice) => {
-        const mergedByDevice: Record<string, Snapshot[]> = { ...(prevByDevice ?? {}) };
-        for (const [deviceKey, arr] of Object.entries(rawByDevice)) {
-          const existing = mergedByDevice[deviceKey] ?? [];
-          mergedByDevice[deviceKey] = mergeSnapshots(existing, arr).sort((a, b) => a.timestamp - b.timestamp);
-        }
-        const mergedArray = Object.values(mergedByDevice).flat().sort((a, b) => a.timestamp - b.timestamp);
-        setRawSnapshots(mergedArray);
-        return mergedByDevice;
-      });
-
-      // Convert to engine measurements and run each device through its own Engine instance
-      const engineByDevice: Record<string, Snapshot[]> = {};
-      const mergedEngine: Snapshot[] = [];
-      (async () => {
-        const { Engine } = await import("@/engine/engine");
-        for (const [deviceKey, mp] of metersByDevice) {
-          const measurements = mp.map((p) => ({
-            mean: [p.x, p.y] as [number, number],
-            cov: measurementCovFromAccuracy(p.accuracy),
-            timestamp: p.timestamp,
-            source: p.source,
-            accuracy: p.accuracy,
-            lat: p.lat,
-            lon: p.lon,
-            speed: p.speed,
-          }));
-
-          const enginePerDevice = new Engine();
-          const measurementsSorted = measurements.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-          const engineSnapRaw = enginePerDevice.processMeasurements(measurementsSorted);
-
-          const engineSnap: Snapshot[] = engineSnapRaw.map((s, idx) => {
-            const m = measurementsSorted[idx];
-            const prevM = measurementsSorted[idx - 1];
-            const comps = s.data.components.map((c: any) => {
-              const { lambda1, lambda2 } = eigenDecomposition(c.cov);
-              const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
-
-              // Prefer mixture's movement confidence if available
-              let action = (c.action as string | undefined) ?? "still";
-
-              // compute a display speed if possible (meters/second) from device or derived from consecutive measurements
-              let displaySpeed: number | undefined = undefined;
-              if (typeof m?.speed === "number") {
-                displaySpeed = m.speed;
-              } else if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
-                const dt = (m.timestamp - prevM.timestamp) / 1000;
-                if (dt > 0) {
-                  const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
-                  const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
-                  displaySpeed = Math.sqrt(dx * dx + dy * dy) / dt;
-                }
-              }
-
-              // fallback movement detection when mixture didn't supply an action
-              if (!c.action && typeof displaySpeed === "number") {
-                const speedThreshold = 0.5; // m/s (fallback threshold)
-                if (displaySpeed > speedThreshold) action = "moving";
-              }
-
-              return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceKey, deviceName: nameMapLocal?.[deviceKey] ?? undefined };
-            });
-            return { timestamp: s.timestamp, data: { components: comps } };
-          });
-
-          engineSnap.sort((a, b) => a.timestamp - b.timestamp);
-          engineByDevice[deviceKey] = engineSnap;
-          mergedEngine.push(...engineSnap);
-        }
-
-        mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
-        setEngineSnapshotsByDevice(engineByDevice);
-
-        // default timeline time to the latest raw snapshot (history should be raw)
-        setTimelineTime(mergedRaw[mergedRaw.length - 1]?.timestamp ?? mergedEngine[mergedEngine.length - 1]?.timestamp ?? Date.now());
-        // store world bounds somewhere (pass into CanvasView via state)
-        setWorldBounds(worldBoundsLocal);
-      })();
-    }
+    // Use shared `processPositions` defined above (duplicate removed)
 
     // close any previous client before creating a new one
     clientCloseRef.current?.();

@@ -3,6 +3,28 @@ import type { ComponentUI } from "@/ui/types";
 import { eigenDecomposition } from "@/util/gaussian";
 import type { Cov2 } from "@/util/gaussian";
 
+// compact color helpers (smaller, easier to read)
+function hexToRgba(hex: string, a: number) {
+  const h = (hex || "").replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
+
+function hexTintRgba(hex: string, factor = 0.2, alpha = 1) {
+  const h = (hex || "").replace("#", "");
+  if (h.length !== 6) return hexToRgba(hex, alpha);
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const blend = (n: number) => Math.round(Math.min(255, Math.max(0, n + (255 - n) * factor)));
+  return `rgba(${blend(r)}, ${blend(g)}, ${blend(b)}, ${alpha})`;
+}
+
+const DEFAULT_PALETTE = ["#5B8CFF", "#60D394", "#FFD36E", "#FF8560", "#C77DFF", "#60C6FF"];
+const ANGLES = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, Math.PI];
+
 type Props = {
   width?: number;
   height?: number;
@@ -20,47 +42,63 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
+
+    // handle high-DPI displays (draw in device pixels, scale ctx for CSS pixels)
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const pixelWidth = Math.max(1, Math.round(width * dpr));
+    const pixelHeight = Math.max(1, Math.round(height * dpr));
+    if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+    }
+    // scale context so that drawing uses CSS pixels
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
-    // transparent background so the underlying map can show through
 
     let cx = width / 2;
     let cy = height / 2;
     let localZoom = zoom ?? 1;
-    // normalize components for calculations (mean/cov/weight)
-    const processed = components.map((c) => {
-      const mean: [number, number] =
-        Array.isArray(c.mean) && c.mean.length === 2 && typeof c.mean[0] === "number" && typeof c.mean[1] === "number"
-          ? (c.mean as [number, number])
-          : [0, 0];
-      const cov: Cov2 =
-        Array.isArray(c.cov) && c.cov.length === 3 && c.cov.every((n) => typeof n === "number")
-          ? (c.cov as Cov2)
-          : typeof c.accuracy === "number"
-          ? [c.accuracy * c.accuracy, 0, c.accuracy * c.accuracy]
-          : [100, 0, 100];
+    const processed = components.map((c, idx) => {
+      const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
+      const cov: Cov2 = Array.isArray(c.cov) && c.cov.length === 3 ? (c.cov as Cov2) : typeof c.accuracy === "number" ? [c.accuracy ** 2, 0, c.accuracy ** 2] : [100, 0, 100];
       const weight = typeof c.weight === "number" ? c.weight : 1;
       const isEstimate = !!(c as any).estimate;
       const isRaw = !!(c as any).raw;
       const isTransient = !!(c as any).spawnedDuringMovement;
-      return { ...c, mean, cov, weight, isEstimate, isRaw, isTransient };
+      let lambda1 = 0, lambda2 = 0, angle = 0;
+      try {
+        const ed = eigenDecomposition(cov);
+        lambda1 = ed.lambda1;
+        lambda2 = ed.lambda2;
+        angle = ed.angle;
+      } catch { }
+      const color = String(DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length] || DEFAULT_PALETTE[0]);
+      const deviceName = String((c as any).deviceName ?? (c as any).device ?? (c as any).source ?? "");
+      const action = typeof (c as any).action === "string" ? (c as any).action : "still";
+      const speedVal = typeof (c as any).speed === "number" ? (c as any).speed : undefined;
+      const accuracyMeters = typeof (c as any).accuracyMeters === "number" ? (c as any).accuracyMeters : Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
+      let label = `${accuracyMeters}m ${action}`;
+      if (action === "moving" && speedVal) {
+        const kmh = speedVal * 3.6;
+        label = `${accuracyMeters}m ${kmh < 10 ? kmh.toFixed(1) : Math.round(kmh)} km/h`;
+      }
+      return { ...c, mean, cov, weight, isEstimate, isRaw, isTransient, lambda1, lambda2, angle, color, deviceName, label };
     });
 
     let anchorX = refMeters?.x ?? 0;
     let anchorY = refMeters?.y ?? 0;
 
-    if (fitToBounds || !refMeters || typeof zoom !== "number") {
+    if (fitToBounds || !refMeters || zoom == null) {
       if (processed.length > 0) {
-        let minX = Number.POSITIVE_INFINITY;
-        let minY = Number.POSITIVE_INFINITY;
-        let maxX = Number.NEGATIVE_INFINITY;
-        let maxY = Number.NEGATIVE_INFINITY;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const c of processed) {
           minX = Math.min(minX, c.mean[0]);
           maxX = Math.max(maxX, c.mean[0]);
           minY = Math.min(minY, c.mean[1]);
           maxY = Math.max(maxY, c.mean[1]);
         }
-        // If a worldBounds prop is provided, use that for the extents
         if (worldBounds) {
           minX = Math.min(minX, worldBounds.minX);
           minY = Math.min(minY, worldBounds.minY);
@@ -69,25 +107,11 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
         }
         const widthMeters = Math.max(1, maxX - minX);
         const heightMeters = Math.max(1, maxY - minY);
-        const pad = 0.86; // leave some padding
-        // Compute maximum radius from covariances so a very large uncertainty doesn't blow up the zoom
-        let maxRadiusMeters = 0;
-        for (const c of processed) {
-          try {
-            const { lambda1, lambda2 } = eigenDecomposition(c.cov);
-            const r = Math.sqrt(Math.max(lambda1, lambda2));
-            if (r > maxRadiusMeters) maxRadiusMeters = r;
-          } catch (e) {
-            // ignore invalid covariance
-          }
-        }
-        // Compute scale independently for X and Y to preserve aspect ratio
-        const xScale = (width * pad) / widthMeters;
-        const yScale = (height * pad) / heightMeters;
+        const xScale = (width * 0.86) / widthMeters;
+        const yScale = (height * 0.86) / heightMeters;
         localZoom = Math.min(xScale, yScale);
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
-        // Determine anchor: if fitToBounds, center on bounding center; otherwise use refMeters or 0.
         anchorX = fitToBounds ? centerX : refMeters?.x ?? 0;
         anchorY = fitToBounds ? centerY : refMeters?.y ?? 0;
         cx = width / 2;
@@ -101,22 +125,15 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       cy = height / 2;
     }
 
-    const hexToRgba = (h: string, a: number) => {
-      const hex = h.replace("#", "");
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const bb = parseInt(hex.substring(4, 6), 16);
-      return `rgba(${r}, ${g}, ${bb}, ${a})`;
-    };
-    const palette = ["#5B8CFF", "#60D394", "#FFD36E", "#FF8560", "#C77DFF", "#60C6FF"];
-    // Prepare draw items with geometry and visual metadata
     const drawItems = processed.map((c, idx) => {
       const x = cx + (c.mean[0] - anchorX) * localZoom;
-      const y = cy - (c.mean[1] - anchorY) * localZoom; // y flip
-      const { lambda1, lambda2, angle } = eigenDecomposition(c.cov);
+      const y = cy - (c.mean[1] - anchorY) * localZoom;
+      const lambda1 = c.lambda1 || 0;
+      const lambda2 = c.lambda2 || 0;
+      const angle = c.angle || 0;
       const a = Math.sqrt(Math.max(1e-6, lambda1)) * localZoom;
       const b = Math.sqrt(Math.max(1e-6, lambda2)) * localZoom;
-      const color = palette[idx % palette.length] ?? "#5B8CFF";
+      const color = String(c.color || DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length]);
       const weightAlpha = Math.max(0.06, Math.min(1, c.weight));
       let fillAlpha = Math.max(0.04, Math.min(0.6, weightAlpha * 0.5));
       let strokeAlpha = Math.max(0.12, Math.min(0.9, weightAlpha * 0.9));
@@ -126,12 +143,47 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
       } else if (c.isRaw) {
         fillAlpha = Math.min(fillAlpha, 0.36);
       }
-      if ((c as any).isTransient) {
+      if (c.isTransient) {
         fillAlpha = Math.min(fillAlpha, 0.12);
         strokeAlpha = Math.min(strokeAlpha, 0.28);
       }
       const dotSize = Math.max(2, Math.min(6, Math.round((c.isEstimate ? 6 : 4) * localZoom)));
-      return { idx, c, x, y, a, b, angle, color, fillAlpha, strokeAlpha, dotSize, lambda1, lambda2 };
+
+      ctx.font = `12px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+      const labelWidth = ctx.measureText((c as any).label || "").width;
+      ctx.font = `11px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+      const deviceWidth = (c as any).deviceName ? ctx.measureText((c as any).deviceName).width : 0;
+
+      const swatchRadius = Math.max(3, Math.round(dotSize));
+      const leftIconsWidth = swatchRadius * 2 + 4;
+      const textWidth = Math.max(labelWidth + 14, deviceWidth);
+      const rectW = textWidth + 16 + leftIconsWidth;
+      const deviceAreaH = (c as any).deviceName ? 11 + 4 + 4 : 0;
+      const labelAreaH = 12 + 8;
+      const rectH = deviceAreaH + labelAreaH;
+      const ellipseRect = { x: x - a - 4, y: y - b - 4, w: 2 * a + 8, h: 2 * b + 8 };
+      const baseOffset = Math.max(8, Math.round(dotSize) + 8);
+
+      return {
+        idx,
+        c,
+        x,
+        y,
+        a,
+        b,
+        angle,
+        color,
+        fillAlpha,
+        strokeAlpha,
+        swatchRadius,
+        leftIconsWidth,
+        rectW,
+        rectH,
+        deviceAreaH,
+        labelAreaH,
+        ellipseRect,
+        baseOffset,
+      };
     });
 
     // Draw ellipses sorted so that larger radii are drawn first (smaller radii on top)
@@ -154,73 +206,33 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
         const { x, y, a, b, angle, color, fillAlpha, strokeAlpha, c } = item;
         ctx.save();
         ctx.globalAlpha = 1;
-        ctx.fillStyle = hexToRgba(color, fillAlpha);
+        ctx.fillStyle = hexToRgba(String(color), fillAlpha);
         ctx.beginPath();
         ctx.ellipse(x, y, a, b, angle, 0, Math.PI * 2);
         ctx.fill();
         ctx.lineWidth = c.isEstimate ? 3 : 2;
-        ctx.strokeStyle = hexToRgba(color, strokeAlpha);
+        ctx.strokeStyle = hexToRgba(String(color), strokeAlpha);
         ctx.stroke();
         ctx.restore();
       }
 
-// central device dot is now drawn on the label (moved from device center)
-    // no center dot is drawn here.
-
       // Now prepare labels and place them to avoid collisions (radial candidate search)
       const placedRects: { x: number; y: number; w: number; h: number }[] = [];
+      let anyPulse = false;
 
       for (const item of drawItems) {
-        const { x, y, a, b, dotSize, c, lambda1, lambda2 } = item;
+        const { x, y, a, b, c, swatchRadius, leftIconsWidth, rectW, rectH, deviceAreaH, labelAreaH, ellipseRect, baseOffset, idx } = item;
         if (!c.isEstimate) continue;
-        const accuracyMeters = typeof (c as any).accuracyMeters === "number" ? (c as any).accuracyMeters : Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
-        const action = typeof (c as any).action === "string" ? (c as any).action : "still";
-        const speedVal = typeof (c as any).speed === "number" ? (c as any).speed : undefined;
-        // remove dot separator from label; use the swatch as the device dot instead
-        let label = `${accuracyMeters}m ${action}`;
-        if (action === "moving" && typeof speedVal === "number") {
-          const kmh = speedVal * 3.6;
-          const speedText = kmh < 10 ? `${kmh.toFixed(1)} km/h` : `${Math.round(kmh)} km/h`;
-          label = `${accuracyMeters}m ${speedText}`;
-        }
 
-        const deviceName = String((c as any).deviceName ?? (c as any).device ?? (c as any).source ?? "");
-        const paddingX = 8;
-        const paddingY = 4;
-        const fontSize = 12;
-        const deviceFontSize = 11;
+        const label = (c as any).label ?? "";
+        const deviceName = String((c as any).deviceName ?? "");
 
-        // measure widths
-        ctx.font = `${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
-        const labelWidth = ctx.measureText(label).width;
-        ctx.font = `${deviceFontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
-        const deviceWidth = deviceName ? ctx.measureText(deviceName).width : 0;
-
-        // swatch size uses the scaled dot size from the device; add a small gap so bottom-row label doesn't touch the swatch
-        const swatchRadius = Math.max(3, Math.round(dotSize));
-        const iconsGap = 4; // small gap between swatch and bottom label text
-        const leftIconsWidth = swatchRadius * 2 + iconsGap;
-
-        const textWidth = Math.max(labelWidth + 14, deviceWidth);
-        const rectW = textWidth + paddingX * 2 + leftIconsWidth;
-        const extraNameTop = 4; // additional top padding for device name
-        const deviceAreaH = deviceName ? deviceFontSize + paddingY + extraNameTop : 0;
-        const labelAreaH = fontSize + paddingY * 2;
-        const rectH = deviceAreaH + labelAreaH;
-
-        const ellipseMargin = 4;
-        const ellipseRect = { x: x - a - ellipseMargin, y: y - b - ellipseMargin, w: 2 * a + ellipseMargin * 2, h: 2 * b + ellipseMargin * 2 };
-
-        // generate radial candidate positions
-        const baseOffset = Math.max(8, Math.round(dotSize) + 8);
-        const maxSteps = 6;
-        const angles = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, Math.PI];
-
+        // generate radial candidate positions using precomputed sizes
         let bestCandidate: { x: number; y: number; conflicts: number; dist: number } | null = null;
 
-        for (let step = 0; step <= maxSteps; step++) {
+        for (let step = 0; step <= 4; step++) {
           const r = baseOffset + step * (rectH + 6);
-          for (const angle of angles) {
+          for (const angle of ANGLES) {
             const dx = r * Math.cos(angle);
             const dy = r * Math.sin(angle);
             let candidateX = dx >= 0 ? x + dx : x + dx - rectW;
@@ -252,17 +264,7 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
           if (bestCandidate && bestCandidate.conflicts === 0) break;
         }
 
-        let finalRect = null as { x: number; y: number; w: number; h: number } | null;
-        if (bestCandidate) {
-          finalRect = { x: bestCandidate.x, y: bestCandidate.y, w: rectW, h: rectH };
-        } else {
-          // fallback to right side clamped
-          let rectX = x + baseOffset;
-          if (rectX + rectW > width) rectX = x - baseOffset - rectW;
-          rectX = Math.min(Math.max(rectX, 2), Math.max(2, width - rectW - 2));
-          const rectY = Math.min(Math.max(y - rectH / 2, 2), Math.max(2, height - rectH - 2));
-          finalRect = { x: rectX, y: rectY, w: rectW, h: rectH };
-        }
+        let finalRect = bestCandidate ? { x: bestCandidate.x, y: bestCandidate.y, w: rectW, h: rectH } : { x: Math.min(Math.max(x + baseOffset, 2), width - rectW - 2), y: Math.min(Math.max(y - rectH / 2, 2), height - rectH - 2), w: rectW, h: rectH };
 
         // draw label with color swatch
         const candidateRect = finalRect;
@@ -273,10 +275,10 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
         ctx.strokeRect(candidateRect.x + 0.5, candidateRect.y + 0.5, candidateRect.w - 1, candidateRect.h - 1);
 
         // color swatch (main device dot moved from the map center)
-        const swatchX = candidateRect.x + paddingX + swatchRadius;
+        const swatchX = candidateRect.x + 8 + swatchRadius;
         const swatchY = candidateRect.y + (deviceAreaH + labelAreaH / 2);
         ctx.beginPath();
-        ctx.fillStyle = item.color ?? "#5B8CFF";
+        ctx.fillStyle = String(item.color ?? DEFAULT_PALETTE[0]);
         ctx.arc(swatchX, swatchY, swatchRadius, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = "rgba(0,0,0,0.06)";
@@ -285,56 +287,55 @@ export const CanvasView: React.FC<Props> = ({ width = 800, height = 600, compone
 
         // pulse border if moving (draw around the label swatch)
         const isMoving = (c as any).action === "moving" || (typeof (c as any).speed === "number" && (c as any).speed > 0.5);
-        let pulse = 0;
         if (isMoving) {
+          anyPulse = true;
           const period = 800; // ms
-          pulse = 0.5 + 0.5 * Math.sin((now as number) * (2 * Math.PI) / period + item.idx);
-        }
-        const outerStrokeW = 1 + 3 * pulse;
-        const outerAlpha = 0.65 + 0.35 * pulse;
-        if (outerStrokeW > 0) {
+          const pulse = 0.5 + 0.5 * Math.sin((now as number) * (2 * Math.PI) / period + item.idx);
+          const outerStrokeW = 1 + 3 * pulse;
+          const outerAlpha = 0.65 + 0.35 * pulse;
           ctx.beginPath();
           ctx.lineWidth = outerStrokeW;
-          ctx.strokeStyle = hexToRgba(item.color ?? "#5B8CFF", outerAlpha);
-          ctx.arc(swatchX, swatchY, swatchRadius + outerStrokeW / 2 + 1, 0, Math.PI * 2);
+          // make the pulsing ring sit a bit closer to the swatch and use a slightly tinted color
+          const pulseRadius = Math.max(1, swatchRadius + outerStrokeW / 2 - 1);
+          ctx.strokeStyle = hexTintRgba(String(item.color ?? DEFAULT_PALETTE[0]), 0.36, outerAlpha);
+          ctx.arc(swatchX, swatchY, pulseRadius, 0, Math.PI * 2);
           ctx.stroke();
         }
 
         // Draw device name and label text
         // Place the device name flush with the left padding, while the label text sits after the swatch on the bottom row
-        const textXLabel = candidateRect.x + paddingX + leftIconsWidth;
-        const textXName = candidateRect.x + paddingX; // allow device name to sit close to label edge
+        const textXLabel = candidateRect.x + 8 + leftIconsWidth;
+        const textXName = candidateRect.x + 8; // allow device name to sit close to label edge
         if (deviceName) {
-          ctx.font = `${deviceFontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+          ctx.font = `11px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
           ctx.textBaseline = "middle";
           ctx.fillStyle = "#333";
-          ctx.fillText(deviceName, textXName, candidateRect.y + extraNameTop + deviceFontSize / 2);
+          ctx.fillText(deviceName, textXName, candidateRect.y + 4 + 11 / 2);
         }
 
-        ctx.font = `${fontSize}px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
+        ctx.font = `12px system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial`;
         ctx.fillStyle = "#111";
         ctx.fillText(label, textXLabel, candidateRect.y + deviceAreaH + labelAreaH / 2);
 
         placedRects.push(candidateRect);
       }
+
+      // Schedule next frame if any items are pulsing
+      if (anyPulse && !destroyed) {
+        rafId = requestAnimationFrame(render);
+      } else {
+        rafId = null;
+      }
     }
 
-    // start render loop: if any moving components, animate; else do a single frame
-      const hasMoving = drawItems.some((item) => {
-        const c = item.c as any;
-        return c?.action === "moving" || (typeof c?.speed === "number" && c.speed > 0.5);
-      });
+    // draw once immediately; render() will continue to schedule frames while needed
+    render();
 
-      // draw once immediately
-      render();
-      if (hasMoving) {
-        rafId = requestAnimationFrame(render);
-      }
-
-      return () => {
-        destroyed = true;
-        if (rafId != null) cancelAnimationFrame(rafId);
-      };  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds]);
+    return () => {
+      destroyed = true;
+      if (rafId != null) cancelAnimationFrame(rafId);
+    };
+  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 };

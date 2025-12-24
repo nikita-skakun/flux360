@@ -44,3 +44,33 @@ export function mergeSnapshots(prev: Snapshot[], next: Snapshot[]) {
 
   return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
 }
+
+/**
+ * Normalize timestamps on persisted snapshots that may be in seconds.
+ * Returns a new sorted array with timestamps in milliseconds.
+ */
+export function normalizeSnapshots(snaps: Snapshot[]) {
+  if (!Array.isArray(snaps)) return [];
+  return snaps
+    .map((s) => {
+      const rawTs = (s as any)?.timestamp;
+      let ts: number;
+      if (typeof rawTs === "number") {
+        ts = rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs;
+      } else if (typeof rawTs === "string") {
+        const n = Number(rawTs);
+        ts = !Number.isNaN(n) ? (n < 1e12 ? Math.round(n * 1000) : n) : Date.now();
+      } else {
+        ts = Date.now();
+      }
+      return { ...s, timestamp: ts } as Snapshot;
+    })
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export function pruneSnapshots(snaps: Snapshot[], sinceMs: number) {
+  if (!Array.isArray(snaps)) return [];
+  return snaps
+    .filter((s) => typeof s?.timestamp === "number" && s.timestamp >= sinceMs)
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
