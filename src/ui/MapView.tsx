@@ -4,6 +4,16 @@ import L from "leaflet";
 import React, { useEffect, useRef, useState } from "react";
 import type { ComponentUI } from "@/ui/types";
 
+// color palette must match the one used in CanvasView for consistent device coloring
+const DEFAULT_PALETTE: Array<[number, number, number]> = [
+  [91, 140, 255],
+  [96, 211, 148],
+  [255, 211, 110],
+  [255, 133, 96],
+  [199, 125, 255],
+  [96, 198, 255],
+];
+
 type Props = {
   components: ComponentUI[];
   refLat: number | null;
@@ -89,6 +99,11 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     map.on("move", updateTransform);
     map.on("zoom", updateTransform);
 
+    // close any open cluster chooser when the map view starts moving/zooming
+    const closeClusterPopup = () => setClusterPopup(null);
+    map.on("movestart", closeClusterPopup);
+    map.on("zoomstart", closeClusterPopup);
+
     // click handler to detect clusters via CanvasView's hit tester
     const onMapClick = (ev: L.LeafletMouseEvent) => {
       try {
@@ -97,13 +112,13 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
         if (hit && hit.items && hit.items.length > 0) {
           if (hit.items.length === 1) {
             // auto-select single item (parse device id as number when possible)
-            const devKey = (hit.items[0] as any)?.device;
+            const devKey = hit.items[0]!.device;
             const devNum = Number(devKey);
             if (Number.isFinite(devNum)) onSelectDevice?.(devNum);
             setClusterPopup(null);
           } else {
-            // multiple — show chooser
-            setClusterPopup({ x: pt.x, y: pt.y, items: hit.items as ComponentUI[] });
+            // multiple — show chooser anchored at the cluster center returned by the canvas
+            setClusterPopup({ x: hit.x, y: hit.y, items: hit.items as ComponentUI[] });
           }
         } else {
           setClusterPopup(null);
@@ -145,6 +160,8 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     return () => {
       map.off("move", updateTransform);
       map.off("zoom", updateTransform);
+      map.off("movestart", closeClusterPopup);
+      map.off("zoomstart", closeClusterPopup);
       map.off("click", onMapClick);
       map.off("mousemove", onMapMove);
       container.removeEventListener("mouseleave", onMouseLeave);
@@ -211,25 +228,39 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
           fitToBounds={false}
           worldBounds={null}
           selectedDeviceId={selectedDeviceId}
+          openClusterPoint={clusterPopup ? { x: clusterPopup.x, y: clusterPopup.y } : null}
         />
       </div>
 
-      {/* cluster chooser popup (anchored to the clicked map point) */}
+      {/* cluster chooser: radial device icon layout (anchored to clicked map point) */}
       {clusterPopup && (
         <div
           className="pointer-events-auto z-[1002]"
-          style={{ position: "absolute", left: `${clusterPopup.x}px`, top: `${clusterPopup.y}px`, transform: "translate(-50%, -110%)" }}
+          style={{ position: "absolute", left: `${clusterPopup.x}px`, top: `${clusterPopup.y}px`, transform: "translate(-50%, -50%)" }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="bg-white rounded shadow p-2 min-w-[160px]">
-            {clusterPopup.items.map((it, i) => {
-              const deviceName = (it as any).deviceName ?? (it as any).device ?? `device ${i}`;
-              const accuracy = (it as any).accuracyMeters ?? (it as any).accuracy ?? "";
-              const speed = typeof (it as any).speed === "number" ? `${Math.round((it as any).speed * 3.6)} km/h` : "";
+          <div style={{ position: "relative", width: 0, height: 0 }}>
+            {clusterPopup.items.filter(Boolean).map((it, i) => {
+              const n = clusterPopup.items.length;
+              const angle = (i / n) * Math.PI * 2 - Math.PI / 2; // start at top
+              const radius = Math.max(40, 22 + n * 6);
+              const left = Math.round(radius * Math.cos(angle));
+              const top = Math.round(radius * Math.sin(angle));
+
+              // determine color by finding component index and using the shared palette
+              const idx = components.findIndex((c) => Number(c.device) === Number(it.device));
+              const col: [number, number, number] = (idx >= 0 ? DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length] : undefined) ?? [0, 0, 0];
+              const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+
               return (
-                <div key={`${deviceName}-${i}`} className="p-1 hover:bg-gray-100 rounded cursor-pointer" onClick={() => { const did = Number((it as any).device); if (Number.isFinite(did)) onSelectDevice?.(did); setClusterPopup(null); }}>
-                  <div className="text-sm">{deviceName}</div>
-                  <div className="text-xs text-muted">{accuracy ? `${accuracy}m` : null}{accuracy && speed ? " • " : null}{speed}</div>
+                <div key={`${it.device}-${i}`} style={{ position: "absolute", left: `${left}px`, top: `${top}px`, transform: "translate(-50%, -50%)" }}>
+                  <div
+                    className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
+                    onClick={(e) => { e.stopPropagation(); onSelectDevice?.(it.device); setClusterPopup(null); }}
+                    title={String(it.device)}
+                  >
+                    <span className="material-symbols-outlined text-lg" style={{ color: colorStr }}>{it.emoji}</span>
+                  </div>
                 </div>
               );
             })}

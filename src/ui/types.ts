@@ -1,9 +1,9 @@
 export type ComponentUI = {
-  mean?: [number, number];
-  cov?: [number, number, number];
-  weight?: number;
-  accuracy?: number;
-  lat?: number;
-  lon?: number;
-  [key: string]: unknown;
+  device: number;
+  lat: number;
+  lon: number;
+  mean: [number, number];
+  cov: [number, number,number];
+  emoji: string;
+  timestamp: number;
 };
