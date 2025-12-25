@@ -1,8 +1,8 @@
+import { degreesToMeters, metersToDegrees } from "../util/geo";
+import CanvasView, { type CanvasViewHandle } from "./CanvasView";
+import L from "leaflet";
 import React, { useEffect, useRef, useState } from "react";
 import type { ComponentUI } from "@/ui/types";
-import CanvasView from "./CanvasView";
-import { degreesToMeters, metersToDegrees } from "../util/geo";
-import L from "leaflet";
 
 type Props = {
   components: ComponentUI[];
@@ -11,9 +11,11 @@ type Props = {
   worldBounds?: { minX: number; minY: number; maxX: number; maxY: number } | null;
   height?: number | string;
   overlay?: React.ReactNode;
+  onSelectDevice?: (id: number) => void;
+  selectedDeviceId?: number | null;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = null, height = 600, overlay }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = null, height = 600, overlay, onSelectDevice, selectedDeviceId }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -21,6 +23,9 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [pixelsPerMeter, setPixelsPerMeter] = useState<number | undefined>(undefined);
+
+  const canvasApiRef = useRef<CanvasViewHandle | null>(null);
+  const [clusterPopup, setClusterPopup] = useState<{ x: number; y: number; items: ComponentUI[] } | null>(null);
 
   // keep latest refLat/refLon in refs to avoid stale closures
   const refLatRef = useRef<number | null>(refLat);
@@ -37,7 +42,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     const mapContainer = mapDivRef.current;
     if (!mapContainer) return;
 
-    const map = L.map(mapContainer, { attributionControl: false, zoomControl: true });
+    const map = L.map(mapContainer, { attributionControl: false, zoomControl: false });
 
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
@@ -84,11 +89,65 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     map.on("move", updateTransform);
     map.on("zoom", updateTransform);
 
+    // click handler to detect clusters via CanvasView's hit tester
+    const onMapClick = (ev: L.LeafletMouseEvent) => {
+      try {
+        const pt = map.latLngToContainerPoint(ev.latlng);
+        const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
+        if (hit && hit.items && hit.items.length > 0) {
+          if (hit.items.length === 1) {
+            // auto-select single item (parse device id as number when possible)
+            const devKey = (hit.items[0] as any)?.device;
+            const devNum = Number(devKey);
+            if (Number.isFinite(devNum)) onSelectDevice?.(devNum);
+            setClusterPopup(null);
+          } else {
+            // multiple — show chooser
+            setClusterPopup({ x: pt.x, y: pt.y, items: hit.items as ComponentUI[] });
+          }
+        } else {
+          setClusterPopup(null);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    // change pointer when hovering over a device or cluster
+    const onMapMove = (ev: L.LeafletMouseEvent) => {
+      try {
+        const pt = map.latLngToContainerPoint(ev.latlng);
+        const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
+        const container = map.getContainer();
+        if (hit && hit.items && hit.items.length > 0) {
+          container.style.cursor = "pointer";
+        } else {
+          container.style.cursor = "";
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    const container = map.getContainer();
+    const onMouseLeave = () => {
+      try {
+        container.style.cursor = "";
+      } catch (e) { }
+    };
+
+    map.on("click", onMapClick);
+    map.on("mousemove", onMapMove);
+    container.addEventListener("mouseleave", onMouseLeave);
+
     mapRef.current = map;
 
     return () => {
       map.off("move", updateTransform);
       map.off("zoom", updateTransform);
+      map.off("click", onMapClick);
+      map.off("mousemove", onMapMove);
+      container.removeEventListener("mouseleave", onMouseLeave);
       map.remove();
       mapRef.current = null;
     };
@@ -143,6 +202,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
       <div className="absolute inset-0 pointer-events-none z-[1000]">
         <CanvasView
+          ref={canvasApiRef}
           components={components}
           width={size.width}
           height={size.height}
@@ -150,8 +210,32 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
           refMeters={centerMeters}
           fitToBounds={false}
           worldBounds={null}
+          selectedDeviceId={selectedDeviceId}
         />
       </div>
+
+      {/* cluster chooser popup (anchored to the clicked map point) */}
+      {clusterPopup && (
+        <div
+          className="pointer-events-auto z-[1002]"
+          style={{ position: "absolute", left: `${clusterPopup.x}px`, top: `${clusterPopup.y}px`, transform: "translate(-50%, -110%)" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-white rounded shadow p-2 min-w-[160px]">
+            {clusterPopup.items.map((it, i) => {
+              const deviceName = (it as any).deviceName ?? (it as any).device ?? `device ${i}`;
+              const accuracy = (it as any).accuracyMeters ?? (it as any).accuracy ?? "";
+              const speed = typeof (it as any).speed === "number" ? `${Math.round((it as any).speed * 3.6)} km/h` : "";
+              return (
+                <div key={`${deviceName}-${i}`} className="p-1 hover:bg-gray-100 rounded cursor-pointer" onClick={() => { const did = Number((it as any).device); if (Number.isFinite(did)) onSelectDevice?.(did); setClusterPopup(null); }}>
+                  <div className="text-sm">{deviceName}</div>
+                  <div className="text-xs text-muted">{accuracy ? `${accuracy}m` : null}{accuracy && speed ? " • " : null}{speed}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Floating overlay (top-right on desktop, bottom full-width on mobile) */}
       {overlay && (

@@ -19,7 +19,7 @@ test("parsing LS_RAW_BY_DEVICE yields positions with normalized timestamps", () 
     for (const snap of snaps) {
       const comp = snap.data?.components?.[0];
       if (!comp) continue;
-      const p = { timestamp: snap.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
+      const p = { timestamp: snap.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, raw: true };
       positionsAll.push(p);
     }
   }

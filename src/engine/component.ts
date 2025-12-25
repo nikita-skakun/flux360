@@ -1,12 +1,10 @@
-import type { Cov2 } from "@/util/gaussian";
-
 export type Vec2 = [number, number];
+export type Cov2 = [number, number, number];
 
 export type Measurement = {
   mean: Vec2;
   cov: Cov2;
   timestamp?: number;
-  source?: string;
   accuracy?: number;
   raw?: unknown;
   lat?: number;
@@ -19,8 +17,6 @@ export type ComponentState = {
   mean: Vec2;
   cov: Cov2;
   consistency: number; // 0..1
-  source?: string;
-  // optional metadata
   spawnedDuringMovement?: boolean;
   createdAt?: number;
 };
@@ -28,10 +24,6 @@ export type ComponentState = {
 // Small 2x2 matrix helpers operating on Cov2 = [a, b, c] representing [[a, b], [b, c]]
 function addCov(a: Cov2, b: Cov2): Cov2 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-}
-
-function subCov(a: Cov2, b: Cov2): Cov2 {
-  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
 
 function mulCovScalar(a: Cov2, s: number): Cov2 {
@@ -80,23 +72,21 @@ export class Component implements ComponentState {
   mean: Vec2;
   cov: Cov2;
   consistency: number;
-  source?: string;
   // whether this component was spawned while the device/motion indicated movement
   spawnedDuringMovement?: boolean;
   // timestamp (ms) when this component was created
   createdAt?: number;
 
-  constructor(mean: Vec2, cov: Cov2, consistency = 0.9, source?: string) {
+  constructor(mean: Vec2, cov: Cov2, consistency = 0.9) {
     this.mean = [mean[0], mean[1]];
     this.cov = symmetric(cov);
     this.consistency = Math.max(0, Math.min(1, consistency));
-    this.source = source;
     this.spawnedDuringMovement = false;
     this.createdAt = Date.now();
   }
 
   clone(): Component {
-    const c = new Component([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.consistency, this.source);
+    const c = new Component([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.consistency);
     c.spawnedDuringMovement = this.spawnedDuringMovement;
     c.createdAt = this.createdAt;
     return c;

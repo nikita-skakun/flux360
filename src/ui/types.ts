@@ -5,6 +5,5 @@ export type ComponentUI = {
   accuracy?: number;
   lat?: number;
   lon?: number;
-  source?: string;
   [key: string]: unknown;
 };

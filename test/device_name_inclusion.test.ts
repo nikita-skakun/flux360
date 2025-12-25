@@ -31,3 +31,36 @@ test("raw snapshot component includes deviceName when available and omits when n
   };
   expect(Object.prototype.hasOwnProperty.call(comp2, "deviceName")).toBe(false);
 });
+
+
+test("raw snapshot component includes emoji when available and omits when not", () => {
+  const mp = [
+    { x: 1, y: 2, lat: 1, lon: 2, accuracy: 10, timestamp: 1000, speed: 0 },
+  ];
+  const p = mp[0]!;
+  const deviceKey = "42";
+
+  // With an icon mapping
+  const iconMap: Record<string, string> = { "42": "personal_bag" };
+  const deviceIconVal = iconMap?.[deviceKey];
+  const comp: any = {
+    mean: [p.x, p.y],
+    accuracy: p.accuracy,
+    speed: p.speed,
+    device: deviceKey,
+    ...(deviceIconVal ? { emoji: deviceIconVal } : {}),
+  };
+  expect(comp.emoji).toBe("personal_bag");
+
+  // Without an icon mapping
+  const iconMap2: Record<string, string> = {};
+  const deviceIconVal2 = iconMap2?.[deviceKey];
+  const comp2: any = {
+    mean: [p.x, p.y],
+    accuracy: p.accuracy,
+    speed: p.speed,
+    device: deviceKey,
+    ...(deviceIconVal2 ? { emoji: deviceIconVal2 } : {}),
+  };
+  expect(Object.prototype.hasOwnProperty.call(comp2, "emoji")).toBe(false);
+});

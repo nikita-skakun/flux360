@@ -13,7 +13,6 @@ test("stationary_transition", async () => {
       accuracy,
       speed,
       motion,
-      source: "sim",
       lat: 0,
       lon: 0,
     } as any;

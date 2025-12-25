@@ -40,8 +40,8 @@ This layout splits concerns into: data/api, model/engine, UI, and small utilitie
 
 ## Data Flow
 
-1. **Traccar Fetch**: A client module calls the Traccar positions API for a chosen device within a fixed timestamp range. The module normalizes the response into records with latitude, longitude, accuracy, timestamp and source.
-2. **Measurement Conversion**: Each record is converted to a measurement with a mean and covariance. Accuracy becomes measurement noise. Device or source tags determine weight scaling.
+1. **Traccar Fetch**: A client module calls the Traccar positions API for a chosen device within a fixed timestamp range. The module normalizes the response into records with latitude, longitude, accuracy and timestamp.
+2. **Measurement Conversion**: Each record is converted to a measurement with a mean and covariance. Accuracy becomes measurement noise. Device tags determine weight scaling.
 3. **Mixture Engine**: A small engine step runs for each measurement:
 
    * Predict all live components.
@@ -54,17 +54,6 @@ This layout splits concerns into: data/api, model/engine, UI, and small utilitie
 5. **Timeline Control**: A slider allows stepping through the stored slices.
 
 ## Engine Components
-
-### gaussian.ts
-
-Implements 2D Gaussian operations:
-
-* Mean and covariance storage
-* Mahalanobis distance
-* Covariance prediction step
-* Measurement update step
-
-Cherry-pick relevant linear algebra utilities here so everything is contained and well-typed.
 
 ### mixture.ts
 
@@ -170,6 +159,3 @@ Keep `App` lean: it wires the data source, runs the engine and holds the timelin
 * Keep the engine pure and free of DOM/React dependencies for easy testing.
 * Add unit tests for `gaussian.ts` and `mixture.ts` to ensure correctness.
 * Create a very small dataset for deterministic playback and debugging.
-
-
-> Note: This document is a minimal scaffold for the POC. The code layout and implementation details are intentionally kept small and iterative so we can validate assumptions quickly and iterate on the engine and UI.

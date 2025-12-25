@@ -1,13 +1,10 @@
-import { Component, type Measurement } from "./component";
-import type { Cov2 } from "@/util/gaussian";
-import { eigenDecomposition } from "@/util/gaussian";
+import { Component, type Cov2, type Measurement } from "./component";
 
 export type ComponentSnapshot = {
   mean: [number, number];
   cov: Cov2;
   consistency: number;
   weight: number;
-  source?: string;
   action?: "moving" | "still";
   spawnedDuringMovement?: boolean;
   createdAt?: number;
@@ -91,7 +88,7 @@ export class Mixture {
   // Create a spawned candidate component (centralizes createdAt and flags)
   private createSpawnedComponent(m: Measurement, covMultiplier: number, initialConsistency: number, spawnedDuringMovement: boolean): Component {
     const spawnCov: Cov2 = [m.cov[0] * covMultiplier, m.cov[1], m.cov[2] * covMultiplier];
-    const spawned = new Component([m.mean[0], m.mean[1]], spawnCov, initialConsistency, m.source);
+    const spawned = new Component([m.mean[0], m.mean[1]], spawnCov, initialConsistency);
     spawned.spawnedDuringMovement = spawnedDuringMovement;
     spawned.createdAt = m.timestamp ?? Date.now();
     return spawned;
@@ -161,11 +158,11 @@ export class Mixture {
 
     const recentDisp = prevM ? Math.hypot(m.mean[0] - prevM.mean[0], m.mean[1] - prevM.mean[1]) : 0;
 
-    // uncertainty via eigen-decomposition fallback to reported accuracy
+    // uncertainty via covariance diagonals (fallback to reported accuracy)
     let measurementUncertainty = 0;
     try {
-      const { lambda1, lambda2 } = eigenDecomposition(m.cov);
-      measurementUncertainty = Math.sqrt(Math.max(lambda1, lambda2));
+      const diagMax = Math.max((m.cov?.[0] ?? 0), (m.cov?.[2] ?? 0));
+      measurementUncertainty = Math.sqrt(Math.max(1e-6, diagMax));
     } catch (e) {
       measurementUncertainty = (m as any).accuracy ?? 1;
     }
@@ -211,14 +208,14 @@ export class Mixture {
   snapshot(): ComponentSnapshot[] {
     // return deep copy for UI consumption, include recent movement confidence as action
     const action = this.lastLikelyMoving ? "moving" : "still";
-    return this.components.map((c) => ({ mean: [c.mean[0], c.mean[1]], cov: [c.cov[0], c.cov[1], c.cov[2]], consistency: c.consistency, weight: c.consistency, source: c.source, action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt }));
+    return this.components.map((c) => ({ mean: [c.mean[0], c.mean[1]], cov: [c.cov[0], c.cov[1], c.cov[2]], consistency: c.consistency, weight: c.consistency, action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt }));
   }
 
   update(m: Measurement): void {
     if (!m) return;
     if (this.components.length === 0) {
       // initialize with a wide component to reflect initial uncertainty
-      const init = new Component([m.mean[0], m.mean[1]], [m.cov[0] * 4, m.cov[1], m.cov[2] * 4], 1, m.source);
+      const init = new Component([m.mean[0], m.mean[1]], [m.cov[0] * 4, m.cov[1], m.cov[2] * 4], 1);
       init.spawnedDuringMovement = false;
       init.createdAt = m.timestamp ?? Date.now();
       this.components.push(init);
@@ -380,8 +377,8 @@ export class Mixture {
 
         // Retire old distant components relative to the dominant
         try {
-          const { lambda1, lambda2 } = eigenDecomposition(dominant.cov);
-          const dominantRadius = Math.sqrt(Math.max(lambda1, lambda2));
+          const diagMax = Math.max((dominant.cov?.[0] ?? 0), (dominant.cov?.[2] ?? 0));
+          const dominantRadius = Math.sqrt(Math.max(1e-6, diagMax));
           const retireDistance = Math.max(this.retireDistanceMeters, dominantRadius * 4);
 
           for (const c of this.components) {

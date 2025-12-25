@@ -1,22 +1,21 @@
-import { Card, CardContent } from "@/components/ui/card";
 import "./index.css";
+import { computeNextTimelineTime } from "@/lib/timeline";
+import { degreesToMeters } from "./util/geo";
+import { mergeSnapshots, pruneSnapshots, normalizeSnapshots } from "@/lib/snapshots";
+import { TimelineSlider } from "./ui/TimelineSlider";
 import { useEffect, useState, useRef, useMemo } from "react";
 import MapView from "./ui/MapView";
-import { TimelineSlider } from "./ui/TimelineSlider";
 import type { ComponentUI } from "@/ui/types";
-import { degreesToMeters } from "./util/geo";
-import { measurementCovFromAccuracy, eigenDecomposition } from "@/util/gaussian";
-import { mergeSnapshots, pruneSnapshots, normalizeSnapshots } from "@/lib/snapshots";
-import { computeNextTimelineTime } from "@/lib/timeline";
+import type { Cov2 } from "./engine/component";
 
 export function App() {
   type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
   type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
   const [timelineTime, setTimelineTime] = useState<number | null>(null);
-  const [rawSnapshotsByDevice, setRawSnapshotsByDevice] = useState<Record<string, Snapshot[]>>({});
+  const [rawSnapshotsByDevice, setRawSnapshotsByDevice] = useState<Record<number, Snapshot[]>>({});
   const rawSnapshots = useMemo(() => mergedArrayFromByDevice(rawSnapshotsByDevice), [rawSnapshotsByDevice]);
-  const [engineSnapshotsByDevice, setEngineSnapshotsByDevice] = useState<Record<string, Snapshot[]>>({});
+  const [engineSnapshotsByDevice, setEngineSnapshotsByDevice] = useState<Record<number, Snapshot[]>>({});
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
@@ -51,15 +50,15 @@ export function App() {
 
   const [showRaw, setShowRaw] = useState<boolean>(() => {
     const v = safeGetItem(LS_UI_SHOW_RAW);
-    return v == null ? true : v === "1";
+    return v == null || v === "1";
   });
   const [showEstimates, setShowEstimates] = useState<boolean>(() => {
     const v = safeGetItem(LS_UI_SHOW_ESTIMATES);
-    return v == null ? true : v === "1";
+    return v == null || v === "1";
   });
   const [showAllPast, setShowAllPast] = useState<boolean>(() => {
     const v = safeGetItem(LS_UI_SHOW_HISTORY);
-    return v == null ? false : v === "1";
+    return v === "1";
   });
 
   // Persist UI toggles (combined)
@@ -105,23 +104,29 @@ export function App() {
     return undefined;
   }
 
+  function measurementCovFromAccuracy(accuracyMeters: number): Cov2 {
+    const v = accuracyMeters * accuracyMeters;
+    return [v, 0, v];
+  }
+
   async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, any[]>, cutoff: number, nameMapLocal?: Record<string, string>): Promise<Snapshot[]> {
     try {
       const { Engine } = await import("@/engine/engine");
-      const engineByDevice: Record<string, Snapshot[]> = {};
+      const engineByDevice: Record<number, Snapshot[]> = {};
       const mergedEngine: Snapshot[] = [];
 
       for (const [deviceKey, arr] of Object.entries(byDevice)) {
+        const deviceId = Number(deviceKey);
         // Normalize a variety of possible input shapes (snapshots or simple measurement objects)
         const measurements = ((arr ?? [])
           .map((s: any) => {
             if (!s) return null;
             if (s.mean) {
-              return { mean: s.mean, cov: s.cov ?? measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, source: s.source, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
+              return { mean: s.mean, cov: s.cov ?? measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
             }
             const c = s.data?.components?.[0];
-            if (c) return { mean: c.mean, cov: measurementCovFromAccuracy(c.accuracy), timestamp: s.timestamp, source: c.source, accuracy: c.accuracy, lat: c.lat, lon: c.lon, speed: c.speed };
-            if (s.x != null && s.y != null && typeof s.timestamp === "number") return { mean: [s.x, s.y], cov: measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, source: s.source, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
+            if (c) return { mean: c.mean, cov: measurementCovFromAccuracy(c.accuracy), timestamp: s.timestamp, accuracy: c.accuracy, lat: c.lat, lon: c.lon, speed: c.speed };
+            if (s.x != null && s.y != null && typeof s.timestamp === "number") return { mean: [s.x, s.y], cov: measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
             return null;
           })
           .filter(Boolean)) as any[];
@@ -129,7 +134,7 @@ export function App() {
         measurements.sort((a: any, b: any) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 
         if (measurements.length === 0) {
-          engineByDevice[deviceKey] = [];
+          engineByDevice[deviceId] = [];
           continue;
         }
 
@@ -141,23 +146,24 @@ export function App() {
           const m = measurements[idx];
           const prevM = measurements[idx - 1];
           const comps = s_.data.components.map((c: any) => {
-            const { lambda1, lambda2 } = eigenDecomposition(c.cov);
-            const accuracyMeters = Math.round(Math.sqrt(Math.max(lambda1, lambda2)));
+            const diagMax = Math.max((c.cov?.[0] ?? 0), (c.cov?.[2] ?? 0));
+            const accuracyMeters = Math.round(Math.sqrt(Math.max(1e-6, diagMax)));
             let action = (c.action as string | undefined) ?? "still";
             const displaySpeed = computeDisplaySpeed(prevM, m);
             if (!c.action && typeof displaySpeed === "number") {
               const speedThreshold = 0.5;
               if (displaySpeed > speedThreshold) action = "moving";
             }
-            const deviceNameVal = deviceNameValFromMap?.[deviceKey];
-            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceKey, ...(deviceNameVal ? { deviceName: deviceNameVal } : {}) };
+            const deviceNameVal = deviceNameValFromMap?.[deviceId];
+            const deviceIconVal = deviceIconsRef.current?.[deviceId];
+            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceId, ...(deviceNameVal ? { deviceName: deviceNameVal } : {}), ...(deviceIconVal ? { emoji: deviceIconVal } : {}) };
           });
           return { timestamp: s_.timestamp, data: { components: comps } };
         });
 
         engineSnap.sort((a, b) => a.timestamp - b.timestamp);
-        engineByDevice[deviceKey] = pruneSnapshots(engineSnap, cutoff);
-        mergedEngine.push(...engineByDevice[deviceKey]);
+        engineByDevice[deviceId] = pruneSnapshots(engineSnap, cutoff);
+        mergedEngine.push(...engineByDevice[deviceId]);
       }
 
       mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
@@ -234,7 +240,8 @@ export function App() {
           maxX = Math.max(maxX, m[0]);
           maxY = Math.max(maxY, m[1]);
         }
-        setWorldBounds({ minX, minY, maxX, maxY });
+        // Defer setting `worldBounds` to the selected-time logic so historic raw data
+        // does not force an automatic zoom on load.
 
         // On reload, reset timeline to the latest persisted timestamp unconditionally
         setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
@@ -296,7 +303,8 @@ export function App() {
         maxX = Math.max(maxX, m[0]);
         maxY = Math.max(maxY, m[1]);
       }
-      setWorldBounds({ minX, minY, maxX, maxY });
+      // Defer setting `worldBounds` to the selected-time logic so historic raw data
+      // does not force an automatic zoom on load.
 
       // On reload, reset timeline to the latest persisted timestamp unconditionally
       setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
@@ -313,66 +321,75 @@ export function App() {
   const [traccarWsUrl, setTraccarWsUrl] = useState<string | null>(() => safeGetItem("traccar:wsUrl") ?? null);
   const [traccarToken, setTraccarToken] = useState<string | null>(() => safeGetItem("traccar:token") ?? null);
   const clientCloseRef = useRef<(() => void) | null>(null);
-  const [deviceNames, setDeviceNames] = useState<Record<string, string>>({});
-  // Keep a ref of device names so callbacks created inside effects can read the latest mapping
-  const deviceNamesRef = useRef<Record<string, string>>(deviceNames);
+  const [deviceNames, setDeviceNames] = useState<Record<number, string>>({});
+  const [deviceIcons, setDeviceIcons] = useState<Record<number, string>>({});
+  // Keep a ref of device names/icons so callbacks created inside effects can read the latest mapping
+  const deviceNamesRef = useRef<Record<number, string>>(deviceNames);
+  const deviceIconsRef = useRef<Record<number, string>>(deviceIcons);
   useEffect(() => {
     deviceNamesRef.current = deviceNames;
   }, [deviceNames]);
-
-  // Ensure device-friendly names are applied to stored snapshots when device names are discovered/updated
   useEffect(() => {
-    if (!deviceNames || Object.keys(deviceNames).length === 0) return;
+    deviceIconsRef.current = deviceIcons;
+  }, [deviceIcons]);
+
+  // Ensure device-friendly names and icons are applied to stored snapshots when device metadata is discovered/updated
+  useEffect(() => {
+    if ((!deviceNames || Object.keys(deviceNames).length === 0) && (!deviceIcons || Object.keys(deviceIcons).length === 0)) return;
 
     const cutoff = Date.now() - HISTORY_MS;
 
-    // Update raw snapshots per-device to include deviceName where missing or outdated
+    // Update raw snapshots per-device to include deviceName and emoji where missing or outdated
     setRawSnapshotsByDevice((prev) => {
       const prevObj = prev ?? {};
       let changed = false;
-      const out: Record<string, Snapshot[]> = {};
+      const out: Record<number, Snapshot[]> = {};
       for (const [k, arr] of Object.entries(prevObj)) {
+        const deviceId = Number(k);
         const updated = arr.map((s) => {
           const comp = (s.data?.components?.[0] ?? {}) as any;
-          const desired = deviceNames[k] ?? comp?.deviceName;
-          if (comp?.deviceName !== desired) {
+          const desiredName = deviceNames[deviceId] ?? comp?.deviceName;
+          const desiredIcon = deviceIcons[deviceId] ?? comp?.emoji;
+          if (comp?.deviceName !== desiredName || comp?.emoji !== desiredIcon) {
             changed = true;
-            const newComp = { ...comp, deviceName: desired };
+            const newComp = { ...comp, ...(desiredName ? { deviceName: desiredName } : {}), ...(desiredIcon ? { emoji: desiredIcon } : {}) };
             return { ...s, data: { components: [newComp] } } as Snapshot;
           }
           return s;
         });
         const pruned = pruneSnapshots(updated, cutoff);
         if (pruned.length !== arr.length) changed = true;
-        out[k] = pruned;
+        out[deviceId] = pruned;
       }
       return changed ? out : prev;
     });
 
-    // Update engine-derived snapshots as well so estimates show friendly names
+    // Update engine-derived snapshots as well so estimates show friendly names and icons
     setEngineSnapshotsByDevice((prev) => {
       const prevObj = prev ?? {};
       let changed = false;
-      const out: Record<string, Snapshot[]> = {};
+      const out: Record<number, Snapshot[]> = {};
       for (const [k, arr] of Object.entries(prevObj)) {
+        const deviceId = Number(k);
         const updated = arr.map((s) => {
           const comp = (s.data?.components?.[0] ?? {}) as any;
-          const desired = deviceNames[k] ?? comp?.deviceName;
-          if (comp?.deviceName !== desired) {
+          const desiredName = deviceNames[deviceId] ?? comp?.deviceName;
+          const desiredIcon = deviceIcons[deviceId] ?? comp?.emoji;
+          if (comp?.deviceName !== desiredName || comp?.emoji !== desiredIcon) {
             changed = true;
-            const newComp = { ...comp, deviceName: desired };
+            const newComp = { ...comp, ...(desiredName ? { deviceName: desiredName } : {}), ...(desiredIcon ? { emoji: desiredIcon } : {}) };
             return { ...s, data: { components: [newComp] } } as Snapshot;
           }
           return s;
         });
         const pruned = pruneSnapshots(updated, cutoff);
         if (pruned.length !== arr.length) changed = true;
-        out[k] = pruned;
+        out[deviceId] = pruned;
       }
       if (!changed) return prev;
       return out;
     });
-  }, [deviceNames]);
+  }, [deviceNames, deviceIcons]);
 
   const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
   const [wsError, setWsError] = useState<string | null>(null);
@@ -415,10 +432,8 @@ export function App() {
   function processPositions(positions: any[], nameMap?: Record<string, string>) {
     if (!positions || positions.length === 0) return;
     const nameMapLocal = nameMap ?? deviceNamesRef.current;
-    // Attach an explicit device key to each position (prefer deviceId, fallback to `source`)
     const positionsWithDevice = positions.map((p) => {
-      const deviceKey = p.deviceId != null ? String(p.deviceId) : p.source ?? "unknown";
-      return { ...p, device: deviceKey };
+      return { ...p, device: p.deviceId };
     });
 
     // Convert to measurements and build simple snapshots (UI-only)
@@ -430,17 +445,17 @@ export function App() {
     setRefLon(baseLon);
 
     // Group positions per device and sort each device stream by timestamp
-    const posByDevice = new Map<string, any[]>();
+    const posByDevice = new Map<number, any[]>();
     for (const p of positionsWithDevice) {
-      const key = String(p.device ?? p.source ?? "unknown");
+      const key = p.device;
       if (!posByDevice.has(key)) posByDevice.set(key, []);
       posByDevice.get(key)!.push(p);
     }
     for (const arr of posByDevice.values()) arr.sort((a, b) => a.timestamp - b.timestamp);
 
     // Convert all positions into meters (per-device) and compute world bounds (min/max)
-    const metersByDevice = new Map<string, any[]>();
-    for (const [deviceKey, arr] of posByDevice) {
+    const metersByDevice = new Map<number, any[]>();
+    for (const [deviceId, arr] of posByDevice) {
       const mp = arr.map((p) => {
         const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
         const raw = (p as any).raw;
@@ -450,14 +465,13 @@ export function App() {
           lon: p.lon,
           accuracy: p.accuracy ?? 50,
           timestamp: p.timestamp,
-          source: p.source,
           x,
           y,
           speed,
-          device: deviceKey,
+          device: deviceId,
         };
       });
-      metersByDevice.set(deviceKey, mp);
+      metersByDevice.set(deviceId, mp);
     }
 
     // Compute derived speeds per device (based on consecutive measurements for the same device)
@@ -497,18 +511,19 @@ export function App() {
     for (const [deviceKey, mp] of metersByDevice) {
       const rawArr: Snapshot[] = mp.map((p) => {
         const deviceNameVal = nameMapLocal?.[deviceKey];
+        const deviceIconVal = deviceIconsRef.current?.[deviceKey];
         const comp: any = {
           mean: [p.x, p.y] as [number, number],
           cov: measurementCovFromAccuracy(p.accuracy),
           accuracy: p.accuracy,
           weight: 1,
-          source: p.source,
           lat: p.lat,
           lon: p.lon,
           raw: true,
           speed: p.speed,
           device: deviceKey,
           ...(deviceNameVal ? { deviceName: deviceNameVal } : {}),
+          ...(deviceIconVal ? { emoji: deviceIconVal } : {}),
         };
         return { timestamp: p.timestamp, data: { components: [comp] } } as Snapshot;
       });
@@ -551,8 +566,9 @@ export function App() {
       setTimelineTime((prev) =>
         prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? prunedMergedEngine[prunedMergedEngine.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? prunedMergedEngine[prunedMergedEngine.length - 1]?.timestamp ?? Date.now() : prev
       );
-      // store world bounds somewhere (pass into CanvasView via state)
-      setWorldBounds(worldBoundsLocal);
+      // Do not set world bounds from the full incoming positions (which may include history).
+      // World bounds are computed from the UI-selected time and filters so historic raw data
+      // doesn't trigger an automatic zoom.
     })();
 
   }
@@ -571,12 +587,12 @@ export function App() {
     setWsStatus("connecting");
     setWsError(null);
 
-    let lastTimestamps: Record<string, number> = {};
+    const knownDevices = new Set<number>();
     let seen = new Set<string>();
     let positionsAll: any[] = [];
 
     function dedupeKey(p: any) {
-      return `${p.deviceId ?? p.source ?? ""}:${p.timestamp}:${p.lat}:${p.lon}`;
+      return `${p.deviceId}:${p.timestamp}:${p.lat}:${p.lon}`;
     }
 
     function insertSortedByTimestamp(arr: any[], item: any) {
@@ -596,16 +612,14 @@ export function App() {
       if (rawSnapshots && rawSnapshots.length > 0) {
         for (const s of rawSnapshots) {
           const comp = s.data.components[0] as any;
-          const p = { timestamp: s.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, source: comp.source ?? undefined, raw: true };
+          const p = { timestamp: s.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, raw: true };
           const key = dedupeKey(p);
           if (seen.has(key)) continue;
           seen.add(key);
           insertSortedByTimestamp(positionsAll, p);
-          const deviceKey = String(comp.device ?? comp.source ?? "unknown");
-          lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
+          knownDevices.add(Number(comp.device));
         }
         setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
-        // Build initial UI from persisted positions
         processPositions(positionsAll);
       }
     } catch (e) { }
@@ -626,9 +640,7 @@ export function App() {
             if (seen.has(key)) return;
             seen.add(key);
             insertSortedByTimestamp(positionsAll, p);
-            // update last timestamp per device
-            const deviceKey = String(p.deviceId ?? p.source ?? "");
-            lastTimestamps[deviceKey] = Math.max(lastTimestamps[deviceKey] ?? 0, p.timestamp ?? 0);
+            knownDevices.add(Number(p.deviceId));
             processPositions(positionsAll);
           },
           onOpen: async () => {
@@ -652,63 +664,39 @@ export function App() {
               })();
 
               // if we can discover device names via the devices endpoint, fetch them so labels are friendly
-              let deviceNameMap: Record<string, string> | undefined;
+              let deviceNameMap: Record<number, string> | undefined;
               if (derivedBase) {
                 try {
                   const devices = await fetchDevices({ baseUrl: derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined });
-                  const map: Record<string, string> = {};
+                  const nameMap: Record<number, string> = {};
+                  const iconMap: Record<number, string> = {};
                   for (const d of devices) {
-                    if (d && d.id != null) map[String(d.id)] = d.name ?? String(d.id);
-                  }
-                  setDeviceNames(map);
-                  deviceNameMap = map;
-                  // refresh current positions with names
-                  processPositions(positionsAll, deviceNameMap);
-                } catch (e) {
-                  // ignore device fetch errors
-                }
-              }
-
-              for (const [deviceKey, ts] of Object.entries(lastTimestamps)) {
-                if (!deviceKey) continue;
-                const from = new Date(Math.max(0, (ts ?? 0) + 1));
-
-                // try requesting history over WS first (if supported)
-                let got = false;
-                try {
-                  // `client` is in scope via closure (assigned after connectRealtime returns)
-                  if ((client as any)?.requestPositions) {
-                    try {
-                      const wsRes = await (client as any).requestPositions({ deviceId: deviceKey, from, timeoutMs: 3000 });
-                      if (wsRes && wsRes.length > 0) {
-                        for (const p of wsRes) {
-                          const key = dedupeKey(p);
-                          if (seen.has(key)) continue;
-                          seen.add(key);
-                          positionsAll.push(p);
-                        }
-                        positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-                        processPositions(positionsAll, deviceNameMap);
-                        got = true;
-                      }
-                    } catch (e) {
-                      // ignore ws request errors and fall back
+                    if (d && d.id != null) {
+                      nameMap[d.id] = d.name ?? String(d.id);
+                      if ((d as any).emoji) iconMap[d.id] = (d as any).emoji;
                     }
                   }
-                } catch (e) {
-                  // ignore
-                }
+                  setDeviceNames(nameMap);
+                  setDeviceIcons(iconMap);
+                  deviceNameMap = nameMap;
+                  // include discovered devices in the fetch list
+                  for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
+                  // refresh current positions with names and icons
+                  processPositions(positionsAll, deviceNameMap);
+                } catch (e) { }
+              }
 
-                if (got) continue;
+              for (const deviceId of knownDevices) {
+                if (deviceId == null || Number.isNaN(Number(deviceId))) continue;
+                const from = new Date(Math.max(0, Date.now() - HISTORY_MS));
+                const to = new Date();
 
-                // fallback to REST fetchPositions
                 try {
                   if (!derivedBase) {
-                    // No base URL could be derived from settings — skip resync
                     continue;
                   }
 
-                  const fetched = await fetchPositions({ baseUrl: derivedBase }, deviceKey, from, null, {});
+                  const fetched = await fetchPositions({ baseUrl: derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined }, Number(deviceId), from, to, {});
                   if (fetched && fetched.length > 0) {
                     for (const p of fetched) {
                       const key = dedupeKey(p);
@@ -717,15 +705,12 @@ export function App() {
                       positionsAll.push(p);
                     }
                     positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+
                     processPositions(positionsAll, deviceNameMap);
                   }
-                } catch (e) {
-                  // ignore per-device fetch errors
-                }
+                } catch (e) { }
               }
-            } catch (e) {
-              // ignore
-            }
+            } catch (e) { }
           },
           onClose: (ev) => {
             const code = (ev as any)?.code;
@@ -748,9 +733,7 @@ export function App() {
         clientCloseRef.current = () => {
           try {
             client.close();
-          } catch (e) {
-            /* ignore */
-          }
+          } catch (e) { }
         };
       } catch (e) {
         console.warn("Could not initialize realtime traccar client:", e);
@@ -763,9 +746,7 @@ export function App() {
     return () => {
       try {
         clientCloseRef.current?.();
-      } catch (e) {
-        /* ignore */
-      }
+      } catch (e) { }
     };
   }, [traccarWsUrl, traccarToken, wsApplyCounter]);
 
@@ -792,112 +773,153 @@ export function App() {
     return result;
   }
 
-  let frame = { components: [] as ComponentUI[] };
-  if (timelineTime != null) {
-    if (showAllPast) {
-      const rawComps = showRaw ? rawSnapshots.filter((s) => s.timestamp <= timelineTime).flatMap((s) => s.data.components) : [];
-      const engineComps = showEstimates
-        ? Object.values(engineSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, timelineTime)?.data.components ?? [])
-        : [];
-      frame = { components: [...rawComps, ...engineComps] };
-    } else {
-      const selectedRawComps = showRaw
-        ? Object.values(rawSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, timelineTime)?.data.components ?? [])
-        : [];
-      const selectedEngineComps = showEstimates
-        ? Object.values(engineSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, timelineTime)?.data.components ?? [])
-        : [];
-      frame = { components: [...selectedRawComps, ...selectedEngineComps] };
+  // Compute the effective time used for visibility (defaults to latest raw snapshot)
+  const getEffectiveTimelineTime = () => timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now());
+
+  // Return the visible components at a given time according to UI toggles
+  const visibleComponentsAtTime = (time: number): ComponentUI[] => {
+    const engineComps = showEstimates
+      ? Object.values(engineSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, time)?.data.components ?? [])
+      : [];
+
+    const rawComps = showRaw
+      ? showAllPast
+        ? rawSnapshots.filter((s) => s.timestamp <= time).flatMap((s) => s.data.components)
+        : Object.values(rawSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, time)?.data.components ?? [])
+      : [];
+
+    return [...rawComps, ...engineComps];
+  };
+
+  const effectiveTime = useMemo(() => getEffectiveTimelineTime(), [timelineTime, rawSnapshots]);
+  const visibleComponents = useMemo(() => visibleComponentsAtTime(effectiveTime), [effectiveTime, showAllPast, showRaw, showEstimates, rawSnapshots, rawSnapshotsByDevice, engineSnapshotsByDevice]);
+
+  const frame = { components: visibleComponents };
+
+  // Compute world bounds from the currently visible components only
+  useEffect(() => {
+    if (visibleComponents.length === 0) {
+      setWorldBounds(null);
+      return;
     }
-  }
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const c of visibleComponents) {
+      const m = (c as any).mean ?? [0, 0];
+      if (typeof m[0] !== "number" || typeof m[1] !== "number") continue;
+      minX = Math.min(minX, m[0]);
+      minY = Math.min(minY, m[1]);
+      maxX = Math.max(maxX, m[0]);
+      maxY = Math.max(maxY, m[1]);
+    }
+
+    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+      setWorldBounds(null);
+    } else {
+      setWorldBounds({ minX, minY, maxX, maxY });
+    }
+  }, [visibleComponents]);
+
+  const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
-      <Card className="bg-card/50 backdrop-blur-sm border-muted w-[90vw] h-[90vh] overflow-hidden mx-auto">
-        <CardContent className="pt-6 h-full flex flex-col">
-          <div className="flex justify-center items-center gap-8 mb-2">
-            <h1 className="text-center text-3xl sm:text-5xl font-bold">Traccar UI POC</h1>
-          </div>
-          <div className="flex-1 h-full">
-            <MapView
-              components={frame.components}
-              refLat={refLat}
-              refLon={refLon}
-              worldBounds={worldBounds}
-              height="100%"
-              overlay={
-                <div className="flex flex-col gap-2">
-                  <div className="w-full">
-                    <div className="mb-3 p-2 rounded bg-muted/10 border">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <input
-                          type="text"
-                          className="border rounded px-2 py-1 w-[36rem]"
-                          placeholder="Traccar WS URL (e.g. ws://localhost:8082/api/socket)"
-                          value={wsUrlInput}
-                          onChange={(e) => setWsUrlInput(e.target.value)}
-                        />
-                        <input
-                          type="password"
-                          className="border rounded px-2 py-1 w-48"
-                          placeholder="Token (optional)"
-                          value={tokenInput}
-                          onChange={(e) => setTokenInput(e.target.value)}
-                        />
-                        <button className="px-3 py-1 rounded bg-primary text-white" onClick={() => applySettings()}>
-                          Save
-                        </button>
-                        <button className="px-3 py-1 rounded border" onClick={() => clearSettings()}>
-                          Clear
-                        </button>
-                        <button className="px-3 py-1 rounded border" onClick={() => {
-                          if (!traccarWsUrl) {
-                            setWsStatus("disconnected");
-                            setWsError("No WebSocket URL configured");
-                          } else {
-                            setWsStatus("connecting");
-                            setWsError(null);
-                            setWsApplyCounter((c) => c + 1);
-                          }
-                        }}>
-                          Reconnect
-                        </button>
-                        <button className="px-3 py-1 rounded border" onClick={() => { clientCloseRef.current?.(); setWsStatus("disconnected"); }}>
-                          Disconnect
-                        </button>
-                      </div>
-                      <div className="text-xs mt-2">
-                        <span className="mr-2">Status: <strong>{wsStatus}</strong></span>
-                        {wsError ? <span className="text-red-500">Error: {wsError}</span> : null}
-                      </div>
-                    </div>
-
-                    <TimelineSlider
-                      snapshots={rawSnapshots}
-                      time={timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now())}
-                      onChange={(t) => setTimelineTime(t)}
-                    />
-                    <div className="flex items-center gap-4 mt-2">
-                      <label className="flex items-center text-sm">
-                        <input type="checkbox" className="mr-2" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
-                        Show Raw
-                      </label>
-                      <label className="flex items-center text-sm">
-                        <input type="checkbox" className="mr-2" checked={showEstimates} onChange={(e) => setShowEstimates(e.target.checked)} />
-                        Show Estimates
-                      </label>
-                      <label className="flex items-center text-sm">
-                        <input type="checkbox" className="mr-2" checked={showAllPast} onChange={(e) => setShowAllPast(e.target.checked)} />
-                        Show History
-                      </label>
-                    </div>
-                  </div>
+    <div className="h-screen w-screen">
+      <MapView
+        components={frame.components}
+        refLat={refLat}
+        refLon={refLon}
+        worldBounds={worldBounds}
+        height="100vh"
+        selectedDeviceId={selectedDeviceId}
+        onSelectDevice={(id) => setSelectedDeviceId(id)}
+        overlay={
+          <div className="flex flex-col gap-2">
+            <div className="w-full">
+              <div className="mb-3 p-2 rounded bg-muted/10 border">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    className="border rounded px-2 py-1 w-[36rem]"
+                    placeholder="Traccar WS URL (e.g. ws://localhost:8082/api/socket)"
+                    value={wsUrlInput}
+                    onChange={(e) => setWsUrlInput(e.target.value)}
+                  />
+                  <input
+                    type="password"
+                    className="border rounded px-2 py-1 w-48"
+                    placeholder="API Token"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                  />
+                  <button className="px-3 py-1 rounded bg-primary text-white" onClick={() => applySettings()}>
+                    Save
+                  </button>
+                  <button className="px-3 py-1 rounded border" onClick={() => clearSettings()}>
+                    Clear
+                  </button>
+                  <button className="px-3 py-1 rounded border" onClick={() => {
+                    if (!traccarWsUrl) {
+                      setWsStatus("disconnected");
+                      setWsError("No WebSocket URL configured");
+                    } else {
+                      setWsStatus("connecting");
+                      setWsError(null);
+                      setWsApplyCounter((c) => c + 1);
+                    }
+                  }}>
+                    Reconnect
+                  </button>
+                  <button className="px-3 py-1 rounded border" onClick={() => { clientCloseRef.current?.(); setWsStatus("disconnected"); }}>
+                    Disconnect
+                  </button>
                 </div>
-              }
-            />
+                <div className="text-xs mt-2">
+                  <span className="mr-2">Status: <strong>{wsStatus}</strong></span>
+                  {wsError ? <span className="text-red-500">Error: {wsError}</span> : null}
+                </div>
+              </div>
+
+              <TimelineSlider
+                snapshots={rawSnapshots}
+                time={timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now())}
+                onChange={(t) => setTimelineTime(t)}
+              />
+              <div className="flex items-center gap-4 mt-2">
+                <label className="flex items-center text-sm">
+                  <input type="checkbox" className="mr-2" checked={showEstimates} onChange={(e) => setShowEstimates(e.target.checked)} />
+                  Show Estimates
+                </label>
+                <label className="flex items-center text-sm">
+                  <input type="checkbox" className="mr-2" checked={showRaw} onChange={(e) => setShowRaw(e.target.checked)} />
+                  Show Raw
+                </label>
+                <label className="flex items-center text-sm">
+                  <input type="checkbox" className="mr-2" checked={showAllPast} onChange={(e) => setShowAllPast(e.target.checked)} />
+                  Show History
+                </label>
+              </div>
+            </div>
+
+            {selectedDeviceId ? (
+              (() => {
+                const key = selectedDeviceId;
+                const t = timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now());
+                const rawSnap = findLatestSnapshotBeforeOrAt(rawSnapshotsByDevice[key] ?? [], t);
+                const engSnap = findLatestSnapshotBeforeOrAt(engineSnapshotsByDevice[key] ?? [], t);
+                const chosen = engSnap && (!rawSnap || (engSnap.timestamp ?? 0) >= (rawSnap.timestamp ?? 0)) ? engSnap : rawSnap;
+                const comp = chosen?.data?.components?.[0] ?? null;
+                return comp ? (
+                  <div className="p-2 rounded border bg-white/90">
+                    <div className="text-sm">{(comp as any).deviceName ?? (comp as any).device}</div>
+                    <div className="text-xs text-muted">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ?? (comp as any).accuracy ?? ""}m</div>
+                    {typeof (comp as any).speed === "number" ? <div className="text-xs text-muted">Speed: {Math.round((comp as any).speed * 3.6)} km/h</div> : null}
+                  </div>
+                ) : null;
+              })()
+            ) : null}
           </div>
-        </CardContent>
-      </Card>
+        }
+      />
     </div>
   );
 }

@@ -16,8 +16,7 @@ export type NormalizedPosition = {
   lon: number;
   accuracy: number; // meters
   timestamp: number; // epoch ms
-  source?: string; // optional source tag (protocol/device)
-  deviceId?: string | number; // optional explicit device identifier when available
+  deviceId: number;
   raw?: unknown; // original payload
 };
 
@@ -62,26 +61,20 @@ export function normalizePosition(raw: unknown, defaultAccuracy = 50): Normalize
   const ts = parseTimestampFromRecord(obj) ?? Date.now();
   const accuracyRaw = obj.accuracy ?? obj.precision;
   const accuracy = typeof accuracyRaw === "number" ? accuracyRaw : defaultAccuracy;
-  const srcRaw = obj.protocol ?? obj.source ?? obj.deviceId;
-  const source = typeof srcRaw === "string" ? srcRaw : typeof srcRaw === "number" ? String(srcRaw) : undefined;
-
-  const deviceIdRaw = obj.deviceId ?? obj.device ?? obj.id;
-  const deviceId = typeof deviceIdRaw === "number" || typeof deviceIdRaw === "string" ? deviceIdRaw : undefined;
-
+  const deviceId = obj.deviceId ?? obj.device ?? obj.id;
   return {
     lat,
     lon,
     accuracy,
     timestamp: ts,
-    source,
-    deviceId,
+    deviceId: typeof deviceId === "number" ? deviceId : 0,
     raw: obj,
   };
 }
 
 export async function fetchPositions(
   opts: TraccarClientOptions,
-  deviceId: number | string,
+  deviceId: number,
   from: Date,
   to: Date | null = null,
   params: Record<string, string | number | boolean> = {}
@@ -95,6 +88,13 @@ export async function fetchPositions(
   if (to) paramsBase.to = to.toISOString();
   for (const [k, v] of Object.entries(params)) {
     paramsBase[k] = String(v);
+  }
+  // If an auth token is provided, include it as a query parameter (Traccar accepts ?token=...)
+  if (!("token" in paramsBase) && opts.auth && (opts.auth as any)?.type === "token") {
+    paramsBase.token = String((opts.auth as any).token);
+  } else if (!("token" in paramsBase) && (opts.auth as any)?.token != null) {
+    // support passing an auth-like object with a token property
+    paramsBase.token = String((opts.auth as any).token);
   }
   const qs = new URLSearchParams(paramsBase).toString();
   const url = `${base}/positions?${qs}`;
@@ -124,10 +124,18 @@ export async function fetchPositions(
   throw new Error("Unexpected Traccar response format: expected JSON array");
 }
 
-export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: string | number; name?: string }[]> {
+export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: number; name: string; emoji?: string }[]> {
   const fetcher = opts.fetchImpl ?? fetch;
   const base = opts.baseUrl.replace(/\/+$/, "");
-  const url = `${base}/devices`;
+  let url = `${base}/devices`;
+  // append token as query parameter if provided (Traccar accepts ?token=...)
+  if (opts.auth && (opts.auth as any)?.type === "token") {
+    const sep = url.includes("?") ? "&" : "?";
+    url = `${url}${sep}token=${encodeURIComponent((opts.auth as any).token)}`;
+  } else if ((opts.auth as any)?.token != null) {
+    const sep = url.includes("?") ? "&" : "?";
+    url = `${url}${sep}token=${encodeURIComponent((opts.auth as any).token)}`;
+  }
 
   const headers: Record<string, string> = {
     "Accept": "application/json",
@@ -155,12 +163,12 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: st
       const o = d as Record<string, any>;
       const id = o.id ?? o.deviceId ?? o.uniqueId ?? undefined;
       let name = o.name ?? o.uniqueId ?? o.deviceId ?? undefined;
+      const emoji = o.emoji ?? o.icon ?? (o.attributes && (o.attributes.emoji ?? o.attributes.icon));
       if (id == null) return null;
-      // ensure a string name (fall back to id when missing)
-      if (name == null) name = String(id);
-      return { id, name: String(name) };
+      if (name == null) name = id;
+      return { id, name: String(name), ...(emoji ? { emoji: String(emoji) } : {}) };
     })
-    .filter(Boolean) as { id: string | number; name?: string }[];
+    .filter(Boolean) as { id: number; name: string; emoji?: string }[];
 }
 
 export type RealtimeConnectOptions = {
@@ -178,7 +186,7 @@ export type RealtimeConnectOptions = {
   defaultAccuracyMeters?: number;
 };
 
-export function connectRealtime(opts: RealtimeConnectOptions): { close: () => void; requestPositions?: (params?: { deviceId?: string | number; from?: Date; to?: Date; timeoutMs?: number; message?: object; }) => Promise<NormalizedPosition[]> } {
+export function connectRealtime(opts: RealtimeConnectOptions): { close: () => void; requestPositions: (params: { deviceId: number; from?: Date; to?: Date; timeoutMs?: number; message?: object; }) => Promise<NormalizedPosition[]> } {
   let ws: WebSocket | null = null;
   let destroyed = false;
   let reconnectDelay = opts.reconnectInitialMs ?? 1000;
@@ -241,9 +249,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
                 pr.resolve(positions);
                 pendingRequests.splice(i, 1);
               }
-            } catch (e) {
-              // ignore matcher errors
-            }
+            } catch (e) { }
           }
         }
       } catch (e) {
@@ -272,7 +278,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     }, reconnectDelay);
   }
 
-  function requestPositions(params: { deviceId?: string | number; from?: Date; to?: Date; timeoutMs?: number; message?: object } = {}): Promise<NormalizedPosition[]> {
+  function requestPositions(params: { deviceId: number; from?: Date; to?: Date; timeoutMs?: number; message?: object }): Promise<NormalizedPosition[]> {
     return new Promise((resolve) => {
       if (!ws) {
         resolve([]);
@@ -302,13 +308,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
         resolve([]);
       }, timeoutMs);
 
-      const matcher = (positions: NormalizedPosition[]) => {
-        if (params.deviceId != null) return positions.some((p) => String(p.deviceId) === String(params.deviceId));
-        if (params.from) return positions.some((p) => p.timestamp >= (params.from?.getTime() ?? 0));
-        return positions.length > 0;
-      };
-
-      pendingRequests.push({ resolve, reject: () => {}, timeoutId, matcher });
+      pendingRequests.push({ resolve, reject: () => { }, timeoutId, matcher: (ps: NormalizedPosition[]) => ps.some((p) => p.deviceId === params.deviceId) });
     });
   }
 
@@ -319,9 +319,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
       destroyed = true;
       try {
         ws?.close();
-      } catch (e) {
-        /* ignore */
-      }
+      } catch (e) { }
       ws = null;
     },
     requestPositions,
