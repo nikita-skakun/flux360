@@ -43,6 +43,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
   const clustersRef = useRef<Cluster[]>([]);
 
   const CLUSTER_DISTANCE_PX = 36; // threshold in screen pixels for grouping markers
+  const PIN_R = 24; // pin head radius (matches drawPin)
 
   function clusterRadius(size: number) {
     return Math.max(8, Math.ceil(6 + Math.sqrt(size) * 6));
@@ -97,14 +98,27 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       if (clusters.length === 0) return null;
       let best: { cluster: Cluster; dist: number; radius: number } | null = null;
       for (const cl of clusters) {
-        const dx = cl.x - px;
-        const dy = cl.y - py;
-        const dist = Math.hypot(dx, dy);
-        const radius = cl.radius ?? clusterRadius(cl.size);
-        const pickRadius = radius + 8;
-        if (dist <= pickRadius) {
-          if (!best || dist < best.dist) best = { cluster: cl, dist, radius };
+        const centerDist = Math.hypot(cl.x - px, cl.y - py);
+        const centerRadius = cl.radius ?? clusterRadius(cl.size);
+        const centerPick = centerRadius + 8;
+
+        // also test the circular pin head above the tip
+        const headY = cl.y - (PIN_R * 1.5);
+        const headDist = Math.hypot(cl.x - px, headY - py);
+        const headPick = PIN_R + 8;
+
+        const centerHit = centerDist <= centerPick;
+        const headHit = headDist <= headPick;
+        if (!centerHit && !headHit) continue;
+
+        let hitDist = centerHit ? centerDist : headDist;
+        let usedRadius = centerHit ? centerRadius : PIN_R;
+        if (centerHit && headHit && headDist < centerDist) {
+          hitDist = headDist;
+          usedRadius = PIN_R;
         }
+
+        if (!best || hitDist < best.dist) best = { cluster: cl, dist: hitDist, radius: usedRadius };
       }
       if (!best) return null;
       const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, emoji: it.emoji, timestamp: it.timestamp })) as ComponentUI[];
@@ -224,7 +238,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
 
     // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.
     function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText?: string, iconColor?: [number, number, number], isSelected = false, badgeText?: string) {
-      const r = 24;
+      const r = PIN_R;
 
       // overall proportions tuned to SVG
       const bodyHeight = r * 1.5;
