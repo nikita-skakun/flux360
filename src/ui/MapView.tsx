@@ -125,7 +125,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
   const flyDurationForMeters = (meters: number) => {
     const m = Math.max(1, meters);
     const v = Math.log10(m);
-    return Math.max(0.25, Math.min(0.6, v * 0.22 + 0.15));
+    return Math.max(0.25, Math.min(1.5, v * 0.22 + 0.15));
   };
 
   // Minimum distance (meters) below which we won't flyTo to avoid tiny jitter
@@ -311,7 +311,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     try {
       const ZOOM_FOR_SELECTED = 16;
       const PAN_DISTANCE_METERS = 20; // minimum distance to trigger a pan
-      const PAN_DURATION = 0.6; // seconds
 
       const center = map.getCenter();
       const centerLatLng = L.latLng(center.lat, center.lng);
