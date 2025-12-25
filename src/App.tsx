@@ -776,6 +776,19 @@ export function App() {
   // Compute the effective time used for visibility (defaults to latest raw snapshot)
   const getEffectiveTimelineTime = () => timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now());
 
+  // Small helper to display durations like "5m ago"
+  function humanDurationSince(ts: number): string {
+    const s = Math.round((Date.now() - (ts ?? Date.now())) / 1000);
+    if (s < 5) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.round(h / 24);
+    return `${d}d ago`;
+  }
+
   // Return the visible components at a given time according to UI toggles
   const visibleComponentsAtTime = (time: number): ComponentUI[] => {
     const engineComps = showEstimates
@@ -909,10 +922,11 @@ export function App() {
                 const chosen = engSnap && (!rawSnap || (engSnap.timestamp ?? 0) >= (rawSnap.timestamp ?? 0)) ? engSnap : rawSnap;
                 const comp = chosen?.data?.components?.[0] ?? null;
                 return comp ? (
-                  <div className="p-2 rounded border bg-white/90">
-                    <div className="text-sm">{(comp as any).deviceName ?? (comp as any).device}</div>
-                    <div className="text-xs text-muted">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ?? (comp as any).accuracy ?? ""}m</div>
-                    {typeof (comp as any).speed === "number" ? <div className="text-xs text-muted">Speed: {Math.round((comp as any).speed * 3.6)} km/h</div> : null}
+                  <div className="p-2 rounded border bg-white/90 text-foreground">
+                    <div className="text-sm font-medium">{(comp as any).deviceName ?? (comp as any).device}</div>
+                    <div className="text-xs text-foreground/70">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ?? (comp as any).accuracy ?? ""}m</div>
+                    {typeof (comp as any).speed === "number" ? <div className="text-xs text-foreground/70">Speed: {Math.round((comp as any).speed * 3.6)} km/h</div> : null}
+                    <div className="text-xs text-foreground/70">Last updated: {humanDurationSince((chosen as any)?.timestamp ?? Date.now())}</div>
                   </div>
                 ) : null;
               })()
