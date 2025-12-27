@@ -2,20 +2,8 @@ import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
 import type { ComponentUI } from "@/ui/types";
 import type { Cov2 } from "@/engine/component";
 
-
-function rgbaFromArr(col: [number, number, number] | undefined, alpha: number) {
-  const [r, g, b] = col || [0, 0, 0];
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-}
-
-const DEFAULT_PALETTE: Array<[number, number, number]> = [
-  [91, 140, 255],
-  [96, 211, 148],
-  [255, 211, 110],
-  [255, 133, 96],
-  [199, 125, 255],
-  [96, 198, 255],
-];
+import { colorForDevice, rgbaString } from "./color";
+import type { ColorValueArray } from "color-hash";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: ComponentUI[]; x: number; y: number } | null;
@@ -43,7 +31,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
   const clustersRef = useRef<Cluster[]>([]);
 
   const CLUSTER_DISTANCE_PX = 36; // threshold in screen pixels for grouping markers
-  const PIN_R = 24; // pin head radius (matches drawPin)
+  const PIN_R = 24; // pin head radius
 
   function clusterRadius(size: number) {
     return Math.max(8, Math.ceil(6 + Math.sqrt(size) * 6));
@@ -156,7 +144,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       // derive radial uncertainty from covariance diagonals (avoid full eigen decomposition)
       const diagMax = Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0));
       const radiusMeters = Math.sqrt(Math.max(1e-6, diagMax));
-      const color = DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length];
+      const color = colorForDevice(c.device);
       return { device: c.device, emoji: c.emoji, timestamp: c.timestamp, mean, cov, radiusMeters, color };
     });
 
@@ -200,7 +188,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       const x = cx + (p.mean[0] - anchorX) * localZoom;
       const y = cy - (p.mean[1] - anchorY) * localZoom;
       const r = Math.max(1, p.radiusMeters * localZoom + 4);
-      const color = p.color ?? DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length];
+      const color = colorForDevice(p.device);
 
       return {
         idx,
@@ -233,11 +221,14 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
 
     function pickClusterColor(items: DrawItem[], selDeviceNum: number | null) {
       const sel = selDeviceNum != null ? items.find((it) => it.device === selDeviceNum) : undefined;
-      return (sel?.color) ?? items?.[0]?.color ?? DEFAULT_PALETTE[0];
+      if (sel && sel.color) return sel.color;
+      if (items && items[0] && items[0].color) return items[0].color;
+      // fallback to stable color for the first item if available
+      return items && items[0] ? colorForDevice(items[0].device) : colorForDevice(0);
     }
 
     // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.
-    function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText?: string, iconColor?: [number, number, number], isSelected = false, badgeText?: string) {
+    function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText: string, iconColor: ColorValueArray, isSelected = false, badgeText?: string) {
       const r = PIN_R;
 
       // overall proportions tuned to SVG
@@ -270,7 +261,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       // icon (material symbol name or fallback letter)
       if (iconText) {
         ctx.save();
-        ctx.fillStyle = rgbaFromArr(iconColor, 1);
+        ctx.fillStyle = rgbaString(iconColor, 1);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.font = `${r}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
@@ -312,12 +303,12 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (!isSelected(item)) continue;
 
         ctx.save();
-        ctx.fillStyle = rgbaFromArr(color, 0.25);
+        ctx.fillStyle = rgbaString(color, 0.25);
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.lineWidth = 2;
-        ctx.strokeStyle = rgbaFromArr(color, 0.4);
+        ctx.strokeStyle = rgbaString(color, 0.4);
         ctx.stroke();
         ctx.restore();
       }

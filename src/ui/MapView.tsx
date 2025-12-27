@@ -4,15 +4,7 @@ import L from "leaflet";
 import React, { useEffect, useRef, useState } from "react";
 import type { ComponentUI } from "@/ui/types";
 
-// color palette must match the one used in CanvasView for consistent device coloring
-const DEFAULT_PALETTE: Array<[number, number, number]> = [
-  [91, 140, 255],
-  [96, 211, 148],
-  [255, 211, 110],
-  [255, 133, 96],
-  [199, 125, 255],
-  [96, 198, 255],
-];
+import { colorForDevice } from "./color";
 
 type Props = {
   components: ComponentUI[];
@@ -412,8 +404,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
               const left = Math.round(radius * Math.cos(angle));
               const top = Math.round(radius * Math.sin(angle));
 
-              const idx = components.findIndex((c) => Number(c.device) === Number(it.device));
-              const col: [number, number, number] = (idx >= 0 ? DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length] : undefined) ?? [0, 0, 0];
+              const col: [number, number, number] = colorForDevice(it.device);
               const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
 
               const enterDelay = i * 20;
