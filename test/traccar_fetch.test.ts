@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { fetchPositions, fetchDevices } from "../src/api/traccarClient";
 
-test("fetchPositions includes token query parameter", async () => {
+test("fetchPositions uses Authorization header and omits token query parameter", async () => {
   let recordedUrl: string | null = null;
   let recordedInit: any = null;
   const fakeFetch = async (url: string, init?: any) => {
@@ -16,17 +16,19 @@ test("fetchPositions includes token query parameter", async () => {
   const u = new URL(recordedUrl!);
   expect(u.pathname.endsWith("/positions")).toBe(true);
   expect(u.searchParams.get("deviceId")).toBe("42");
-  expect(u.searchParams.get("token")).toBe("abc123");
+  expect(u.searchParams.get("token")).toBe(null);
 
   expect(recordedInit).toBeTruthy();
   expect(recordedInit.headers).toBeTruthy();
   expect(recordedInit.headers["Authorization"]).toBe("Bearer abc123");
 });
 
-test("fetchDevices includes token query parameter", async () => {
+test("fetchDevices uses Authorization header and omits token query parameter", async () => {
   let recordedUrl: string | null = null;
-  const fakeFetch = async (url: string) => {
+  let recordedInit: any = null;
+  const fakeFetch = async (url: string, init?: any) => {
     recordedUrl = url;
+    recordedInit = init;
     return { ok: true, json: async () => [] } as any;
   };
 
@@ -35,5 +37,9 @@ test("fetchDevices includes token query parameter", async () => {
   expect(recordedUrl).toBeTruthy();
   const u = new URL(recordedUrl!);
   expect(u.pathname.endsWith("/devices")).toBe(true);
-  expect(u.searchParams.get("token")).toBe("t0k");
+  expect(u.searchParams.get("token")).toBe(null);
+
+  expect(recordedInit).toBeTruthy();
+  expect(recordedInit.headers).toBeTruthy();
+  expect(recordedInit.headers["Authorization"]).toBe("Bearer t0k");
 });

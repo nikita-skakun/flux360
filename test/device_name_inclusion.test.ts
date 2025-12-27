@@ -52,7 +52,7 @@ test("raw snapshot component includes emoji when available and omits when not", 
   };
   expect(comp.emoji).toBe("personal_bag");
 
-  // Without an icon mapping
+  // Without an icon mapping: default emoji should be added (first char of device key)
   const iconMap2: Record<string, string> = {};
   const deviceIconVal2 = iconMap2?.[deviceKey];
   const comp2: any = {
@@ -61,6 +61,8 @@ test("raw snapshot component includes emoji when available and omits when not", 
     speed: p.speed,
     device: deviceKey,
     ...(deviceIconVal2 ? { emoji: deviceIconVal2 } : {}),
+    // app behavior ensures an emoji default is present when none is provided
+    emoji: (deviceIconVal2 ?? String(deviceKey).charAt(0).toUpperCase()),
   };
-  expect(Object.prototype.hasOwnProperty.call(comp2, "emoji")).toBe(false);
+  expect(comp2.emoji).toBe(String(deviceKey).charAt(0).toUpperCase());
 });

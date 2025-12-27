@@ -89,13 +89,7 @@ export async function fetchPositions(
   for (const [k, v] of Object.entries(params)) {
     paramsBase[k] = String(v);
   }
-  // If an auth token is provided, include it as a query parameter (Traccar accepts ?token=...)
-  if (!("token" in paramsBase) && opts.auth && (opts.auth as any)?.type === "token") {
-    paramsBase.token = String((opts.auth as any).token);
-  } else if (!("token" in paramsBase) && (opts.auth as any)?.token != null) {
-    // support passing an auth-like object with a token property
-    paramsBase.token = String((opts.auth as any).token);
-  }
+
   const qs = new URLSearchParams(paramsBase).toString();
   const url = `${base}/positions?${qs}`;
 
@@ -128,14 +122,6 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
   const fetcher = opts.fetchImpl ?? fetch;
   const base = opts.baseUrl.replace(/\/+$/, "");
   let url = `${base}/devices`;
-  // append token as query parameter if provided (Traccar accepts ?token=...)
-  if (opts.auth && (opts.auth as any)?.type === "token") {
-    const sep = url.includes("?") ? "&" : "?";
-    url = `${url}${sep}token=${encodeURIComponent((opts.auth as any).token)}`;
-  } else if ((opts.auth as any)?.token != null) {
-    const sep = url.includes("?") ? "&" : "?";
-    url = `${url}${sep}token=${encodeURIComponent((opts.auth as any).token)}`;
-  }
 
   const headers: Record<string, string> = {
     "Accept": "application/json",

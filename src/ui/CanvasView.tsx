@@ -208,7 +208,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         x,
         y,
         r,
-        emoji: p.emoji ?? String(p.device).charAt(0).toUpperCase(),
+        emoji: p.emoji,
         timestamp: p.timestamp,
         color
       };

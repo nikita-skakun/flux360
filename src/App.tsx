@@ -156,7 +156,8 @@ export function App() {
             }
             const deviceNameVal = deviceNameValFromMap?.[deviceId];
             const deviceIconVal = deviceIconsRef.current?.[deviceId];
-            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceId, ...(deviceNameVal ? { deviceName: deviceNameVal } : {}), ...(deviceIconVal ? { emoji: deviceIconVal } : {}) };
+            const emojiVal = deviceIconVal ?? String(deviceId).charAt(0).toUpperCase();
+            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceId, emoji: emojiVal, ...(deviceNameVal ? { deviceName: deviceNameVal } : {}) };
           });
           return { timestamp: s_.timestamp, data: { components: comps } };
         });
@@ -202,7 +203,8 @@ export function App() {
               .map((snap: any) => {
                 const comp = snap.data?.components?.[0];
                 if (!comp) return null;
-                return { timestamp: snap.timestamp, data: { components: [{ ...comp }] } } as Snapshot;
+                const emojiVal = comp?.emoji ?? String(comp?.device ?? "unknown").charAt(0).toUpperCase();
+                return { timestamp: snap.timestamp, data: { components: [{ ...comp, emoji: emojiVal }] } } as Snapshot;
               })
               .filter(Boolean) as Snapshot[]
           );
@@ -264,7 +266,8 @@ export function App() {
             const comp = snap.data?.components?.[0];
             if (!comp) return null;
             const { x, y } = degreesToMeters(comp.lat, comp.lon, baseLat, baseLon);
-            return { timestamp: snap.timestamp, data: { components: [{ ...comp, mean: [x, y] }] } } as Snapshot;
+            const emojiVal = comp?.emoji ?? String(comp?.device ?? "unknown").charAt(0).toUpperCase();
+            return { timestamp: snap.timestamp, data: { components: [{ ...comp, mean: [x, y], emoji: emojiVal }] } } as Snapshot;
           })
           .filter(Boolean) as Snapshot[]
       );
@@ -512,6 +515,7 @@ export function App() {
       const rawArr: Snapshot[] = mp.map((p) => {
         const deviceNameVal = nameMapLocal?.[deviceKey];
         const deviceIconVal = deviceIconsRef.current?.[deviceKey];
+        const emojiVal = deviceIconVal ?? String(deviceKey).charAt(0).toUpperCase();
         const comp: any = {
           mean: [p.x, p.y] as [number, number],
           cov: measurementCovFromAccuracy(p.accuracy),
@@ -522,8 +526,8 @@ export function App() {
           raw: true,
           speed: p.speed,
           device: deviceKey,
+          emoji: emojiVal,
           ...(deviceNameVal ? { deviceName: deviceNameVal } : {}),
-          ...(deviceIconVal ? { emoji: deviceIconVal } : {}),
         };
         return { timestamp: p.timestamp, data: { components: [comp] } } as Snapshot;
       });
