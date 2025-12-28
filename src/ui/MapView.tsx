@@ -221,12 +221,25 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
       const pt = map.latLngToContainerPoint(ev.latlng);
       const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
       const container = map.getContainer();
-      container.style.cursor = (hit && hit.items && hit.items.length > 0) ? "pointer" : "";
+      if (hit && hit.items && hit.items.length > 0) {
+        container.style.cursor = "pointer";
+        if (hit.items.length === 1) {
+          const first = hit.items[0];
+          if (first) container.title = (first as any).deviceName ?? String(first.device);
+          else container.title = "";
+        } else {
+          container.title = "";
+        }
+      } else {
+        container.style.cursor = "";
+        container.title = "";
+      }
     };
 
     const container = map.getContainer();
     const onMouseLeave = () => {
       container.style.cursor = "";
+      container.title = "";
     };
 
     map.on("click", onMapClick);
@@ -429,7 +442,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
                     className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center cursor-pointer hover:scale-110"
                     style={innerStyle}
                     onClick={(e) => { e.stopPropagation(); onSelectDevice?.(it.device); closeClusterPopupAnimated(); }}
-                    title={String(it.device)}
+                    title={(it as any).deviceName ?? String(it.device)}
                   >
                     <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{it.emoji}</span>
                   </div>

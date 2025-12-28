@@ -930,12 +930,12 @@ export function App() {
                     <div className="flex items-start">
                       <div className="flex-1">
                         <div className="text-sm font-medium">{(comp as any).deviceName ?? (comp as any).device}</div>
-                        <div className="text-xs text-foreground/70">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ?? (comp as any).accuracy ?? ""}m</div>
+                        <div className="text-xs text-foreground/70">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ??  ""}m</div>
                       </div>
                       <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
                     </div>
                     {typeof (comp as any).speed === "number" ? <div className="text-xs text-foreground/70">Speed: {Math.round((comp as any).speed * 3.6)} km/h</div> : null}
-                    <div className="text-xs text-foreground/70">Last updated: {humanDurationSince((chosen as any)?.timestamp ?? Date.now())}</div>
+                    <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(chosen?.timestamp ?? Date.now())}</div>
                   </div>
                 ) : null;
               })()
