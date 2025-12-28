@@ -1,7 +1,7 @@
 import type { Measurement } from "./component";
-import { Mixture } from "./mixture";
+import { Mixture, type ComponentSnapshot } from "./mixture";
 
-export type EngineSnapshot = { timestamp: number; data: { components: any[] } };
+export type EngineSnapshot = { timestamp: number; data: { components: ComponentSnapshot[] } };
 
 export class Engine {
   mixture: Mixture;
@@ -18,7 +18,7 @@ export class Engine {
     for (const m of measurements) {
       this.mixture.update(m);
       // deep copy snapshot (include action and spawn metadata from mixture)
-      const compSnap = this.mixture.snapshot().map((c) => ({ mean: [c.mean[0], c.mean[1]] as [number, number], cov: [c.cov[0], c.cov[1], c.cov[2]], weight: c.weight, action: (c as any).action, spawnedDuringMovement: (c as any).spawnedDuringMovement, createdAt: (c as any).createdAt }));
+      const compSnap = this.mixture.snapshot().map((c: ComponentSnapshot) => ({ mean: [c.mean[0], c.mean[1]] as [number, number], cov: [c.cov[0], c.cov[1], c.cov[2]] as [number, number, number], consistency: c.consistency, weight: c.weight, action: c.action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt }));
       snapshots.push({ timestamp: m.timestamp ?? Date.now(), data: { components: compSnap } });
     }
 

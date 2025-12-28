@@ -72,6 +72,15 @@ export function normalizePosition(raw: unknown, defaultAccuracy = 50): Normalize
   };
 }
 
+async function performGet(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown> {
+  const res = await fetcher(url, { method: "GET", headers });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "<no body>");
+    throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
+  }
+  return await res.json().catch(() => null);
+}
+
 export async function fetchPositions(
   opts: TraccarClientOptions,
   deviceId: number,
@@ -99,13 +108,7 @@ export async function fetchPositions(
   const authHeader = buildAuthHeader(opts.auth);
   if (authHeader) headers["Authorization"] = authHeader;
 
-  const res = await fetcher(url, { method: "GET", headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
-  }
-
-  const json: unknown = await res.json().catch(() => null);
+  const json: unknown = await performGet(fetcher, url, headers);
   if (Array.isArray(json)) {
     return json.map((p) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
   }
@@ -129,13 +132,7 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
   const authHeader = buildAuthHeader(opts.auth);
   if (authHeader) headers["Authorization"] = authHeader;
 
-  const res = await fetcher(url, { method: "GET", headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
-  }
-
-  const json: unknown = await res.json().catch(() => null);
+  const json: unknown = await performGet(fetcher, url, headers);
   let arr: unknown[] = [];
   if (Array.isArray(json)) arr = json;
   else if (json && typeof json === "object") {
@@ -143,18 +140,22 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
     if (Array.isArray(obj.data)) arr = obj.data;
   }
 
-  return arr
-    .map((d) => {
-      if (!d || typeof d !== "object") return null;
-      const o = d as Record<string, any>;
-      const id = o.id ?? o.deviceId ?? o.uniqueId ?? undefined;
-      let name = o.name ?? o.uniqueId ?? o.deviceId ?? undefined;
-      const emoji = o.emoji ?? o.icon ?? (o.attributes && (o.attributes.emoji ?? o.attributes.icon));
-      if (id == null) return null;
-      if (name == null) name = id;
-      return { id, name: String(name), ...(emoji ? { emoji: String(emoji) } : {}) };
-    })
-    .filter(Boolean) as { id: number; name: string; emoji?: string }[];
+  return arr.flatMap((d) => {
+    if (!d || typeof d !== "object") return [];
+    const o = d as Record<string, unknown>;
+
+    const idRaw = o.id ?? o.deviceId ?? o.uniqueId;
+    if (typeof idRaw !== "number") return [];
+    const id = idRaw as number;
+
+    const nameRaw = o.name ?? o.uniqueId ?? o.deviceId;
+    const name = nameRaw != null ? String(nameRaw) : String(id);
+
+    let emoji: string | undefined;
+    if (o.attributes && typeof (o.attributes as any).emoji === "string") emoji = (o.attributes as any).emoji;
+
+    return [{ id, name, ...(emoji ? { emoji: String(emoji) } : {}) }];
+  });
 }
 
 export type RealtimeConnectOptions = {
@@ -165,7 +166,7 @@ export type RealtimeConnectOptions = {
   onPositions?: (ps: NormalizedPosition[]) => void;
   onOpen?: () => void;
   onClose?: (ev?: CloseEvent) => void;
-  onError?: (err: any) => void;
+  onError?: (err: unknown) => void;
   autoReconnect?: boolean;
   reconnectInitialMs?: number;
   reconnectMaxMs?: number;
@@ -177,7 +178,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
   let destroyed = false;
   let reconnectDelay = opts.reconnectInitialMs ?? 1000;
 
-  type PendingRequest = { resolve: (ps: NormalizedPosition[]) => void; reject: (err: any) => void; timeoutId: ReturnType<typeof setTimeout>; matcher: (ps: NormalizedPosition[]) => boolean };
+  type PendingRequest = { resolve: (ps: NormalizedPosition[]) => void; reject: (err: unknown) => void; timeoutId: ReturnType<typeof setTimeout>; matcher: (ps: NormalizedPosition[]) => boolean };
   const pendingRequests: PendingRequest[] = [];
 
   function buildWsUrl() {
@@ -200,9 +201,6 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     if (opts.auth && opts.auth.type === "token") {
       const sep = wsUrl.includes("?") ? "&" : "?";
       wsUrl = `${wsUrl}${sep}token=${encodeURIComponent(opts.auth.token)}`;
-    } else if (typeof (opts.auth as any)?.token === "string") {
-      const sep = wsUrl.includes("?") ? "&" : "?";
-      wsUrl = `${wsUrl}${sep}token=${encodeURIComponent((opts.auth as any).token)}`;
     }
 
     try {

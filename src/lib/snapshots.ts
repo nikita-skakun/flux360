@@ -3,7 +3,7 @@ import type { ComponentUI } from "@/ui/types";
 type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
 
 function snapshotKey(s: Snapshot) {
-  const c = s?.data?.components?.[0] as any;
+  const c = s?.data?.components?.[0] as ComponentUI | undefined;
   return `${c?.device ?? "unknown"}:${s.timestamp}:${c?.lat}:${c?.lon}`;
 }
 
@@ -22,10 +22,10 @@ export function mergeSnapshots(prev: Snapshot[], next: Snapshot[]) {
 
     // Merge first component properties, preferring defined values from `s`,
     // but preserving numeric accuracy/cov from existing if missing in `s`.
-    const prevComp = existing.data?.components?.[0] ?? {} as any;
-    const newComp = s.data?.components?.[0] ?? {} as any;
+    const prevComp = existing.data?.components?.[0] ?? {} as Partial<ComponentUI>;
+    const newComp = s.data?.components?.[0] ?? {} as Partial<ComponentUI>;
 
-    const mergedComp: any = { ...prevComp, ...newComp };
+    const mergedComp: Partial<ComponentUI> = { ...prevComp, ...newComp };
 
     if (typeof newComp.accuracy !== "number" && typeof prevComp.accuracy === "number") {
       mergedComp.accuracy = prevComp.accuracy;
@@ -38,7 +38,7 @@ export function mergeSnapshots(prev: Snapshot[], next: Snapshot[]) {
     // preserve raw flag if either says it's raw
     mergedComp.raw = !!prevComp.raw || !!newComp.raw;
 
-    const mergedSnap: Snapshot = { ...existing, ...s, data: { components: [mergedComp] } };
+    const mergedSnap: Snapshot = { ...existing, ...s, data: { components: [mergedComp as ComponentUI] } };
     map.set(key, mergedSnap);
   }
 
@@ -53,7 +53,7 @@ export function normalizeSnapshots(snaps: Snapshot[]) {
   if (!Array.isArray(snaps)) return [];
   return snaps
     .map((s) => {
-      const rawTs = (s as any)?.timestamp;
+      const rawTs = (s as unknown as { timestamp?: unknown })?.timestamp;
       let ts: number;
       if (typeof rawTs === "number") {
         ts = rawTs < 1e12 ? Math.round(rawTs * 1000) : rawTs;

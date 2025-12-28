@@ -2,8 +2,7 @@ import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
 import type { ComponentUI } from "@/ui/types";
 import type { Cov2 } from "@/engine/component";
 
-import { colorForDevice, rgbaString } from "./color";
-import type { ColorValueArray } from "color-hash";
+import { colorForDevice, rgbaString, type Color } from "./color";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: ComponentUI[]; x: number; y: number } | null;
@@ -138,7 +137,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     ctx.clearRect(0, 0, width, height);
 
     let localZoom = zoom ?? 1;
-    const processed = components.map((c, idx) => {
+    const processed = components.map(c => {
       const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
       const cov: Cov2 = Array.isArray(c.cov) && c.cov.length === 3 ? (c.cov as Cov2) : [100, 0, 100];
       // derive radial uncertainty from covariance diagonals (avoid full eigen decomposition)
@@ -228,7 +227,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     }
 
     // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.
-    function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText: string, iconColor: ColorValueArray, isSelected = false, badgeText?: string) {
+    function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText: string, iconColor: Color, isSelected = false, badgeText?: string) {
       const r = PIN_R;
 
       // overall proportions tuned to SVG

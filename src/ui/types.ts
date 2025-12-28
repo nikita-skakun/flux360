@@ -6,4 +6,11 @@ export type ComponentUI = {
   cov: [number, number,number];
   emoji: string;
   timestamp: number;
+  // optional metadata
+  deviceName?: string;
+  accuracy?: number;
+  accuracyMeters?: number;
+  speed?: number;
+  action?: string;
+  raw?: boolean;
 };

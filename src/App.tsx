@@ -4,9 +4,11 @@ import { degreesToMeters } from "./util/geo";
 import { mergeSnapshots, pruneSnapshots, normalizeSnapshots } from "@/lib/snapshots";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import { useEffect, useState, useRef, useMemo } from "react";
+import { useLocalStorageBoolean } from "@/hooks/useLocalStorage";
 import MapView from "./ui/MapView";
 import type { ComponentUI } from "@/ui/types";
-import type { Cov2 } from "./engine/component";
+import type { Cov2, Measurement } from "./engine/component";
+import type { NormalizedPosition } from "@/api/traccarClient";
 
 export function App() {
   type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
@@ -42,31 +44,15 @@ export function App() {
       else window.localStorage.setItem(key, value);
     } catch (e) { }
   }
-  function safeGetJSON<T = any>(key: string): T | null {
+  function safeGetJSON<T = unknown>(key: string): T | null {
     const v = safeGetItem(key);
     if (v == null) return null;
     try { return JSON.parse(v) as T; } catch (e) { return null; }
   }
 
-  const [showRaw, setShowRaw] = useState<boolean>(() => {
-    const v = safeGetItem(LS_UI_SHOW_RAW);
-    return v == null || v === "1";
-  });
-  const [showEstimates, setShowEstimates] = useState<boolean>(() => {
-    const v = safeGetItem(LS_UI_SHOW_ESTIMATES);
-    return v == null || v === "1";
-  });
-  const [showAllPast, setShowAllPast] = useState<boolean>(() => {
-    const v = safeGetItem(LS_UI_SHOW_HISTORY);
-    return v === "1";
-  });
-
-  // Persist UI toggles (combined)
-  useEffect(() => {
-    safeSetItem(LS_UI_SHOW_RAW, showRaw ? "1" : "0");
-    safeSetItem(LS_UI_SHOW_ESTIMATES, showEstimates ? "1" : "0");
-    safeSetItem(LS_UI_SHOW_HISTORY, showAllPast ? "1" : "0");
-  }, [showRaw, showEstimates, showAllPast]);
+  const [showRaw, setShowRaw] = useLocalStorageBoolean(LS_UI_SHOW_RAW, true);
+  const [showEstimates, setShowEstimates] = useLocalStorageBoolean(LS_UI_SHOW_ESTIMATES, true);
+  const [showAllPast, setShowAllPast] = useLocalStorageBoolean(LS_UI_SHOW_HISTORY, false);
 
   // Persist raw snapshots to localStorage
   // Avoid overwriting existing non-empty persisted data with an empty initial state on mount
@@ -91,7 +77,7 @@ export function App() {
   }, [rawSnapshotsByDevice]);
 
   // small helpers to reduce duplication and keep logic in one place
-  function computeDisplaySpeed(prevM: any | undefined, m: any | undefined): number | undefined {
+  function computeDisplaySpeed(prevM: Measurement | undefined, m: Measurement | undefined): number | undefined {
     if (typeof m?.speed === "number") return m.speed;
     if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
       const dt = (m.timestamp - prevM.timestamp) / 1000;
@@ -109,7 +95,7 @@ export function App() {
     return [v, 0, v];
   }
 
-  async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, any[]>, cutoff: number, nameMapLocal?: Record<string, string>): Promise<Snapshot[]> {
+  async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, unknown[]>, cutoff: number, nameMapLocal?: Record<string, string>): Promise<Snapshot[]> {
     try {
       const { Engine } = await import("@/engine/engine");
       const engineByDevice: Record<number, Snapshot[]> = {};
@@ -119,19 +105,20 @@ export function App() {
         const deviceId = Number(deviceKey);
         // Normalize a variety of possible input shapes (snapshots or simple measurement objects)
         const measurements = ((arr ?? [])
-          .map((s: any) => {
-            if (!s) return null;
-            if (s.mean) {
-              return { mean: s.mean, cov: s.cov ?? measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
+          .map((s: unknown) => {
+            if (!s || typeof s !== "object") return null as null;
+            const obj = s as Record<string, any>;
+            if (obj.mean) {
+              return { mean: obj.mean as [number, number], cov: (obj.cov as Cov2) ?? measurementCovFromAccuracy(Number(obj.accuracy) || 50), timestamp: Number(obj.timestamp) || undefined, accuracy: Number(obj.accuracy) || undefined, lat: obj.lat as number | undefined, lon: obj.lon as number | undefined, speed: typeof obj.speed === "number" ? obj.speed : undefined } as Measurement;
             }
-            const c = s.data?.components?.[0];
-            if (c) return { mean: c.mean, cov: measurementCovFromAccuracy(c.accuracy), timestamp: s.timestamp, accuracy: c.accuracy, lat: c.lat, lon: c.lon, speed: c.speed };
-            if (s.x != null && s.y != null && typeof s.timestamp === "number") return { mean: [s.x, s.y], cov: measurementCovFromAccuracy(s.accuracy), timestamp: s.timestamp, accuracy: s.accuracy, lat: s.lat, lon: s.lon, speed: s.speed };
-            return null;
+            const c = obj.data?.components?.[0] as Record<string, any> | undefined;
+            if (c && c.mean) return { mean: c.mean as [number, number], cov: measurementCovFromAccuracy(Number(c.accuracy) || 50), timestamp: Number(obj.timestamp) || undefined, accuracy: Number(c.accuracy) || undefined, lat: c.lat as number | undefined, lon: c.lon as number | undefined, speed: typeof c.speed === "number" ? c.speed : undefined } as Measurement;
+            if (obj.x != null && obj.y != null && typeof obj.timestamp === "number") return { mean: [Number(obj.x), Number(obj.y)], cov: measurementCovFromAccuracy(Number(obj.accuracy) || 50), timestamp: obj.timestamp as number, accuracy: Number(obj.accuracy) || undefined, lat: obj.lat as number | undefined, lon: obj.lon as number | undefined, speed: typeof obj.speed === "number" ? obj.speed : undefined } as Measurement;
+            return null as null;
           })
-          .filter(Boolean)) as any[];
+          .filter(Boolean) as Measurement[]);
 
-        measurements.sort((a: any, b: any) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        measurements.sort((a: Measurement, b: Measurement) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 
         if (measurements.length === 0) {
           engineByDevice[deviceId] = [];
@@ -350,13 +337,13 @@ export function App() {
       for (const [k, arr] of Object.entries(prevObj)) {
         const deviceId = Number(k);
         const updated = arr.map((s) => {
-          const comp = (s.data?.components?.[0] ?? {}) as any;
+          const comp = (s.data?.components?.[0] ?? {}) as Partial<ComponentUI>;
           const desiredName = deviceNames[deviceId] ?? comp?.deviceName;
           const desiredIcon = deviceIcons[deviceId] ?? comp?.emoji;
           if (comp?.deviceName !== desiredName || comp?.emoji !== desiredIcon) {
             changed = true;
             const newComp = { ...comp, ...(desiredName ? { deviceName: desiredName } : {}), ...(desiredIcon ? { emoji: desiredIcon } : {}) };
-            return { ...s, data: { components: [newComp] } } as Snapshot;
+            return { ...s, data: { components: [newComp as ComponentUI] } } as Snapshot;
           }
           return s;
         });
@@ -375,13 +362,13 @@ export function App() {
       for (const [k, arr] of Object.entries(prevObj)) {
         const deviceId = Number(k);
         const updated = arr.map((s) => {
-          const comp = (s.data?.components?.[0] ?? {}) as any;
+          const comp = (s.data?.components?.[0] ?? {}) as Partial<ComponentUI>;
           const desiredName = deviceNames[deviceId] ?? comp?.deviceName;
           const desiredIcon = deviceIcons[deviceId] ?? comp?.emoji;
           if (comp?.deviceName !== desiredName || comp?.emoji !== desiredIcon) {
             changed = true;
             const newComp = { ...comp, ...(desiredName ? { deviceName: desiredName } : {}), ...(desiredIcon ? { emoji: desiredIcon } : {}) };
-            return { ...s, data: { components: [newComp] } } as Snapshot;
+            return { ...s, data: { components: [newComp as ComponentUI] } } as Snapshot;
           }
           return s;
         });
@@ -432,7 +419,7 @@ export function App() {
     setWsApplyCounter((c) => c + 1);
   }
 
-  function processPositions(positions: any[], nameMap?: Record<string, string>) {
+  function processPositions(positions: NormalizedPosition[], nameMap?: Record<string, string>) {
     if (!positions || positions.length === 0) return;
     const nameMapLocal = nameMap ?? deviceNamesRef.current;
     const positionsWithDevice = positions.map((p) => {
@@ -448,7 +435,7 @@ export function App() {
     setRefLon(baseLon);
 
     // Group positions per device and sort each device stream by timestamp
-    const posByDevice = new Map<number, any[]>();
+    const posByDevice = new Map<number, NormalizedPosition[]>();
     for (const p of positionsWithDevice) {
       const key = p.device;
       if (!posByDevice.has(key)) posByDevice.set(key, []);
@@ -457,12 +444,13 @@ export function App() {
     for (const arr of posByDevice.values()) arr.sort((a, b) => a.timestamp - b.timestamp);
 
     // Convert all positions into meters (per-device) and compute world bounds (min/max)
-    const metersByDevice = new Map<number, any[]>();
+    type MeterPoint = { lat: number; lon: number; accuracy: number; timestamp: number; x: number; y: number; speed?: number; device: number };
+    const metersByDevice = new Map<number, MeterPoint[]>();
     for (const [deviceId, arr] of posByDevice) {
-      const mp = arr.map((p) => {
+      const mp: MeterPoint[] = arr.map((p) => {
         const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
-        const raw = (p as any).raw;
-        const speed = typeof raw?.speed === "number" ? raw.speed : p.speed;
+        const raw = (p as any).raw as Record<string, unknown> | undefined;
+        const speed = typeof raw?.speed === "number" ? (raw.speed as number) : undefined;
         return {
           lat: p.lat,
           lon: p.lon,
@@ -480,8 +468,8 @@ export function App() {
     // Compute derived speeds per device (based on consecutive measurements for the same device)
     for (const mp of metersByDevice.values()) {
       for (let i = 0; i < mp.length; i++) {
-        const cur = mp[i] as any;
-        const prev = mp[i - 1] as any | undefined;
+        const cur = mp[i] as MeterPoint;
+        const prev = mp[i - 1] as MeterPoint | undefined;
         if (prev && typeof cur.timestamp === "number" && typeof prev.timestamp === "number") {
           const dt = (cur.timestamp - prev.timestamp) / 1000;
           if (dt > 0) {
@@ -930,7 +918,7 @@ export function App() {
                     <div className="flex items-start">
                       <div className="flex-1">
                         <div className="text-sm font-medium">{(comp as any).deviceName ?? (comp as any).device}</div>
-                        <div className="text-xs text-foreground/70">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ??  ""}m</div>
+                        <div className="text-xs text-foreground/70">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ?? ""}m</div>
                       </div>
                       <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
                     </div>

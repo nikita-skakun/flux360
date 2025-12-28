@@ -1,16 +1,27 @@
-import ColorHash, { type ColorValueArray } from "color-hash";
+import ColorHash from "color-hash";
 
-const ch = new ColorHash({
+export type Color = [number, number, number];
+
+interface ColorHashInstance { rgb(s: string): Color }
+interface ColorHashCtor { new(opts?: { saturation?: number | number[]; lightness?: number | number[] }): ColorHashInstance }
+
+const ch = new (ColorHash as unknown as ColorHashCtor)({
   // soften colors a bit by lowering saturation and increasing lightness
   saturation: [0.45, 0.55, 0.65],
   lightness: [0.50, 0.56, 0.62],
 });
 
-export function colorForDevice(deviceId: number): ColorValueArray {
-  return ch.rgb(String(deviceId));
+const cache = new Map<number, Color>();
+
+export function colorForDevice(deviceId: number): Color {
+  const cached = cache.get(deviceId);
+  if (cached) return cached;
+  const rgb = ch.rgb(String(deviceId));
+  cache.set(deviceId, rgb);
+  return rgb;
 }
 
-export function rgbaString(color: ColorValueArray, a: number = 1): string {
+export function rgbaString(color: Color, a: number = 1): string {
   const [r, g, b] = color;
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
