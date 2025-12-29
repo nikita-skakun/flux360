@@ -1,9 +1,8 @@
+import type { NormalizedPosition } from "@/api/traccarClient";
 import React from "react";
 
-type Snap = { timestamp: number };
-
 type Props = {
-  snapshots: Snap[];
+  snapshots: NormalizedPosition[];
   time: number;
   onChange: (time: number) => void;
   step?: number;
@@ -28,7 +27,6 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, ste
   const times = snapshots.map((s) => s.timestamp);
   const minTime = Math.min(...times);
   const maxTime = Math.max(...times);
-  const range = Math.max(1, maxTime - minTime);
   const clamped = Math.min(Math.max(time, minTime), maxTime);
   const formatted = new Date(clamped).toLocaleString();
 
