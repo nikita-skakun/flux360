@@ -1,3 +1,4 @@
+import type { NormalizedPosition } from "@/api/traccarClient";
 import { test, expect } from "bun:test";
 
 test("parsing LS_RAW_BY_DEVICE (DevicePoint arrays) yields positions with normalized timestamps", () => {
@@ -12,17 +13,16 @@ test("parsing LS_RAW_BY_DEVICE (DevicePoint arrays) yields positions with normal
     ],
   };
 
-  const positionsAll: any[] = [];
-  for (const [k, arr] of Object.entries(storedByDevice)) {
+  const positionsAll: NormalizedPosition[] = [];
+  for (const [, arr] of Object.entries(storedByDevice)) {
     const snaps = arr.sort((a, b) => a.timestamp - b.timestamp);
     for (const snap of snaps) {
-      if (!snap) continue;
-      const p = { timestamp: snap.timestamp, lat: snap.lat, lon: snap.lon, accuracy: snap.accuracy, deviceId: snap.device, raw: true };
+      const p: NormalizedPosition = { deviceId: snap.device, timestamp: snap.timestamp, lat: snap.lat, lon: snap.lon, accuracy: snap.accuracy };
       positionsAll.push(p);
     }
   }
 
   expect(positionsAll.length).toBe(2);
-  expect(positionsAll[0].timestamp).toBe(t1);
-  expect(positionsAll[1].timestamp).toBe(t2);
+  expect(positionsAll[0]!.timestamp).toBe(t1);
+  expect(positionsAll[1]!.timestamp).toBe(t2);
 });
