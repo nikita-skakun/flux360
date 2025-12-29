@@ -5,10 +5,10 @@ export type TraccarAuth =
   | { type: "token"; token: string };
 
 export type TraccarClientOptions = {
-  baseUrl: string; // e.g. "https://traccar.example.com/api"
+  baseUrl: string; // e.g. "traccar.example.com"
+  secure?: boolean; // default false (http), true for https
   auth?: TraccarAuth;
   fetchImpl?: typeof fetch; // for testing or alternate runtimes
-  defaultAccuracyMeters?: number; // if accuracy missing
 };
 
 export type NormalizedPosition = {
@@ -70,7 +70,8 @@ export async function fetchPositions(
   params: Record<string, string | number | boolean> = {}
 ): Promise<NormalizedPosition[]> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const base = opts.baseUrl.replace(/\/+$/, "");
+  const protocol = opts.secure ? 'https' : 'http';
+  const base = `${protocol}://${opts.baseUrl}/api`;
   const paramsBase: Record<string, string> = {
     deviceId: String(deviceId),
     from: from.toISOString(),
@@ -104,7 +105,8 @@ export async function fetchPositions(
 
 export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: number; name: string; emoji: string }[]> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const base = opts.baseUrl.replace(/\/+$/, "");
+  const protocol = opts.secure ? 'https' : 'http';
+  const base = `${protocol}://${opts.baseUrl}/api`;
   let url = `${base}/devices`;
 
   const headers: Record<string, string> = {
@@ -141,8 +143,8 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
 }
 
 export type RealtimeConnectOptions = {
-  wsUrl?: string; // explicit WebSocket URL
-  baseUrl?: string; // used to derive a default ws url when wsUrl omitted
+  baseUrl?: string; // the host, e.g. "traccar.example.com"
+  secure?: boolean; // default false (ws), true for wss
   auth?: TraccarAuth;
   onPosition?: (p: NormalizedPosition) => void;
   onPositions?: (ps: NormalizedPosition[]) => void;
@@ -163,8 +165,10 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
   const pendingRequests: PendingRequest[] = [];
 
   function buildWsUrl() {
-    if (opts.wsUrl) return opts.wsUrl;
-    if (opts.baseUrl) return opts.baseUrl.replace(/^http/, "ws").replace(/\/+$/, "") + "/api/socket";
+    if (opts.baseUrl) {
+      const protocol = opts.secure ? 'wss' : 'ws';
+      return `${protocol}://${opts.baseUrl}/api/socket`;
+    }
     return undefined;
   }
 

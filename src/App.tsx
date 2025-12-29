@@ -213,10 +213,12 @@ export function App() {
   }, []);
 
   // Traccar connection settings (persisted in localStorage)
-  const [wsUrlInput, setWsUrlInput] = useState<string>(() => safeGetItem("traccar:wsUrl") ?? "");
+  const [baseUrlInput, setBaseUrlInput] = useState<string>(() => safeGetItem("traccar:baseUrl") ?? "");
+  const [secureInput, setSecureInput] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
   const [tokenInput, setTokenInput] = useState<string>(() => safeGetItem("traccar:token") ?? "");
   // applied (active) settings used by the client; change these via Apply/Save
-  const [traccarWsUrl, setTraccarWsUrl] = useState<string | null>(() => safeGetItem("traccar:wsUrl") ?? null);
+  const [traccarBaseUrl, setTraccarBaseUrl] = useState<string | null>(() => safeGetItem("traccar:baseUrl") ?? null);
+  const [traccarSecure, setTraccarSecure] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
   const [traccarToken, setTraccarToken] = useState<string | null>(() => safeGetItem("traccar:token") ?? null);
   const clientCloseRef = useRef<(() => void) | null>(null);
   const [deviceNames, setDeviceNames] = useState<Record<number, string>>({});
@@ -239,32 +241,37 @@ export function App() {
 
   function applySettings() {
     // Persist settings safely
-    safeSetItem("traccar:wsUrl", wsUrlInput || null);
+    safeSetItem("traccar:baseUrl", baseUrlInput || null);
+    safeSetItem("traccar:secure", secureInput.toString());
     safeSetItem("traccar:token", tokenInput || null);
 
-    setTraccarWsUrl(wsUrlInput || null);
+    setTraccarBaseUrl(baseUrlInput || null);
+    setTraccarSecure(secureInput);
     setTraccarToken(tokenInput || null);
 
-    if (wsUrlInput && wsUrlInput.trim() !== "") {
+    if (baseUrlInput && baseUrlInput.trim() !== "") {
       // attempt to connect
       setWsStatus("connecting");
       setWsError(null);
     } else {
       // don't attempt to connect when no URL provided
       setWsStatus("disconnected");
-      setWsError("No WebSocket URL configured");
+      setWsError("No Base URL configured");
     }
 
     setWsApplyCounter((c) => c + 1);
   }
 
   function clearSettings() {
-    setWsUrlInput("");
+    setBaseUrlInput("");
+    setSecureInput(false);
     setTokenInput("");
     // Clear persisted settings safely
-    safeSetItem("traccar:wsUrl", null);
+    safeSetItem("traccar:baseUrl", null);
+    safeSetItem("traccar:secure", "false");
     safeSetItem("traccar:token", null);
-    setTraccarWsUrl(null);
+    setTraccarBaseUrl(null);
+    setTraccarSecure(false);
     setTraccarToken(null);
     setWsStatus("disconnected");
     setWsError(null);
@@ -356,12 +363,12 @@ export function App() {
   }
 
   useEffect(() => {
-    // If there is no configured WS URL, do not attempt to connect
-    if (!traccarWsUrl) {
+    // If there is no configured base URL, do not attempt to connect
+    if (!traccarBaseUrl) {
       clientCloseRef.current?.();
       setWsStatus("disconnected");
       // leave wsError alone if it already contains a helpful message, otherwise clear
-      setWsError((prev) => (prev && prev.includes("No WebSocket URL") ? prev : prev ?? null));
+      setWsError((prev) => (prev && prev.includes("No Base URL") ? prev : prev ?? null));
       return;
     }
 
@@ -412,7 +419,8 @@ export function App() {
       try {
         const { connectRealtime, fetchPositions, fetchDevices } = await import("@/api/traccarClient");
         const client = connectRealtime({
-          wsUrl: traccarWsUrl ?? undefined,
+          baseUrl: traccarBaseUrl ?? undefined,
+          secure: traccarSecure,
           auth: traccarToken ? { type: "token", token: traccarToken } : undefined,
           autoReconnect: true,
           reconnectInitialMs: 1000,
@@ -431,25 +439,13 @@ export function App() {
               setWsError(null);
               // attempt resync for known devices if any (prefer WS request, fallback to REST)
               try {
-                // derive base from ws url when possible for REST and devices API
-              const derivedBase = (() => {
-                try {
-                  if (!traccarWsUrl) return undefined;
-                  const u = new URL(traccarWsUrl);
-                  if (u.protocol === "ws:") u.protocol = "http:";
-                  if (u.protocol === "wss:") u.protocol = "https:";
-                  if (u.pathname.endsWith("/api/socket")) u.pathname = u.pathname.replace(/\/socket$/, "");
-                  if (u.pathname.endsWith("/socket")) u.pathname = u.pathname.replace(/\/socket$/, "");
-                  return u.origin + (u.pathname === "/" ? "" : u.pathname);
-                } catch (e) {
-                  return undefined;
-                }
-              })();
+                // derive base from baseUrl for REST and devices API
+              const derivedBase = traccarBaseUrl ? { baseUrl: traccarBaseUrl, secure: traccarSecure } : undefined;
 
               // if we can discover device names via the devices endpoint, fetch them so labels are friendly
               let deviceNameMap: Record<number, string>;
               if (derivedBase) {
-                const devices = await fetchDevices({ baseUrl: derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined });
+                const devices = await fetchDevices({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined });
                 const nameMap: Record<number, string> = {};
                 const iconMap: Record<number, string> = {};
                 for (const d of devices) {
@@ -479,7 +475,7 @@ export function App() {
                     continue;
                   }
 
-                  const fetched = await fetchPositions({ baseUrl: derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined }, Number(deviceId), from, to, {});
+                  const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined }, Number(deviceId), from, to, {});
                   if (fetched && fetched.length > 0) {
                     for (const p of fetched) {
                       const key = dedupeKey(p);
@@ -532,7 +528,7 @@ export function App() {
         clientCloseRef.current?.();
       } catch (e) { }
     };
-  }, [traccarWsUrl, traccarToken, wsApplyCounter]);
+  }, [traccarBaseUrl, traccarSecure, traccarToken, wsApplyCounter]);
 
   // helper to find the most recent snapshot before or at a given time
   function findLatestSnapshotBeforeOrAt(snaps: DevicePoint[], time: number): DevicePoint | null {
@@ -643,11 +639,19 @@ export function App() {
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="text"
-                    className="border rounded px-2 py-1 w-[36rem]"
-                    placeholder="Traccar WS URL (e.g. ws://localhost:8082/api/socket)"
-                    value={wsUrlInput}
-                    onChange={(e) => setWsUrlInput(e.target.value)}
+                    className="border rounded px-2 py-1 w-[24rem]"
+                    placeholder="Traccar Base URL (e.g. localhost:8082)"
+                    value={baseUrlInput}
+                    onChange={(e) => setBaseUrlInput(e.target.value)}
                   />
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={secureInput}
+                      onChange={(e) => setSecureInput(e.target.checked)}
+                    />
+                    Secure (HTTPS/WSS)
+                  </label>
                   <input
                     type="password"
                     className="border rounded px-2 py-1 w-48"
@@ -662,9 +666,9 @@ export function App() {
                     Clear
                   </button>
                   <button className="px-3 py-1 rounded border" onClick={() => {
-                    if (!traccarWsUrl) {
+                    if (!traccarBaseUrl) {
                       setWsStatus("disconnected");
-                      setWsError("No WebSocket URL configured");
+                      setWsError("No Base URL configured");
                     } else {
                       setWsStatus("connecting");
                       setWsError(null);
