@@ -6,14 +6,13 @@ const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose"
 test("fade", async () => {
   const { Engine } = await import("../src/engine/engine");
 
-  const makeMeasurement = (x: number, y: number, t: number, accuracy = 10, motion?: boolean) => {
+  const makeMeasurement = (x: number, y: number, t: number, accuracy: number) => {
     return {
       device: 0,
-      mean: [x, y] as [number, number],
-      cov: [accuracy * accuracy, 0, accuracy * accuracy] as [number, number, number],
+      mean: [x, y],
+      cov: [accuracy * accuracy, 0, accuracy * accuracy],
       timestamp: t,
       accuracy,
-      motion,
       lat: 0,
       lon: 0,
     } as DevicePoint;
@@ -31,7 +30,7 @@ test("fade", async () => {
   for (let i = 0; i < moveCount; i++) {
     const x = 120 + (Math.random() - 0.5) * 4;
     const y = (Math.random() - 0.5) * 4;
-    measurements.push(makeMeasurement(x, y, t0 + (stationaryCount + i) * stepMs, 10, true));
+    measurements.push(makeMeasurement(x, y, t0 + (stationaryCount + i) * stepMs, 10));
   }
   for (let i = 0; i < stableCount; i++) measurements.push(makeMeasurement(120 + (Math.random() - 0.5) * 1, (Math.random() - 0.5) * 1, t0 + (stationaryCount + moveCount + i) * stepMs, 8));
 

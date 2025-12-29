@@ -1,8 +1,8 @@
-import type { NormalizedPosition } from "@/api/traccarClient";
 import React from "react";
+import type { DevicePoint } from "./types";
 
 type Props = {
-  snapshots: NormalizedPosition[];
+  snapshots: DevicePoint[];
   time: number;
   onChange: (time: number) => void;
   step?: number;

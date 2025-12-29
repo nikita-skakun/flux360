@@ -1,7 +1,7 @@
 import "./index.css";
 import { computeNextTimelineTime } from "@/lib/timeline";
 import { degreesToMeters, metersToDegrees } from "./util/geo";
-import { mergeSnapshots, pruneSnapshots } from "@/lib/snapshots";
+import { pruneSnapshots } from "@/lib/snapshots";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useLocalStorageBoolean } from "@/hooks/useLocalStorage";
@@ -135,6 +135,25 @@ export function App() {
     );
   }
 
+  // Merge incoming per-device raw snapshots with the existing state, prune by cutoff,
+  // update timeline time to remain within retained range, and return the pruned merged array.
+  function mergeAndApplyRawSnapshots(incomingByDevice: Record<string, DevicePoint[]>, cutoff: number): DevicePoint[] {
+    let prunedMergedArray: DevicePoint[] = [];
+    setRawSnapshotsByDevice((prevByDevice) => {
+      const mergedByDevice: Record<string, DevicePoint[]> = { ...(prevByDevice ?? {}) };
+      for (const [deviceKey, arr] of Object.entries(incomingByDevice)) {
+        const existing = mergedByDevice[deviceKey] ?? [];
+        const merged = [...existing, ...arr].sort((a, b) => a.timestamp - b.timestamp);
+        mergedByDevice[deviceKey] = pruneSnapshots(merged, cutoff);
+      }
+      const mergedArray = Object.values(mergedByDevice).flat().sort((a, b) => a.timestamp - b.timestamp);
+      prunedMergedArray = pruneSnapshots(mergedArray, cutoff);
+      ensureTimelineTimeWithinCutoff(prunedMergedArray, cutoff);
+      return mergedByDevice;
+    });
+    return prunedMergedArray;
+  }
+
   // Load persisted raw snapshots and build derived state (runs once on mount)
   useEffect(() => {
     try {
@@ -152,7 +171,7 @@ export function App() {
               .map((p) => {
                 if (!p) return null;
                 if (typeof p.timestamp !== "number" || typeof p.lat !== "number" || typeof p.lon !== "number") return null;
-                return { ...p } as DevicePoint;
+                return { ...p };
               })
               .filter(Boolean) as DevicePoint[]
           ).sort((a, b) => a.timestamp - b.timestamp);
@@ -170,17 +189,7 @@ export function App() {
         setRefLon(baseLon);
         const cutoff = Date.now() - HISTORY_MS;
 
-        setRawSnapshotsByDevice((prev) => {
-          const out: Record<string, DevicePoint[]> = { ...(prev ?? {}) };
-          for (const [k, arr] of Object.entries(byDevice)) {
-            const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
-            out[k] = pruneSnapshots(merged, cutoff);
-          }
-          const mergedArray = mergedArrayFromByDevice(out);
-          // Ensure timelineTime is within the retained range
-          ensureTimelineTimeWithinCutoff(mergedArray, cutoff);
-          return out;
-        });
+        mergeAndApplyRawSnapshots(byDevice, cutoff);
 
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const s of reconstructed) {
@@ -323,33 +332,18 @@ export function App() {
 
     const cutoff = Date.now() - HISTORY_MS;
 
-    // Merge with previous device-point histories per device
-    setRawSnapshotsByDevice((prevByDevice) => {
-      // compute previous merged array/last timestamp so we can detect "at latest" positions
-      const prevMergedArray = mergedArrayFromByDevice(prevByDevice ?? {});
-      const prevLatest = prevMergedArray[prevMergedArray.length - 1]?.timestamp ?? null;
-
-      const mergedByDevice: Record<string, DevicePoint[]> = { ...(prevByDevice ?? {}) };
-      for (const [deviceKey, arr] of Object.entries(rawByDevice)) {
-        const existing = mergedByDevice[deviceKey] ?? [];
-        const merged = mergeSnapshots(existing, arr).sort((a, b) => a.timestamp - b.timestamp);
-        mergedByDevice[deviceKey] = pruneSnapshots(merged, cutoff);
-      }
-      // recompute merged rawSnapshots (global list) from per-device lists
-      const mergedArray = Object.values(mergedByDevice).flat().sort((a, b) => a.timestamp - b.timestamp);
-      const prunedMergedArray = pruneSnapshots(mergedArray, cutoff);
-      mergedRaw = prunedMergedArray;
-
-      const newLatest = prunedMergedArray[prunedMergedArray.length - 1]?.timestamp ?? null;
-      // Advance timeline to new latest if the user was already at the previous latest (or timeline unset/expired)
-      setTimelineTime((prevTime) => computeNextTimelineTime(prevTime, prevLatest, newLatest, cutoff));
-
-      return mergedByDevice;
-    });
+    // Merge with previous device-point histories per device using the shared helper
+    const prevMergedArray = mergedArrayFromByDevice(rawSnapshotsByDevice ?? {});
+    const prevLatest = prevMergedArray[prevMergedArray.length - 1]?.timestamp ?? null;
+    const prunedMergedArray = mergeAndApplyRawSnapshots(rawByDevice, cutoff);
+    mergedRaw = prunedMergedArray;
+    const newLatest = prunedMergedArray[prunedMergedArray.length - 1]?.timestamp ?? null;
+    // Advance timeline to new latest if the user was already at the previous latest (or timeline unset/expired)
+    setTimelineTime((prevTime) => computeNextTimelineTime(prevTime, prevLatest, newLatest, cutoff));
 
     // Convert to engine measurements and run each device through its own Engine instance
     (async () => {
-      const prunedMergedEngine = await buildEngineSnapshotsFromByDevice(rawByDevice, cutoff);
+      await buildEngineSnapshotsFromByDevice(rawByDevice, cutoff);
       // default timeline time to the latest raw snapshot (history should be raw)
       setTimelineTime((prev) =>
         prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev
@@ -461,7 +455,7 @@ export function App() {
                 for (const d of devices) {
                   if (d && d.id != null) {
                     nameMap[d.id] = d.name;
-                    if (d.emoji) iconMap[d.id] = d.emoji;
+                    iconMap[d.id] = d.emoji;
                   }
                 }
                 setDeviceNames(nameMap);
