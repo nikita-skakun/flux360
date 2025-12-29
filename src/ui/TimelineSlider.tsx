@@ -30,7 +30,6 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, ste
   const clamped = Math.min(Math.max(time, minTime), maxTime);
   const formatted = new Date(clamped).toLocaleString();
 
-  // compute previous and next snapshot timestamps relative to current clamped time
   const sortedTimes = times.slice().sort((a, b) => a - b);
   let prevTime: number | null = null;
   for (let i = sortedTimes.length - 1; i >= 0; i--) {

@@ -17,8 +17,7 @@ export class Engine {
 
     for (const m of measurements) {
       this.mixture.update(m);
-      // deep copy snapshot (include action and spawn metadata from mixture)
-      const compSnap = this.mixture.snapshot().map((c: ComponentSnapshot) => ({ mean: [c.mean[0], c.mean[1]] as [number, number], cov: [c.cov[0], c.cov[1], c.cov[2]] as [number, number, number], consistency: c.consistency, weight: c.weight, action: c.action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt }));
+      const compSnap = this.mixture.snapshot().map((c: ComponentSnapshot) => ({ mean: [c.mean[0], c.mean[1]], cov: [c.cov[0], c.cov[1], c.cov[2]], consistency: c.consistency, weight: c.weight, action: c.action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt } as ComponentSnapshot));
       snapshots.push({ timestamp: m.timestamp ?? Date.now(), data: { components: compSnap } });
     }
 

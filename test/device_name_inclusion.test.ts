@@ -7,7 +7,6 @@ test("device names and icons are stored separately from snapshots", () => {
   const p = mp[0]!;
   const deviceKey = "42";
 
-  // device names/icons should live in separate mappings, not inside snapshot components
   const nameMap: Record<string, string> = { "42": "Phone A" };
   expect(nameMap[deviceKey]).toBe("Phone A");
 

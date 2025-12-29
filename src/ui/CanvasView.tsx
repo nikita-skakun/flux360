@@ -14,9 +14,9 @@ type Props = {
   height?: number;
   components: DevicePoint[];
   deviceIcons?: Record<number, string>;
-  refMeters?: { x: number; y: number }; // reference coordinate (meters) for centering
-  zoom?: number; // pixels per meter
-  fitToBounds?: boolean; // if true, zoom to fit all components
+  refMeters?: { x: number; y: number };
+  zoom?: number;
+  fitToBounds?: boolean;
   worldBounds?: { minX: number; minY: number; maxX: number; maxY: number } | null;
   selectedDeviceId?: number | null;
   openClusterPoint?: { x: number; y: number } | null;
@@ -30,8 +30,8 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
 
-  const CLUSTER_DISTANCE_PX = 36; // threshold in screen pixels for grouping markers
-  const PIN_R = 24; // pin head radius
+  const CLUSTER_DISTANCE_PX = 36;
+  const PIN_R = 24;
 
   function clusterRadius(size: number) {
     return Math.max(8, Math.ceil(6 + Math.sqrt(size) * 6));

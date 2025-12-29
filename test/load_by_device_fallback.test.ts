@@ -3,8 +3,8 @@ import { test, expect } from "bun:test";
 
 test("parsing LS_RAW_BY_DEVICE (DevicePoint arrays) yields positions with normalized timestamps", () => {
   const now = Date.now();
-  const t1 = now - 60_000; // one minute ago
-  const t2 = now - 30_000; // 30 seconds ago
+  const t1 = now - 60_000;
+  const t2 = now - 30_000;
 
   const storedByDevice = {
     d1: [

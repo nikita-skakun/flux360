@@ -1,14 +1,13 @@
-// Traccar client utilities
-
 export type TraccarAuth =
   | { type: "basic"; username: string; password: string }
-  | { type: "token"; token: string };
+  | { type: "token"; token: string }
+  | { type: "none" };
 
 export type TraccarClientOptions = {
-  baseUrl: string; // e.g. "traccar.example.com"
-  secure?: boolean; // default false (http), true for https
-  auth?: TraccarAuth;
-  fetchImpl?: typeof fetch; // for testing or alternate runtimes
+  baseUrl: string;
+  secure: boolean;
+  auth: TraccarAuth;
+  fetchImpl?: typeof fetch;
 };
 
 export type NormalizedPosition = {
@@ -34,14 +33,14 @@ function buildAuthHeader(auth?: TraccarAuth) {
 export function normalizePosition(raw: unknown): NormalizedPosition | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
-  const lat = typeof obj.latitude === "number" ? obj.latitude : undefined;
-  const lon = typeof obj.longitude === "number" ? obj.longitude : undefined;
+  const lat = typeof obj["latitude"] === "number" ? obj["latitude"] : undefined;
+  const lon = typeof obj["longitude"] === "number" ? obj["longitude"] : undefined;
   if (typeof lat !== "number" || typeof lon !== "number") return null;
 
-  const ts = typeof obj.fixTime === "string" ? Date.parse(obj.fixTime) : undefined;
+  const ts = typeof obj["fixTime"] === "string" ? Date.parse(obj["fixTime"]) : undefined;
   if (typeof ts !== "number" || Number.isNaN(ts)) return null;
 
-  const deviceId = typeof obj.id === "number" ? obj.deviceId : undefined;
+  const deviceId = typeof obj["deviceId"] === "number" ? obj["deviceId"] : undefined;
   if (typeof deviceId !== "number") return null;
 
   return {
@@ -49,7 +48,7 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
     timestamp: ts,
     lat,
     lon,
-    accuracy: typeof obj.accuracy === "number" ? obj.accuracy : 100,
+    accuracy: typeof obj["accuracy"] === "number" ? obj["accuracy"] : 100,
   } as NormalizedPosition;
 }
 
@@ -76,7 +75,7 @@ export async function fetchPositions(
     deviceId: String(deviceId),
     from: from.toISOString(),
   };
-  if (to) paramsBase.to = to.toISOString();
+  if (to) paramsBase["to"] = to.toISOString();
   for (const [k, v] of Object.entries(params)) {
     paramsBase[k] = String(v);
   }
@@ -96,8 +95,8 @@ export async function fetchPositions(
   }
   if (json && typeof json === "object") {
     const obj = json as Record<string, unknown>;
-    if (Array.isArray(obj.data)) {
-      return obj.data.map((p) => normalizePosition(p)).filter(Boolean) as NormalizedPosition[];
+    if (Array.isArray(obj["data"])) {
+      return obj["data"].map((p) => normalizePosition(p)).filter(Boolean) as NormalizedPosition[];
     }
   }
   throw new Error("Unexpected Traccar response format: expected JSON array");
@@ -120,22 +119,22 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
   if (Array.isArray(json)) arr = json;
   else if (json && typeof json === "object") {
     const obj = json as Record<string, unknown>;
-    if (Array.isArray(obj.data)) arr = obj.data;
+    if (Array.isArray(obj["data"])) arr = obj["data"];
   }
 
   return arr.flatMap((d) => {
     if (!d || typeof d !== "object") return [];
     const o = d as Record<string, unknown>;
 
-    const idRaw = o.id;
+    const idRaw = o["id"];
     if (typeof idRaw !== "number") return [];
     const id = idRaw as number;
 
-    const nameRaw = o.name ?? o.uniqueId ?? id;
+    const nameRaw = o["name"] ?? o["uniqueId"] ?? id;
     const name = String(nameRaw);
 
     let emoji: string;
-    if (o.attributes && typeof (o.attributes as any).emoji === "string") emoji = (o.attributes as any).emoji;
+    if (o["attributes"] && typeof (o["attributes"] as any)["emoji"] === "string") emoji = (o["attributes"] as any)["emoji"];
     else emoji = name.toUpperCase().charAt(0);
 
     return [{ id, name, emoji }];
@@ -143,9 +142,9 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
 }
 
 export type RealtimeConnectOptions = {
-  baseUrl?: string; // the host, e.g. "traccar.example.com"
-  secure?: boolean; // default false (ws), true for wss
-  auth?: TraccarAuth;
+  baseUrl: string;
+  secure: boolean;
+  auth: TraccarAuth;
   onPosition?: (p: NormalizedPosition) => void;
   onPositions?: (ps: NormalizedPosition[]) => void;
   onOpen?: () => void;
@@ -176,13 +175,11 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     if (destroyed) return;
     const base = buildWsUrl();
     if (!base) {
-      // No URL configured — do not attempt to connect.
       opts.onError?.(new Error("No WebSocket URL provided; not connecting."));
       return;
     }
 
     let wsUrl = base;
-    // append token if provided
     if (opts.auth && opts.auth.type === "token") {
       const sep = wsUrl.includes("?") ? "&" : "?";
       wsUrl = `${wsUrl}${sep}token=${encodeURIComponent(opts.auth.token)}`;
@@ -209,7 +206,6 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
           for (const p of positions) opts.onPosition?.(p);
           opts.onPositions?.(positions);
 
-          // resolve any pending requests that match
           for (let i = pendingRequests.length - 1; i >= 0; i--) {
             const pr = pendingRequests[i];
             if (pr && pr.matcher(positions)) {
@@ -220,7 +216,6 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
           }
         }
       } catch (e) {
-        // ignore parse errors but notify
         opts.onError?.(e);
       }
     };
@@ -262,14 +257,12 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
       try {
         ws.send(JSON.stringify(message));
       } catch (e) {
-        // if send fails, just resolve empty so caller can fallback
         resolve([]);
         return;
       }
 
       const timeoutMs = params.timeoutMs ?? 2000;
       const timeoutId = setTimeout(() => {
-        // timed out — resolve with empty array
         const idx = pendingRequests.findIndex((p) => p.timeoutId === timeoutId);
         if (idx >= 0) pendingRequests.splice(idx, 1);
         resolve([]);
@@ -306,17 +299,14 @@ export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] 
         return;
       }
 
-      // quick attempt: if this object looks like a position, normalize it
       const tryNorm = normalizePosition(node);
       if (tryNorm) {
         out.push(tryNorm);
         return;
       }
-      // common wrappers in Traccar messages
       for (const k of ["positions", "data", "payload", "body", "message"]) {
         if (k in node) walk((node as any)[k]);
       }
-      // otherwise traverse properties
       for (const v of Object.values(node)) walk(v);
     }
   }

@@ -48,7 +48,6 @@ const parseValue = (value: string): any => {
 };
 
 function parseArgs(): Partial<Bun.BuildConfig> {
-  // Use a looser indexable type since flags can be arbitrary keys like "minify.whitespace"
   const config: Record<string, any> = {};
   const args = process.argv.slice(2);
 
@@ -83,7 +82,6 @@ function parseArgs(): Partial<Bun.BuildConfig> {
 
     if (key.includes(".")) {
       const [parentKey, childKey] = key.split(".") as [string, string];
-      // ensure parent is an object
       if (!config[parentKey] || typeof config[parentKey] !== "object") config[parentKey] = {};
       config[parentKey][childKey] = parseValue(value);
     } else {

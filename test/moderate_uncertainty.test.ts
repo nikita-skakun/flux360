@@ -1,7 +1,7 @@
 import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
 
-const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
 test("moderate_uncertainty", async () => {
   const { Engine } = await import("../src/engine/engine");

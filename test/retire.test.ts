@@ -1,7 +1,7 @@
 import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
 
-const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
 test("retire", async () => {
   const { Engine } = await import("../src/engine/engine");
@@ -30,19 +30,16 @@ test("retire", async () => {
     measurements.push(makeMeasurement((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, t0 + i * stepMs, 10));
   }
 
-  // movement phase
   for (let i = 0; i < moveCount; i++) {
     const x = 120 + (Math.random() - 0.5) * 4;
     const y = (Math.random() - 0.5) * 4;
     measurements.push(makeMeasurement(x, y, t0 + (stationaryCount + i) * stepMs, 10));
   }
 
-  // stable at new location
   for (let i = 0; i < settleCount; i++) measurements.push(makeMeasurement(120 + (Math.random() - 0.5) * 1, (Math.random() - 0.5) * 1, t0 + (stationaryCount + moveCount + i) * stepMs, 8));
 
   const snaps = engine.processMeasurements(measurements);
 
-  // final snapshot check: ensure old far components faded/removed
   const final = snaps[snaps.length - 1];
   const finalComps = final?.data.components;
   const farCount = (finalComps ?? []).filter((c) => {

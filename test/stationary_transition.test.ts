@@ -1,7 +1,7 @@
 import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
 
-const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
 test("stationary_transition", async () => {
   const { Engine } = await import("../src/engine/engine");
@@ -36,7 +36,6 @@ test("stationary_transition", async () => {
 
   const snaps = engine.processMeasurements(measurements);
 
-  // check that final snapshot is 'still'
   const final = snaps[snaps.length - 1];
   const comps = final?.data.components;
   const best = comps && comps.length ? comps.reduce((a, b) => (a.weight >= b.weight ? a : b)) : null;

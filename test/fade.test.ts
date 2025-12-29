@@ -1,7 +1,7 @@
 import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
 
-const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
 test("fade", async () => {
   const { Engine } = await import("../src/engine/engine");
@@ -36,7 +36,6 @@ test("fade", async () => {
 
   const snaps = engine.processMeasurements(measurements);
 
-  // summary
   const keyIndices = [stationaryCount - 1, stationaryCount + moveCount - 1, stationaryCount + moveCount + stableCount - 1];
   if (VERBOSE) {
     console.log("Processed snapshots:");
@@ -50,7 +49,6 @@ test("fade", async () => {
     }
   }
 
-  // examine final snapshot and count movement-spawn remnants
   const final = snaps[snaps.length - 1];
   const finalComps = final?.data.components;
   const spawnedCount = finalComps ? finalComps.filter((c) => c.spawnedDuringMovement).length : 0;

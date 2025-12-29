@@ -1,7 +1,7 @@
 import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
 
-const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
 test("big_move", async () => {
   const { Engine } = await import("../src/engine/engine");
@@ -26,7 +26,6 @@ test("big_move", async () => {
   const measurements: DevicePoint[] = [];
   for (let i = 0; i < stationaryCount; i++) measurements.push(makeMeasurement((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2, t0 + i * stepMs, 6));
 
-  // single strong report far away
   measurements.push(makeMeasurement(200, 0, t0 + stationaryCount * stepMs, 5));
   measurements.push(makeMeasurement(201, -1, t0 + (stationaryCount + 1) * stepMs, 5));
 

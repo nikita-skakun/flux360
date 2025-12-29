@@ -14,7 +14,7 @@
   }
 
   const testFiles = entries.filter((f) => f.endsWith(".test.ts")).sort();
-  const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+  const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
   if (testFiles.length === 0) {
     console.error("No tests found in test/ (looking for *.test.ts)");
@@ -34,7 +34,6 @@
     const passMatch = combined.split(/\r?\n/).find((line) => /^\[PASS\]/.test(line));
 
     if (code === 0) {
-      // Print the PASS line if available, otherwise print a concise success
       if (passMatch) {
         console.log(passMatch);
       } else {

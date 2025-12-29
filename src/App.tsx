@@ -29,7 +29,6 @@ export function App() {
   const LS_UI_SHOW_HISTORY = "ui:showHistory";
   const HISTORY_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-  // Safe localStorage helpers
   function safeGetItem(key: string): string | null {
     try {
       if (typeof window === "undefined") return null;
@@ -55,25 +54,17 @@ export function App() {
   const [showEstimates, setShowEstimates] = useLocalStorageBoolean(LS_UI_SHOW_ESTIMATES, true);
   const [showAllPast, setShowAllPast] = useLocalStorageBoolean(LS_UI_SHOW_HISTORY, false);
 
-  // Persist raw snapshots to localStorage
-  // Avoid overwriting existing non-empty persisted data with an empty initial state on mount
   useEffect(() => {
     const existing = safeGetItem(LS_RAW_SNAPSHOTS);
     if (Array.isArray(rawSnapshots) && rawSnapshots.length === 0 && existing && existing !== "[]") {
-      // Keep previously persisted non-empty snapshots and avoid clobbering them with an initial empty array
       return;
     }
     safeSetItem(LS_RAW_SNAPSHOTS, JSON.stringify(rawSnapshots));
   }, [rawSnapshots]);
 
-  // Persist raw snapshots by device to localStorage (stronger per-device history persistence)
-  // Avoid overwriting existing non-empty persisted per-device data with an empty initial state on mount
   useEffect(() => {
     const existing = safeGetItem(LS_RAW_BY_DEVICE);
-    if (rawSnapshotsByDevice && Object.keys(rawSnapshotsByDevice).length === 0 && existing && existing !== "{}") {
-      // Keep previously persisted non-empty by-device data and avoid clobbering it
-      return;
-    }
+    if (rawSnapshotsByDevice && Object.keys(rawSnapshotsByDevice).length === 0 && existing && existing !== "{}") return;
     safeSetItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
   }, [rawSnapshotsByDevice]);
 
@@ -91,7 +82,6 @@ export function App() {
 
       for (const [deviceKey, arr] of Object.entries(byDevice)) {
         const deviceId = Number(deviceKey);
-        // Use DevicePoint[] directly for engine processing
         const measurements = arr.slice().sort((a: DevicePoint, b: DevicePoint) => (a.timestamp - b.timestamp));
 
         if (measurements.length === 0) {
@@ -102,7 +92,7 @@ export function App() {
         const enginePerDevice = new Engine();
         const engineSnapRaw: EngineSnapshot[] = enginePerDevice.processMeasurements(measurements);
 
-        const engineSnap: DevicePoint[] = engineSnapRaw.flatMap((s_: EngineSnapshot, idx: number) => {
+        const engineSnap: DevicePoint[] = engineSnapRaw.flatMap((s_: EngineSnapshot) => {
           return s_.data.components.map((c: ComponentSnapshot) => {
             const diagMax = Math.max(c.cov[0], c.cov[2]);
             const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
@@ -120,7 +110,6 @@ export function App() {
       setEngineSnapshotsByDevice(engineByDevice);
       return pruneSnapshots(mergedEngine, cutoff);
     } catch (e) {
-      // ignore engine errors
       return [];
     }
   }
@@ -135,8 +124,6 @@ export function App() {
     );
   }
 
-  // Merge incoming per-device raw snapshots with the existing state, prune by cutoff,
-  // update timeline time to remain within retained range, and return the pruned merged array.
   function mergeAndApplyRawSnapshots(incomingByDevice: Record<string, DevicePoint[]>, cutoff: number): DevicePoint[] {
     let prunedMergedArray: DevicePoint[] = [];
     setRawSnapshotsByDevice((prevByDevice) => {
@@ -154,12 +141,10 @@ export function App() {
     return prunedMergedArray;
   }
 
-  // Load persisted raw snapshots and build derived state (runs once on mount)
   useEffect(() => {
     try {
       if (typeof window === "undefined") return;
 
-      // Expect per-device persisted format: Record<string, DevicePoint[]>
       const parsedByDevice = safeGetJSON<Record<string, DevicePoint[]>>(LS_RAW_BY_DEVICE);
       if (parsedByDevice && typeof parsedByDevice === "object") {
         const byDevice: Record<string, DevicePoint[]> = {};
@@ -199,31 +184,22 @@ export function App() {
           maxY = Math.max(maxY, s.mean[1]);
         }
 
-        // On reload, reset timeline to the latest persisted timestamp unconditionally
         setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
 
-        // build engine-derived snapshots asynchronously (shared helper)
         buildEngineSnapshotsFromByDevice(byDevice, cutoff);
       }
-
-      // Defer setting `worldBounds` to the selected-time logic so historic raw data
-      // does not force an automatic zoom on load.
-
     } catch (e) { }
   }, []);
 
-  // Traccar connection settings (persisted in localStorage)
   const [baseUrlInput, setBaseUrlInput] = useState<string>(() => safeGetItem("traccar:baseUrl") ?? "");
   const [secureInput, setSecureInput] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
   const [tokenInput, setTokenInput] = useState<string>(() => safeGetItem("traccar:token") ?? "");
-  // applied (active) settings used by the client; change these via Apply/Save
   const [traccarBaseUrl, setTraccarBaseUrl] = useState<string | null>(() => safeGetItem("traccar:baseUrl") ?? null);
   const [traccarSecure, setTraccarSecure] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
   const [traccarToken, setTraccarToken] = useState<string | null>(() => safeGetItem("traccar:token") ?? null);
   const clientCloseRef = useRef<(() => void) | null>(null);
   const [deviceNames, setDeviceNames] = useState<Record<number, string>>({});
   const [deviceIcons, setDeviceIcons] = useState<Record<number, string>>({});
-  // Keep a ref of device names/icons so callbacks created inside effects can read the latest mapping
   const deviceNamesRef = useRef<Record<number, string>>(deviceNames);
   const deviceIconsRef = useRef<Record<number, string>>(deviceIcons);
   useEffect(() => {
@@ -240,7 +216,6 @@ export function App() {
   const [wsApplyCounter, setWsApplyCounter] = useState(0);
 
   function applySettings() {
-    // Persist settings safely
     safeSetItem("traccar:baseUrl", baseUrlInput || null);
     safeSetItem("traccar:secure", secureInput.toString());
     safeSetItem("traccar:token", tokenInput || null);
@@ -250,11 +225,9 @@ export function App() {
     setTraccarToken(tokenInput || null);
 
     if (baseUrlInput && baseUrlInput.trim() !== "") {
-      // attempt to connect
       setWsStatus("connecting");
       setWsError(null);
     } else {
-      // don't attempt to connect when no URL provided
       setWsStatus("disconnected");
       setWsError("No Base URL configured");
     }
@@ -266,7 +239,6 @@ export function App() {
     setBaseUrlInput("");
     setSecureInput(false);
     setTokenInput("");
-    // Clear persisted settings safely
     safeSetItem("traccar:baseUrl", null);
     safeSetItem("traccar:secure", "false");
     safeSetItem("traccar:token", null);
@@ -285,7 +257,6 @@ export function App() {
       return { ...p, device: p.deviceId };
     });
 
-    // Convert to measurements and build simple snapshots (UI-only)
     const first = positionsWithDevice[0];
     if (!first) return;
     const baseLat = first.lat;
@@ -293,7 +264,6 @@ export function App() {
     setRefLat(baseLat);
     setRefLon(baseLon);
 
-    // Group positions per device and sort each device stream by timestamp
     const posByDevice = new Map<number, NormalizedPosition[]>();
     for (const p of positionsWithDevice) {
       const key = p.device;
@@ -302,7 +272,6 @@ export function App() {
     }
     for (const arr of posByDevice.values()) arr.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Compute world bounds from incoming positions
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const arr of posByDevice.values()) {
       for (const p of arr) {
@@ -314,7 +283,6 @@ export function App() {
       }
     }
 
-    // Build raw per-position device points (history of measurements), keep per-device and merged lists
     const rawByDevice: Record<string, DevicePoint[]> = {};
     let mergedRaw: DevicePoint[] = [];
     for (const [deviceKey, arr] of posByDevice) {
@@ -339,40 +307,25 @@ export function App() {
 
     const cutoff = Date.now() - HISTORY_MS;
 
-    // Merge with previous device-point histories per device using the shared helper
     const prevMergedArray = mergedArrayFromByDevice(rawSnapshotsByDevice ?? {});
     const prevLatest = prevMergedArray[prevMergedArray.length - 1]?.timestamp ?? null;
     const prunedMergedArray = mergeAndApplyRawSnapshots(rawByDevice, cutoff);
     mergedRaw = prunedMergedArray;
     const newLatest = prunedMergedArray[prunedMergedArray.length - 1]?.timestamp ?? null;
-    // Advance timeline to new latest if the user was already at the previous latest (or timeline unset/expired)
-    setTimelineTime((prevTime) => computeNextTimelineTime(prevTime, prevLatest, newLatest, cutoff));
+    setTimelineTime((prev) => computeNextTimelineTime(prev, prevLatest, newLatest, cutoff));
 
-    // Convert to engine measurements and run each device through its own Engine instance
-    (async () => {
-      await buildEngineSnapshotsFromByDevice(rawByDevice, cutoff);
-      // default timeline time to the latest raw snapshot (history should be raw)
-      setTimelineTime((prev) =>
-        prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev
-      );
-      // Do not set world bounds from the full incoming positions (which may include history).
-      // World bounds are computed from the UI-selected time and filters so historic raw data
-      // doesn't trigger an automatic zoom.
-    })();
-
+    buildEngineSnapshotsFromByDevice(rawByDevice, cutoff);
+    setTimelineTime((prev) => prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev);
   }
 
   useEffect(() => {
-    // If there is no configured base URL, do not attempt to connect
     if (!traccarBaseUrl) {
       clientCloseRef.current?.();
       setWsStatus("disconnected");
-      // leave wsError alone if it already contains a helpful message, otherwise clear
       setWsError((prev) => (prev && prev.includes("No Base URL") ? prev : prev ?? null));
       return;
     }
 
-    // update status for this connection attempt
     setWsStatus("connecting");
     setWsError(null);
 
@@ -395,7 +348,6 @@ export function App() {
       arr.splice(lo, 0, item);
     }
 
-    // Pre-seed positionsAll and seen with persisted device points so old locations are preserved
     try {
       if (rawSnapshots && rawSnapshots.length > 0) {
         for (const s of rawSnapshots) {
@@ -412,7 +364,6 @@ export function App() {
       }
     } catch (e) { }
 
-    // close any previous client before creating a new one
     clientCloseRef.current?.();
 
     (async () => {
@@ -421,7 +372,7 @@ export function App() {
         const client = connectRealtime({
           baseUrl: traccarBaseUrl ?? undefined,
           secure: traccarSecure,
-          auth: traccarToken ? { type: "token", token: traccarToken } : undefined,
+          auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" },
           autoReconnect: true,
           reconnectInitialMs: 1000,
           reconnectMaxMs: 30000,
@@ -437,60 +388,51 @@ export function App() {
             (async () => {
               setWsStatus("connected");
               setWsError(null);
-              // attempt resync for known devices if any (prefer WS request, fallback to REST)
               try {
-                // derive base from baseUrl for REST and devices API
-              const derivedBase = traccarBaseUrl ? { baseUrl: traccarBaseUrl, secure: traccarSecure } : undefined;
+                const derivedBase = traccarBaseUrl ? { baseUrl: traccarBaseUrl, secure: traccarSecure } : null;
 
-              // if we can discover device names via the devices endpoint, fetch them so labels are friendly
-              let deviceNameMap: Record<number, string>;
-              if (derivedBase) {
-                const devices = await fetchDevices({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined });
-                const nameMap: Record<number, string> = {};
-                const iconMap: Record<number, string> = {};
-                for (const d of devices) {
-                  if (d && d.id != null) {
-                    nameMap[d.id] = d.name;
-                    iconMap[d.id] = d.emoji;
-                  }
-                }
-                setDeviceNames(nameMap);
-                setDeviceIcons(iconMap);
-                deviceNameMap = nameMap;
-                // include discovered devices in the fetch list
-                for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
-                // refresh current positions with names and icons
-                processPositions(positionsAll);
-              } else {
-                deviceNameMap = {};
-              }
-
-              for (const deviceId of knownDevices) {
-                if (deviceId == null || Number.isNaN(Number(deviceId))) continue;
-                const from = new Date(Math.max(0, Date.now() - HISTORY_MS));
-                const to = new Date();
-
-                try {
-                  if (!derivedBase) {
-                    continue;
-                  }
-
-                  const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined }, Number(deviceId), from, to, {});
-                  if (fetched && fetched.length > 0) {
-                    for (const p of fetched) {
-                      const key = dedupeKey(p);
-                      if (seen.has(key)) continue;
-                      seen.add(key);
-                      positionsAll.push(p);
+                if (derivedBase) {
+                  const devices = await fetchDevices({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } });
+                  const nameMap: Record<number, string> = {};
+                  const iconMap: Record<number, string> = {};
+                  for (const d of devices) {
+                    if (d && d.id != null) {
+                      nameMap[d.id] = d.name;
+                      iconMap[d.id] = d.emoji;
                     }
-                    positionsAll.sort((a, b) => a.timestamp - b.timestamp);
-
-                    processPositions(positionsAll);
                   }
-                } catch (e) { }
-              }
-            } catch (e) { }
-            })().catch(() => {});
+                  setDeviceNames(nameMap);
+                  setDeviceIcons(iconMap);
+                  for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
+                  processPositions(positionsAll);
+                }
+
+                for (const deviceId of knownDevices) {
+                  if (deviceId == null || Number.isNaN(Number(deviceId))) continue;
+                  const from = new Date(Math.max(0, Date.now() - HISTORY_MS));
+                  const to = new Date();
+
+                  try {
+                    if (!derivedBase) {
+                      continue;
+                    }
+
+                    const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } }, Number(deviceId), from, to, {});
+                    if (fetched && fetched.length > 0) {
+                      for (const p of fetched) {
+                        const key = dedupeKey(p);
+                        if (seen.has(key)) continue;
+                        seen.add(key);
+                        positionsAll.push(p);
+                      }
+                      positionsAll.sort((a, b) => a.timestamp - b.timestamp);
+
+                      processPositions(positionsAll);
+                    }
+                  } catch (e) { }
+                }
+              } catch (e) { }
+            })().catch(() => { });
           },
           onClose: (ev) => {
             const code = ev?.code;
@@ -508,7 +450,6 @@ export function App() {
           },
         });
 
-        // keep a handle for debugging and allow manual close
         (window as unknown as { __traccarClient?: unknown }).__traccarClient = client;
         clientCloseRef.current = () => {
           client.close();
@@ -520,13 +461,11 @@ export function App() {
       }
     })();
 
-    // cleanup function for useEffect
     return () => {
       clientCloseRef.current?.();
     };
   }, [traccarBaseUrl, traccarSecure, traccarToken, wsApplyCounter]);
 
-  // helper to find the most recent snapshot before or at a given time
   function findLatestSnapshotBeforeOrAt(snaps: DevicePoint[], time: number): DevicePoint | null {
     if (!Array.isArray(snaps) || snaps.length === 0) return null;
     let lo = 0;
@@ -549,10 +488,8 @@ export function App() {
     return result;
   }
 
-  // Compute the effective time used for visibility (defaults to latest raw snapshot)
   const getEffectiveTimelineTime = () => timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now());
 
-  // Small helper to display durations like "5m ago"
   function humanDurationSince(ts: number): string {
     const s = Math.round((Date.now() - (ts ?? Date.now())) / 1000);
     if (s < 5) return "just now";
@@ -565,22 +502,21 @@ export function App() {
     return `${d}d ago`;
   }
 
-  // Return the visible components at a given time according to UI toggles
   const visibleComponentsAtTime = (time: number): DevicePoint[] => {
     const engineComps = showEstimates
       ? Object.values(engineSnapshotsByDevice).flatMap((arr) => {
-          const p = findLatestSnapshotBeforeOrAt(arr, time);
-          return p ? [p] : [];
-        })
+        const p = findLatestSnapshotBeforeOrAt(arr, time);
+        return p ? [p] : [];
+      })
       : [];
 
     const rawComps = showRaw
       ? showAllPast
         ? rawSnapshots.filter((s) => s.timestamp <= time)
         : Object.values(rawSnapshotsByDevice).flatMap((arr) => {
-            const p = findLatestSnapshotBeforeOrAt(arr, time);
-            return p ? [p] : [];
-          })
+          const p = findLatestSnapshotBeforeOrAt(arr, time);
+          return p ? [p] : [];
+        })
       : [];
 
     return [...rawComps, ...engineComps];
@@ -591,7 +527,6 @@ export function App() {
 
   const frame = { components: visibleComponents };
 
-  // Compute world bounds from the currently visible components only
   useEffect(() => {
     if (visibleComponents.length === 0) {
       setWorldBounds(null);

@@ -14,7 +14,7 @@ test("does not advance when user is not at latest", () => {
   const prevLatest = 1000;
   const newLatest = 2000;
   const cutoff = 0;
-  const current = 1500; // user moved slider back
+  const current = 1500;
   const out = computeNextTimelineTime(current, prevLatest, newLatest, cutoff);
   expect(out).toBe(1500);
 });

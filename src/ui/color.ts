@@ -3,7 +3,6 @@ import ColorHash from "color-hash";
 export type Color = [number, number, number];
 
 const ch = new ColorHash({
-  // soften colors a bit by lowering saturation and increasing lightness
   saturation: [0.45, 0.55, 0.65],
   lightness: [0.50, 0.56, 0.62],
 });

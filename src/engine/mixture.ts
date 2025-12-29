@@ -7,8 +7,8 @@ export type ComponentSnapshot = {
   consistency: number;
   weight: number;
   action?: "moving" | "still";
-  spawnedDuringMovement?: boolean;
-  createdAt?: number;
+  spawnedDuringMovement: boolean;
+  createdAt: number;
 };
 
 export class Mixture {

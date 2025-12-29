@@ -1,6 +1,3 @@
-// Small geo utilities for the POC
-
-// Convert lat/lon degrees to meters around a reference point using equirectangular approx.
 export function degreesToMeters(lat: number, lon: number, refLat: number = lat, refLon: number = lon) {
   const R = 6371000; // meters
   const dLat = (lat - refLat) * (Math.PI / 180);
