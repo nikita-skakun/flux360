@@ -211,14 +211,12 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
 
           // resolve any pending requests that match
           for (let i = pendingRequests.length - 1; i >= 0; i--) {
-            try {
-              const pr = pendingRequests[i];
-              if (pr && pr.matcher(positions)) {
-                clearTimeout(pr.timeoutId);
-                pr.resolve(positions);
-                pendingRequests.splice(i, 1);
-              }
-            } catch (e) { }
+            const pr = pendingRequests[i];
+            if (pr && pr.matcher(positions)) {
+              clearTimeout(pr.timeoutId);
+              pr.resolve(positions);
+              pendingRequests.splice(i, 1);
+            }
           }
         }
       } catch (e) {
@@ -286,9 +284,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
   return {
     close() {
       destroyed = true;
-      try {
-        ws?.close();
-      } catch (e) { }
+      ws?.close();
       ws = null;
     },
     requestPositions,

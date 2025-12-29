@@ -511,9 +511,7 @@ export function App() {
         // keep a handle for debugging and allow manual close
         (window as unknown as { __traccarClient?: unknown }).__traccarClient = client;
         clientCloseRef.current = () => {
-          try {
-            client.close();
-          } catch (e) { }
+          client.close();
         };
       } catch (e) {
         console.warn("Could not initialize realtime traccar client:", e);
@@ -524,9 +522,7 @@ export function App() {
 
     // cleanup function for useEffect
     return () => {
-      try {
-        clientCloseRef.current?.();
-      } catch (e) { }
+      clientCloseRef.current?.();
     };
   }, [traccarBaseUrl, traccarSecure, traccarToken, wsApplyCounter]);
 
