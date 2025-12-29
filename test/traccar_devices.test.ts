@@ -8,7 +8,7 @@ test("fetchDevices parses array response", async () => {
     { id: 3 },
   ];
   const fakeFetch = async (url: string) => ({ ok: true, json: async () => sample });
-  const devices = await fetchDevices({ baseUrl: "http://example/api", fetchImpl: fakeFetch as any });
+  const devices = await fetchDevices({ baseUrl: "http://example/api", fetchImpl: fakeFetch as typeof fetch });
   expect(devices.length).toBe(3);
   const names = devices.map((d) => d.name ?? "");
   expect(names[0]).toBe("Device A");
@@ -19,10 +19,10 @@ test("fetchDevices parses array response", async () => {
 test("fetchDevices parses object.data response", async () => {
   const sample = { data: [{ id: 7, name: "X" }, { id: 8, uniqueId: "Y" }] };
   const fakeFetch = async (url: string) => ({ ok: true, json: async () => sample });
-  const devices = await fetchDevices({ baseUrl: "http://example/api", fetchImpl: fakeFetch as any });
+  const devices = await fetchDevices({ baseUrl: "http://example/api", fetchImpl: fakeFetch as typeof fetch });
   expect(devices.length).toBe(2);
-  expect(devices[0].id).toBe(7);
-  expect(devices[0].name).toBe("X");
-  expect(devices[1].id).toBe(8);
-  expect(devices[1].name).toBe("Y");
+  expect(devices[0]!.id).toBe(7);
+  expect(devices[0]!.name).toBe("X");
+  expect(devices[1]!.id).toBe(8);
+  expect(devices[1]!.name).toBe("Y");
 });

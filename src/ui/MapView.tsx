@@ -2,12 +2,14 @@ import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import React, { useEffect, useRef, useState } from "react";
-import type { ComponentUI } from "@/ui/types";
+import type { DevicePoint } from "@/ui/types";
 
 import { colorForDevice } from "./color";
 
 type Props = {
-  components: ComponentUI[];
+  components: DevicePoint[];
+  deviceNames?: Record<number, string>;
+  deviceIcons?: Record<number, string>;
   refLat: number | null;
   refLon: number | null;
   worldBounds?: { minX: number; minY: number; maxX: number; maxY: number } | null;
@@ -17,7 +19,7 @@ type Props = {
   selectedDeviceId?: number | null;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = null, height = 600, overlay, onSelectDevice, selectedDeviceId }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = null, height = 600, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -28,7 +30,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
 
   const canvasApiRef = useRef<CanvasViewHandle | null>(null);
   // store anchor as map lat/lng so the chooser stays pinned to the map
-  const [clusterPopup, setClusterPopup] = useState<{ lat: number; lng: number; items: ComponentUI[] } | null>(null);
+  const [clusterPopup, setClusterPopup] = useState<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
 
   // animation state for the cluster popup so we can animate open/close
   const [clusterAnimation, setClusterAnimation] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle');
@@ -36,7 +38,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
   const CLUSTER_ANIM_MS = 150;
 
   // refs to hold latest values so event handlers registered once can see them
-  const clusterPopupRef = useRef<{ lat: number; lng: number; items: ComponentUI[] } | null>(null);
+  const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
 
   useEffect(() => {
@@ -47,7 +49,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
   }, [clusterAnimation]);
 
   // open helper (animated) — now accepts lat/lng anchor
-  const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: ComponentUI[] }) => {
+  const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
     if (clusterAnimationTimerRef.current) {
       window.clearTimeout(clusterAnimationTimerRef.current);
       clusterAnimationTimerRef.current = null;
@@ -208,8 +210,8 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
               const dur = flyDurationForMeters(dist);
               map.flyTo([clusterPoint.lat, clusterPoint.lng], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
             }
-          } catch (e) {}
-          openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items as ComponentUI[] });
+          } catch (e) { }
+          openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items });
         }
       } else {
         closeClusterPopupAnimated();
@@ -225,7 +227,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
         container.style.cursor = "pointer";
         if (hit.items.length === 1) {
           const first = hit.items[0];
-          if (first) container.title = (first as any).deviceName ?? String(first.device);
+          if (first) container.title = (deviceNames && deviceNames[first.device]) ?? String(first.device);
           else container.title = "";
         } else {
           container.title = "";
@@ -442,9 +444,9 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
                     className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center cursor-pointer hover:scale-110"
                     style={innerStyle}
                     onClick={(e) => { e.stopPropagation(); onSelectDevice?.(it.device); closeClusterPopupAnimated(); }}
-                    title={(it as any).deviceName ?? String(it.device)}
+                    title={(deviceNames && deviceNames[it.device]) ?? String(it.device)}
                   >
-                    <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{it.emoji}</span>
+                    <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{(deviceIcons && deviceIcons[it.device]) ?? String(it.device).charAt(0).toUpperCase()}</span>
                   </div>
                 </div>
               );
@@ -462,6 +464,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
         <CanvasView
           ref={canvasApiRef}
           components={components}
+          deviceIcons={deviceIcons}
           width={size.width}
           height={size.height}
           zoom={pixelsPerMeter}

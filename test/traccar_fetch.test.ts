@@ -3,14 +3,14 @@ import { fetchPositions, fetchDevices } from "../src/api/traccarClient";
 
 test("fetchPositions uses Authorization header and omits token query parameter", async () => {
   let recordedUrl: string | null = null;
-  let recordedInit: any = null;
-  const fakeFetch = async (url: string, init?: any) => {
+  let recordedInit: RequestInit | null = null;
+  const fakeFetch = async (url: string, init: RequestInit) => {
     recordedUrl = url;
     recordedInit = init;
-    return { ok: true, json: async () => [] } as any;
+    return { ok: true, json: async () => [] };
   };
 
-  await fetchPositions({ baseUrl: "http://example/api", auth: { type: "token", token: "abc123" }, fetchImpl: fakeFetch as any }, 42, new Date(1600000000000));
+  await fetchPositions({ baseUrl: "http://example/api", auth: { type: "token", token: "abc123" }, fetchImpl: fakeFetch as typeof fetch }, 42, new Date(1600000000000));
 
   expect(recordedUrl).toBeTruthy();
   const u = new URL(recordedUrl!);
@@ -19,20 +19,21 @@ test("fetchPositions uses Authorization header and omits token query parameter",
   expect(u.searchParams.get("token")).toBe(null);
 
   expect(recordedInit).toBeTruthy();
-  expect(recordedInit.headers).toBeTruthy();
-  expect(recordedInit.headers["Authorization"]).toBe("Bearer abc123");
+  expect(recordedInit!.headers).toBeTruthy();
+  const h = new Headers(recordedInit!.headers as HeadersInit);
+  expect(h.get("Authorization")).toBe("Bearer abc123");
 });
 
 test("fetchDevices uses Authorization header and omits token query parameter", async () => {
   let recordedUrl: string | null = null;
-  let recordedInit: any = null;
-  const fakeFetch = async (url: string, init?: any) => {
+  let recordedInit: RequestInit | null = null;
+  const fakeFetch = async (url: string, init: RequestInit) => {
     recordedUrl = url;
     recordedInit = init;
-    return { ok: true, json: async () => [] } as any;
+    return { ok: true, json: async () => [] };
   };
 
-  await fetchDevices({ baseUrl: "http://example/api", auth: { type: "token", token: "t0k" }, fetchImpl: fakeFetch as any });
+  await fetchDevices({ baseUrl: "http://example/api", auth: { type: "token", token: "t0k" }, fetchImpl: fakeFetch as typeof fetch });
 
   expect(recordedUrl).toBeTruthy();
   const u = new URL(recordedUrl!);
@@ -40,6 +41,7 @@ test("fetchDevices uses Authorization header and omits token query parameter", a
   expect(u.searchParams.get("token")).toBe(null);
 
   expect(recordedInit).toBeTruthy();
-  expect(recordedInit.headers).toBeTruthy();
-  expect(recordedInit.headers["Authorization"]).toBe("Bearer t0k");
+  expect(recordedInit!.headers).toBeTruthy();
+  const h = new Headers(recordedInit!.headers as HeadersInit);
+  expect(h.get("Authorization")).toBe("Bearer t0k");
 });

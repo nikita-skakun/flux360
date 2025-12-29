@@ -1,25 +1,23 @@
 import { test, expect } from "bun:test";
-import { normalizeSnapshots } from "../src/lib/snapshots";
 
-test("parsing LS_RAW_BY_DEVICE yields positions with normalized timestamps", () => {
+test("parsing LS_RAW_BY_DEVICE (DevicePoint arrays) yields positions with normalized timestamps", () => {
   const now = Date.now();
   const t1 = now - 60_000; // one minute ago
   const t2 = now - 30_000; // 30 seconds ago
 
   const storedByDevice = {
     d1: [
-      { timestamp: t1, data: { components: [{ lat: 1.1, lon: -2.2, accuracy: 5, device: 'd1' }] } },
-      { timestamp: t2, data: { components: [{ lat: 1.2, lon: -2.3, accuracy: 6, device: 'd1' }] } },
+      { timestamp: t1, lat: 1.1, lon: -2.2, accuracy: 5, device: 1, mean: [1.1, -2.2], cov: [25, 0, 25] },
+      { timestamp: t2, lat: 1.2, lon: -2.3, accuracy: 6, device: 1, mean: [1.2, -2.3], cov: [36, 0, 36] },
     ],
   };
 
   const positionsAll: any[] = [];
   for (const [k, arr] of Object.entries(storedByDevice)) {
-    const snaps = normalizeSnapshots(arr as any);
+    const snaps = arr.sort((a, b) => a.timestamp - b.timestamp);
     for (const snap of snaps) {
-      const comp = snap.data?.components?.[0];
-      if (!comp) continue;
-      const p = { timestamp: snap.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, raw: true };
+      if (!snap) continue;
+      const p = { timestamp: snap.timestamp, lat: snap.lat, lon: snap.lon, accuracy: snap.accuracy, deviceId: snap.device, raw: true };
       positionsAll.push(p);
     }
   }

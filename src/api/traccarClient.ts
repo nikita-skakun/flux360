@@ -12,12 +12,11 @@ export type TraccarClientOptions = {
 };
 
 export type NormalizedPosition = {
+  deviceId: number;
+  timestamp: number; // epoch ms
   lat: number;
   lon: number;
   accuracy: number; // meters
-  timestamp: number; // epoch ms
-  deviceId: number;
-  raw?: unknown; // original payload
 };
 
 function buildAuthHeader(auth?: TraccarAuth) {
@@ -32,44 +31,26 @@ function buildAuthHeader(auth?: TraccarAuth) {
   return undefined;
 }
 
-function parseTimestampFromRecord(r: unknown): number | undefined {
-  // Traccar may return a number of fields for times. Prefer `time` or `deviceTime` or `fixTime` etc.
-  if (!r || typeof r !== "object") return undefined;
-  const obj = r as Record<string, unknown>;
-  const candidates = ["time", "timestamp", "deviceTime", "fixTime", "serverTime", "fixtime", "timeServer"];
-  for (const k of candidates) {
-    const v = obj[k];
-    if (v == null) continue;
-    if (typeof v === "number") return v;
-    if (typeof v === "string") {
-      const parsed = Date.parse(v);
-      if (!Number.isNaN(parsed)) return parsed;
-      const n = Number(v);
-      if (!Number.isNaN(n)) return n;
-    }
-  }
-  return undefined;
-}
-
-export function normalizePosition(raw: unknown, defaultAccuracy = 50): NormalizedPosition | null {
+export function normalizePosition(raw: unknown): NormalizedPosition | null {
   if (!raw || typeof raw !== "object") return null;
   const obj = raw as Record<string, unknown>;
-  const lat = typeof obj.latitude === "number" ? obj.latitude : typeof obj.lat === "number" ? obj.lat : typeof obj.latDeg === "number" ? obj.latDeg : typeof obj.y === "number" ? obj.y : undefined;
-  const lon = typeof obj.longitude === "number" ? obj.longitude : typeof obj.lon === "number" ? obj.lon : typeof obj.lng === "number" ? obj.lng : typeof obj.x === "number" ? obj.x : undefined;
+  const lat = typeof obj.latitude === "number" ? obj.latitude : undefined;
+  const lon = typeof obj.longitude === "number" ? obj.longitude : undefined;
   if (typeof lat !== "number" || typeof lon !== "number") return null;
 
-  const ts = parseTimestampFromRecord(obj) ?? Date.now();
-  const accuracyRaw = obj.accuracy ?? obj.precision;
-  const accuracy = typeof accuracyRaw === "number" ? accuracyRaw : defaultAccuracy;
-  const deviceId = obj.deviceId ?? obj.device ?? obj.id;
+  const ts = typeof obj.fixTime === "string" ? Date.parse(obj.fixTime) : undefined;
+  if (typeof ts !== "number" || Number.isNaN(ts)) return null;
+
+  const deviceId = typeof obj.id === "number" ? obj.deviceId : undefined;
+  if (typeof deviceId !== "number") return null;
+
   return {
+    deviceId,
+    timestamp: ts,
     lat,
     lon,
-    accuracy,
-    timestamp: ts,
-    deviceId: typeof deviceId === "number" ? deviceId : 0,
-    raw: obj,
-  };
+    accuracy: typeof obj.accuracy === "number" ? obj.accuracy : 100,
+  } as NormalizedPosition;
 }
 
 async function performGet(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown> {
@@ -110,12 +91,12 @@ export async function fetchPositions(
 
   const json: unknown = await performGet(fetcher, url, headers);
   if (Array.isArray(json)) {
-    return json.map((p) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
+    return json.map((p) => normalizePosition(p)).filter(Boolean) as NormalizedPosition[];
   }
   if (json && typeof json === "object") {
     const obj = json as Record<string, unknown>;
     if (Array.isArray(obj.data)) {
-      return obj.data.map((p) => normalizePosition(p, opts.defaultAccuracyMeters ?? 50)).filter(Boolean) as NormalizedPosition[];
+      return obj.data.map((p) => normalizePosition(p)).filter(Boolean) as NormalizedPosition[];
     }
   }
   throw new Error("Unexpected Traccar response format: expected JSON array");
@@ -144,12 +125,12 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
     if (!d || typeof d !== "object") return [];
     const o = d as Record<string, unknown>;
 
-    const idRaw = o.id ?? o.deviceId ?? o.uniqueId;
+    const idRaw = o.id;
     if (typeof idRaw !== "number") return [];
     const id = idRaw as number;
 
-    const nameRaw = o.name ?? o.uniqueId ?? o.deviceId;
-    const name = nameRaw != null ? String(nameRaw) : String(id);
+    const nameRaw = o.name ?? o.uniqueId ?? id;
+    const name = String(nameRaw);
 
     let emoji: string | undefined;
     if (o.attributes && typeof (o.attributes as any).emoji === "string") emoji = (o.attributes as any).emoji;
@@ -167,10 +148,9 @@ export type RealtimeConnectOptions = {
   onOpen?: () => void;
   onClose?: (ev?: CloseEvent) => void;
   onError?: (err: unknown) => void;
-  autoReconnect?: boolean;
-  reconnectInitialMs?: number;
-  reconnectMaxMs?: number;
-  defaultAccuracyMeters?: number;
+  autoReconnect: boolean;
+  reconnectInitialMs: number;
+  reconnectMaxMs: number;
 };
 
 export function connectRealtime(opts: RealtimeConnectOptions): { close: () => void; requestPositions: (params: { deviceId: number; from?: Date; to?: Date; timeoutMs?: number; message?: object; }) => Promise<NormalizedPosition[]> } {
@@ -219,7 +199,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     ws.onmessage = (ev: MessageEvent) => {
       try {
         const raw = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
-        const positions = extractPositionsFromMessage(raw, opts.defaultAccuracyMeters ?? 50);
+        const positions = extractPositionsFromMessage(raw);
         if (positions.length > 0) {
           for (const p of positions) opts.onPosition?.(p);
           opts.onPositions?.(positions);
@@ -310,7 +290,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
   };
 }
 
-export function extractPositionsFromMessage(raw: unknown, defaultAccuracy = 50): NormalizedPosition[] {
+export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] {
   const out: NormalizedPosition[] = [];
 
   const visited = new WeakSet();
@@ -326,7 +306,7 @@ export function extractPositionsFromMessage(raw: unknown, defaultAccuracy = 50):
       }
 
       // quick attempt: if this object looks like a position, normalize it
-      const tryNorm = normalizePosition(node, defaultAccuracy);
+      const tryNorm = normalizePosition(node);
       if (tryNorm) {
         out.push(tryNorm);
         return;

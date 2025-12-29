@@ -1,23 +1,24 @@
 import "./index.css";
 import { computeNextTimelineTime } from "@/lib/timeline";
-import { degreesToMeters } from "./util/geo";
-import { mergeSnapshots, pruneSnapshots, normalizeSnapshots } from "@/lib/snapshots";
+import { degreesToMeters, metersToDegrees } from "./util/geo";
+import { mergeSnapshots, pruneSnapshots } from "@/lib/snapshots";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useLocalStorageBoolean } from "@/hooks/useLocalStorage";
 import MapView from "./ui/MapView";
-import type { ComponentUI } from "@/ui/types";
-import type { Cov2, Measurement } from "./engine/component";
+import type { DevicePoint } from "@/ui/types";
+import type { Cov2 } from "@/ui/types";
+import type { EngineSnapshot } from "@/engine/engine";
+import type { ComponentSnapshot } from "@/engine/mixture";
 import type { NormalizedPosition } from "@/api/traccarClient";
 
 export function App() {
-  type Snapshot = { timestamp: number; data: { components: ComponentUI[] } };
   type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
   const [timelineTime, setTimelineTime] = useState<number | null>(null);
-  const [rawSnapshotsByDevice, setRawSnapshotsByDevice] = useState<Record<number, Snapshot[]>>({});
+  const [rawSnapshotsByDevice, setRawSnapshotsByDevice] = useState<Record<number, DevicePoint[]>>({});
   const rawSnapshots = useMemo(() => mergedArrayFromByDevice(rawSnapshotsByDevice), [rawSnapshotsByDevice]);
-  const [engineSnapshotsByDevice, setEngineSnapshotsByDevice] = useState<Record<number, Snapshot[]>>({});
+  const [engineSnapshotsByDevice, setEngineSnapshotsByDevice] = useState<Record<number, DevicePoint[]>>({});
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
@@ -76,49 +77,22 @@ export function App() {
     safeSetItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
   }, [rawSnapshotsByDevice]);
 
-  // small helpers to reduce duplication and keep logic in one place
-  function computeDisplaySpeed(prevM: Measurement | undefined, m: Measurement | undefined): number | undefined {
-    if (typeof m?.speed === "number") return m.speed;
-    if (prevM && m && typeof m.timestamp === "number" && typeof prevM.timestamp === "number") {
-      const dt = (m.timestamp - prevM.timestamp) / 1000;
-      if (dt > 0) {
-        const dx = (m.mean?.[0] ?? 0) - (prevM.mean?.[0] ?? 0);
-        const dy = (m.mean?.[1] ?? 0) - (prevM.mean?.[1] ?? 0);
-        return Math.sqrt(dx * dx + dy * dy) / dt;
-      }
-    }
-    return undefined;
-  }
 
   function measurementCovFromAccuracy(accuracyMeters: number): Cov2 {
     const v = accuracyMeters * accuracyMeters;
     return [v, 0, v];
   }
 
-  async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, unknown[]>, cutoff: number, nameMapLocal?: Record<string, string>): Promise<Snapshot[]> {
+  async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, DevicePoint[]>, cutoff: number): Promise<DevicePoint[]> {
     try {
       const { Engine } = await import("@/engine/engine");
-      const engineByDevice: Record<number, Snapshot[]> = {};
-      const mergedEngine: Snapshot[] = [];
+      const engineByDevice: Record<number, DevicePoint[]> = {};
+      const mergedEngine: DevicePoint[] = [];
 
       for (const [deviceKey, arr] of Object.entries(byDevice)) {
         const deviceId = Number(deviceKey);
-        // Normalize a variety of possible input shapes (snapshots or simple measurement objects)
-        const measurements = ((arr ?? [])
-          .map((s: unknown) => {
-            if (!s || typeof s !== "object") return null as null;
-            const obj = s as Record<string, any>;
-            if (obj.mean) {
-              return { mean: obj.mean as [number, number], cov: (obj.cov as Cov2) ?? measurementCovFromAccuracy(Number(obj.accuracy) || 50), timestamp: Number(obj.timestamp) || undefined, accuracy: Number(obj.accuracy) || undefined, lat: obj.lat as number | undefined, lon: obj.lon as number | undefined, speed: typeof obj.speed === "number" ? obj.speed : undefined } as Measurement;
-            }
-            const c = obj.data?.components?.[0] as Record<string, any> | undefined;
-            if (c && c.mean) return { mean: c.mean as [number, number], cov: measurementCovFromAccuracy(Number(c.accuracy) || 50), timestamp: Number(obj.timestamp) || undefined, accuracy: Number(c.accuracy) || undefined, lat: c.lat as number | undefined, lon: c.lon as number | undefined, speed: typeof c.speed === "number" ? c.speed : undefined } as Measurement;
-            if (obj.x != null && obj.y != null && typeof obj.timestamp === "number") return { mean: [Number(obj.x), Number(obj.y)], cov: measurementCovFromAccuracy(Number(obj.accuracy) || 50), timestamp: obj.timestamp as number, accuracy: Number(obj.accuracy) || undefined, lat: obj.lat as number | undefined, lon: obj.lon as number | undefined, speed: typeof obj.speed === "number" ? obj.speed : undefined } as Measurement;
-            return null as null;
-          })
-          .filter(Boolean) as Measurement[]);
-
-        measurements.sort((a: Measurement, b: Measurement) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        // Use DevicePoint[] directly for engine processing
+        const measurements = arr.slice().sort((a: DevicePoint, b: DevicePoint) => (a.timestamp - b.timestamp));
 
         if (measurements.length === 0) {
           engineByDevice[deviceId] = [];
@@ -126,27 +100,15 @@ export function App() {
         }
 
         const enginePerDevice = new Engine();
-        const engineSnapRaw = enginePerDevice.processMeasurements(measurements);
-        const deviceNameValFromMap = (nameMapLocal ?? deviceNamesRef.current) ?? {};
+        const engineSnapRaw: EngineSnapshot[] = enginePerDevice.processMeasurements(measurements);
 
-        const engineSnap: Snapshot[] = engineSnapRaw.map((s_: any, idx: number) => {
-          const m = measurements[idx];
-          const prevM = measurements[idx - 1];
-          const comps = s_.data.components.map((c: any) => {
-            const diagMax = Math.max((c.cov?.[0] ?? 0), (c.cov?.[2] ?? 0));
-            const accuracyMeters = Math.round(Math.sqrt(Math.max(1e-6, diagMax)));
-            let action = (c.action as string | undefined) ?? "still";
-            const displaySpeed = computeDisplaySpeed(prevM, m);
-            if (!c.action && typeof displaySpeed === "number") {
-              const speedThreshold = 0.5;
-              if (displaySpeed > speedThreshold) action = "moving";
-            }
-            const deviceNameVal = deviceNameValFromMap?.[deviceId];
-            const deviceIconVal = deviceIconsRef.current?.[deviceId];
-            const emojiVal = deviceIconVal ?? String(deviceId).charAt(0).toUpperCase();
-            return { ...c, estimate: true, accuracyMeters, action, speed: displaySpeed, device: deviceId, emoji: emojiVal, ...(deviceNameVal ? { deviceName: deviceNameVal } : {}) };
+        const engineSnap: DevicePoint[] = engineSnapRaw.flatMap((s_: EngineSnapshot, idx: number) => {
+          return s_.data.components.map((c: ComponentSnapshot) => {
+            const diagMax = Math.max(c.cov[0], c.cov[2]);
+            const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
+            const { lat: compLat, lon: compLon } = typeof refLat === "number" && typeof refLon === "number" ? metersToDegrees(c.mean[0], c.mean[1], refLat, refLon) : { lat: 0, lon: 0 };
+            return { mean: c.mean, cov: c.cov, timestamp: s_.timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal } as DevicePoint;
           });
-          return { timestamp: s_.timestamp, data: { components: comps } };
         });
 
         engineSnap.sort((a, b) => a.timestamp - b.timestamp);
@@ -163,11 +125,11 @@ export function App() {
     }
   }
 
-  function mergedArrayFromByDevice(out: Record<string, Snapshot[]>) {
+  function mergedArrayFromByDevice(out: Record<string, DevicePoint[]>) {
     return Object.values(out).flat().sort((a, b) => a.timestamp - b.timestamp);
   }
 
-  function ensureTimelineTimeWithinCutoff(mergedArray: Snapshot[], cutoff: number) {
+  function ensureTimelineTimeWithinCutoff(mergedArray: DevicePoint[], cutoff: number) {
     setTimelineTime((prev) =>
       prev == null ? mergedArray[mergedArray.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedArray[mergedArray.length - 1]?.timestamp ?? Date.now() : prev
     );
@@ -178,31 +140,30 @@ export function App() {
     try {
       if (typeof window === "undefined") return;
 
-      // Prefer the newer per-device persisted format when available
-      const parsedByDevice = safeGetJSON<Record<string, any>>(LS_RAW_BY_DEVICE);
+      // Expect per-device persisted format: Record<string, DevicePoint[]>
+      const parsedByDevice = safeGetJSON<Record<string, DevicePoint[]>>(LS_RAW_BY_DEVICE);
       if (parsedByDevice && typeof parsedByDevice === "object") {
-        const byDevice: Record<string, Snapshot[]> = {};
-        const reconstructed: Snapshot[] = [];
+        const byDevice: Record<string, DevicePoint[]> = {};
+        const reconstructed: DevicePoint[] = [];
         for (const [k, arr] of Object.entries(parsedByDevice)) {
           if (!Array.isArray(arr)) continue;
-          const re = normalizeSnapshots(
+          const re = (
             arr
-              .map((snap: any) => {
-                const comp = snap.data?.components?.[0];
-                if (!comp) return null;
-                const emojiVal = comp?.emoji ?? String(comp?.device ?? "unknown").charAt(0).toUpperCase();
-                return { timestamp: snap.timestamp, data: { components: [{ ...comp, emoji: emojiVal }] } } as Snapshot;
+              .map((p) => {
+                if (!p) return null;
+                if (typeof p.timestamp !== "number" || typeof p.lat !== "number" || typeof p.lon !== "number") return null;
+                return { ...p } as DevicePoint;
               })
-              .filter(Boolean) as Snapshot[]
-          );
+              .filter(Boolean) as DevicePoint[]
+          ).sort((a, b) => a.timestamp - b.timestamp);
           if (re.length > 0) {
             byDevice[k] = re;
             reconstructed.push(...re);
           }
         }
         if (reconstructed.length === 0) return;
-        const baseLat = reconstructed[0]?.data?.components?.[0]?.lat;
-        const baseLon = reconstructed[0]?.data?.components?.[0]?.lon;
+        const baseLat = reconstructed[0]?.lat;
+        const baseLon = reconstructed[0]?.lon;
         if (typeof baseLat !== "number" || typeof baseLon !== "number") return;
 
         setRefLat(baseLat);
@@ -210,7 +171,7 @@ export function App() {
         const cutoff = Date.now() - HISTORY_MS;
 
         setRawSnapshotsByDevice((prev) => {
-          const out: Record<string, Snapshot[]> = { ...(prev ?? {}) };
+          const out: Record<string, DevicePoint[]> = { ...(prev ?? {}) };
           for (const [k, arr] of Object.entries(byDevice)) {
             const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
             out[k] = pruneSnapshots(merged, cutoff);
@@ -223,14 +184,11 @@ export function App() {
 
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const s of reconstructed) {
-          const m = s.data.components[0]?.mean ?? [0, 0];
-          minX = Math.min(minX, m[0]);
-          minY = Math.min(minY, m[1]);
-          maxX = Math.max(maxX, m[0]);
-          maxY = Math.max(maxY, m[1]);
+          minX = Math.min(minX, s.mean[0]);
+          minY = Math.min(minY, s.mean[1]);
+          maxX = Math.max(maxX, s.mean[0]);
+          maxY = Math.max(maxY, s.mean[1]);
         }
-        // Defer setting `worldBounds` to the selected-time logic so historic raw data
-        // does not force an automatic zoom on load.
 
         // On reload, reset timeline to the latest persisted timestamp unconditionally
         setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
@@ -239,68 +197,9 @@ export function App() {
         buildEngineSnapshotsFromByDevice(byDevice, cutoff);
       }
 
-      // Fallback to old single-array persisted snapshots (backwards compatibility)
-      const parsed = safeGetJSON<any[]>(LS_RAW_SNAPSHOTS);
-      if (!Array.isArray(parsed) || parsed.length === 0) return;
-
-      const baseLat = parsed[0]?.data?.components?.[0]?.lat;
-      const baseLon = parsed[0]?.data?.components?.[0]?.lon;
-      if (typeof baseLat !== "number" || typeof baseLon !== "number") return;
-
-      const reconstructed: Snapshot[] = normalizeSnapshots(
-        parsed
-          .map((snap: any) => {
-            const comp = snap.data?.components?.[0];
-            if (!comp) return null;
-            const { x, y } = degreesToMeters(comp.lat, comp.lon, baseLat, baseLon);
-            const emojiVal = comp?.emoji ?? String(comp?.device ?? "unknown").charAt(0).toUpperCase();
-            return { timestamp: snap.timestamp, data: { components: [{ ...comp, mean: [x, y], emoji: emojiVal }] } } as Snapshot;
-          })
-          .filter(Boolean) as Snapshot[]
-      );
-
-      if (reconstructed.length === 0) return;
-
-      setRefLat(baseLat);
-      setRefLon(baseLon);
-      const cutoff = Date.now() - HISTORY_MS;
-
-      const byDevice: Record<string, Snapshot[]> = {};
-      for (const s of reconstructed) {
-        const k = String(s.data.components[0]?.device ?? "unknown");
-        if (!byDevice[k]) byDevice[k] = [];
-        byDevice[k].push(s);
-      }
-      for (const arr of Object.values(byDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
-
-      // Merge per-device histories with any existing state instead of blindly replacing
-      setRawSnapshotsByDevice((prev) => {
-        const out: Record<string, Snapshot[]> = { ...(prev ?? {}) };
-        for (const [k, arr] of Object.entries(byDevice)) {
-          const merged = mergeSnapshots(out[k] ?? [], arr).sort((a, b) => a.timestamp - b.timestamp);
-          out[k] = pruneSnapshots(merged, cutoff);
-        }
-        const mergedArray = mergedArrayFromByDevice(out);
-        ensureTimelineTimeWithinCutoff(mergedArray, cutoff);
-        return out;
-      });
-
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const s of reconstructed) {
-        const m = s.data.components[0]?.mean ?? [0, 0];
-        minX = Math.min(minX, m[0]);
-        minY = Math.min(minY, m[1]);
-        maxX = Math.max(maxX, m[0]);
-        maxY = Math.max(maxY, m[1]);
-      }
       // Defer setting `worldBounds` to the selected-time logic so historic raw data
       // does not force an automatic zoom on load.
 
-      // On reload, reset timeline to the latest persisted timestamp unconditionally
-      setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
-
-      // build engine-derived snapshots asynchronously (shared helper)
-      buildEngineSnapshotsFromByDevice(byDevice, cutoff);
     } catch (e) { }
   }, []);
 
@@ -323,63 +222,7 @@ export function App() {
     deviceIconsRef.current = deviceIcons;
   }, [deviceIcons]);
 
-  // Ensure device-friendly names and icons are applied to stored snapshots when device metadata is discovered/updated
-  useEffect(() => {
-    if ((!deviceNames || Object.keys(deviceNames).length === 0) && (!deviceIcons || Object.keys(deviceIcons).length === 0)) return;
 
-    const cutoff = Date.now() - HISTORY_MS;
-
-    // Update raw snapshots per-device to include deviceName and emoji where missing or outdated
-    setRawSnapshotsByDevice((prev) => {
-      const prevObj = prev ?? {};
-      let changed = false;
-      const out: Record<number, Snapshot[]> = {};
-      for (const [k, arr] of Object.entries(prevObj)) {
-        const deviceId = Number(k);
-        const updated = arr.map((s) => {
-          const comp = (s.data?.components?.[0] ?? {}) as Partial<ComponentUI>;
-          const desiredName = deviceNames[deviceId] ?? comp?.deviceName;
-          const desiredIcon = deviceIcons[deviceId] ?? comp?.emoji;
-          if (comp?.deviceName !== desiredName || comp?.emoji !== desiredIcon) {
-            changed = true;
-            const newComp = { ...comp, ...(desiredName ? { deviceName: desiredName } : {}), ...(desiredIcon ? { emoji: desiredIcon } : {}) };
-            return { ...s, data: { components: [newComp as ComponentUI] } } as Snapshot;
-          }
-          return s;
-        });
-        const pruned = pruneSnapshots(updated, cutoff);
-        if (pruned.length !== arr.length) changed = true;
-        out[deviceId] = pruned;
-      }
-      return changed ? out : prev;
-    });
-
-    // Update engine-derived snapshots as well so estimates show friendly names and icons
-    setEngineSnapshotsByDevice((prev) => {
-      const prevObj = prev ?? {};
-      let changed = false;
-      const out: Record<number, Snapshot[]> = {};
-      for (const [k, arr] of Object.entries(prevObj)) {
-        const deviceId = Number(k);
-        const updated = arr.map((s) => {
-          const comp = (s.data?.components?.[0] ?? {}) as Partial<ComponentUI>;
-          const desiredName = deviceNames[deviceId] ?? comp?.deviceName;
-          const desiredIcon = deviceIcons[deviceId] ?? comp?.emoji;
-          if (comp?.deviceName !== desiredName || comp?.emoji !== desiredIcon) {
-            changed = true;
-            const newComp = { ...comp, ...(desiredName ? { deviceName: desiredName } : {}), ...(desiredIcon ? { emoji: desiredIcon } : {}) };
-            return { ...s, data: { components: [newComp as ComponentUI] } } as Snapshot;
-          }
-          return s;
-        });
-        const pruned = pruneSnapshots(updated, cutoff);
-        if (pruned.length !== arr.length) changed = true;
-        out[deviceId] = pruned;
-      }
-      if (!changed) return prev;
-      return out;
-    });
-  }, [deviceNames, deviceIcons]);
 
   const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
   const [wsError, setWsError] = useState<string | null>(null);
@@ -419,9 +262,9 @@ export function App() {
     setWsApplyCounter((c) => c + 1);
   }
 
-  function processPositions(positions: NormalizedPosition[], nameMap?: Record<string, string>) {
+  function processPositions(positions: NormalizedPosition[]) {
     if (!positions || positions.length === 0) return;
-    const nameMapLocal = nameMap ?? deviceNamesRef.current;
+
     const positionsWithDevice = positions.map((p) => {
       return { ...p, device: p.deviceId };
     });
@@ -443,81 +286,34 @@ export function App() {
     }
     for (const arr of posByDevice.values()) arr.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Convert all positions into meters (per-device) and compute world bounds (min/max)
-    type MeterPoint = { lat: number; lon: number; accuracy: number; timestamp: number; x: number; y: number; speed?: number; device: number };
-    const metersByDevice = new Map<number, MeterPoint[]>();
-    for (const [deviceId, arr] of posByDevice) {
-      const mp: MeterPoint[] = arr.map((p) => {
-        const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
-        const raw = (p as any).raw as Record<string, unknown> | undefined;
-        const speed = typeof raw?.speed === "number" ? (raw.speed as number) : undefined;
-        return {
-          lat: p.lat,
-          lon: p.lon,
-          accuracy: p.accuracy ?? 50,
-          timestamp: p.timestamp,
-          x,
-          y,
-          speed,
-          device: deviceId,
-        };
-      });
-      metersByDevice.set(deviceId, mp);
-    }
-
-    // Compute derived speeds per device (based on consecutive measurements for the same device)
-    for (const mp of metersByDevice.values()) {
-      for (let i = 0; i < mp.length; i++) {
-        const cur = mp[i] as MeterPoint;
-        const prev = mp[i - 1] as MeterPoint | undefined;
-        if (prev && typeof cur.timestamp === "number" && typeof prev.timestamp === "number") {
-          const dt = (cur.timestamp - prev.timestamp) / 1000;
-          if (dt > 0) {
-            const dx = cur.x - prev.x;
-            const dy = cur.y - prev.y;
-            cur.speed = Math.sqrt(dx * dx + dy * dy) / dt;
-          } else {
-            cur.speed = cur.speed ?? 0;
-          }
-        } else {
-          cur.speed = cur.speed ?? 0;
-        }
-      }
-    }
-
+    // Compute world bounds from incoming positions
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const mp of metersByDevice.values()) {
-      for (const p of mp) {
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
+    for (const arr of posByDevice.values()) {
+      for (const p of arr) {
+        const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
       }
     }
-    const worldBoundsLocal = { minX, minY, maxX, maxY };
 
-    // Build raw per-position snapshots (history of measurements), keep per-device and merged lists
-    const rawByDevice: Record<string, Snapshot[]> = {};
-    let mergedRaw: Snapshot[] = [];
-    for (const [deviceKey, mp] of metersByDevice) {
-      const rawArr: Snapshot[] = mp.map((p) => {
-        const deviceNameVal = nameMapLocal?.[deviceKey];
-        const deviceIconVal = deviceIconsRef.current?.[deviceKey];
-        const emojiVal = deviceIconVal ?? String(deviceKey).charAt(0).toUpperCase();
-        const comp: any = {
-          mean: [p.x, p.y] as [number, number],
+    // Build raw per-position device points (history of measurements), keep per-device and merged lists
+    const rawByDevice: Record<string, DevicePoint[]> = {};
+    let mergedRaw: DevicePoint[] = [];
+    for (const [deviceKey, arr] of posByDevice) {
+      const rawArr: DevicePoint[] = arr.map((p) => {
+        const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
+        const comp: DevicePoint = {
+          mean: [x, y] as [number, number],
           cov: measurementCovFromAccuracy(p.accuracy),
           accuracy: p.accuracy,
-          weight: 1,
           lat: p.lat,
           lon: p.lon,
-          raw: true,
-          speed: p.speed,
           device: deviceKey,
-          emoji: emojiVal,
-          ...(deviceNameVal ? { deviceName: deviceNameVal } : {}),
+          timestamp: p.timestamp,
         };
-        return { timestamp: p.timestamp, data: { components: [comp] } } as Snapshot;
+        return comp;
       });
       rawArr.sort((a, b) => a.timestamp - b.timestamp);
       rawByDevice[deviceKey] = rawArr;
@@ -527,13 +323,13 @@ export function App() {
 
     const cutoff = Date.now() - HISTORY_MS;
 
-    // Merge with previous snapshots **per device** to keep per-device history persistent
+    // Merge with previous device-point histories per device
     setRawSnapshotsByDevice((prevByDevice) => {
       // compute previous merged array/last timestamp so we can detect "at latest" positions
       const prevMergedArray = mergedArrayFromByDevice(prevByDevice ?? {});
       const prevLatest = prevMergedArray[prevMergedArray.length - 1]?.timestamp ?? null;
 
-      const mergedByDevice: Record<string, Snapshot[]> = { ...(prevByDevice ?? {}) };
+      const mergedByDevice: Record<string, DevicePoint[]> = { ...(prevByDevice ?? {}) };
       for (const [deviceKey, arr] of Object.entries(rawByDevice)) {
         const existing = mergedByDevice[deviceKey] ?? [];
         const merged = mergeSnapshots(existing, arr).sort((a, b) => a.timestamp - b.timestamp);
@@ -553,10 +349,10 @@ export function App() {
 
     // Convert to engine measurements and run each device through its own Engine instance
     (async () => {
-      const prunedMergedEngine = await buildEngineSnapshotsFromByDevice(Object.fromEntries(metersByDevice), cutoff, nameMapLocal);
+      const prunedMergedEngine = await buildEngineSnapshotsFromByDevice(rawByDevice, cutoff);
       // default timeline time to the latest raw snapshot (history should be raw)
       setTimelineTime((prev) =>
-        prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? prunedMergedEngine[prunedMergedEngine.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? prunedMergedEngine[prunedMergedEngine.length - 1]?.timestamp ?? Date.now() : prev
+        prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev
       );
       // Do not set world bounds from the full incoming positions (which may include history).
       // World bounds are computed from the UI-selected time and filters so historic raw data
@@ -581,30 +377,29 @@ export function App() {
 
     const knownDevices = new Set<number>();
     let seen = new Set<string>();
-    let positionsAll: any[] = [];
+    let positionsAll: NormalizedPosition[] = [];
 
-    function dedupeKey(p: any) {
+    function dedupeKey(p: { deviceId?: number; timestamp?: number; lat?: number; lon?: number }) {
       return `${p.deviceId}:${p.timestamp}:${p.lat}:${p.lon}`;
     }
 
-    function insertSortedByTimestamp(arr: any[], item: any) {
-      const t = item.timestamp ?? 0;
+    function insertSortedByTimestamp(arr: NormalizedPosition[], item: NormalizedPosition) {
       let lo = 0;
       let hi = arr.length;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if ((arr[mid]?.timestamp ?? 0) <= t) lo = mid + 1;
+        if ((arr[mid]?.timestamp ?? 0) <= item.timestamp) lo = mid + 1;
         else hi = mid;
       }
       arr.splice(lo, 0, item);
     }
 
-    // Pre-seed positionsAll and seen with persisted snapshots so old locations are preserved
+    // Pre-seed positionsAll and seen with persisted device points so old locations are preserved
     try {
       if (rawSnapshots && rawSnapshots.length > 0) {
         for (const s of rawSnapshots) {
-          const comp = s.data.components[0] as any;
-          const p = { timestamp: s.timestamp, lat: comp.lat, lon: comp.lon, accuracy: comp.accuracy ?? 50, speed: comp.speed ?? 0, deviceId: comp.device ?? undefined, raw: true };
+          const comp = s;
+          const p: NormalizedPosition = { timestamp: comp.timestamp, lat: comp.lat, lon: comp.lon, accuracy: typeof comp.accuracy === "number" ? comp.accuracy : 50, deviceId: comp.device };
           const key = dedupeKey(p);
           if (seen.has(key)) continue;
           seen.add(key);
@@ -626,7 +421,8 @@ export function App() {
           wsUrl: traccarWsUrl ?? undefined,
           auth: traccarToken ? { type: "token", token: traccarToken } : undefined,
           autoReconnect: true,
-          defaultAccuracyMeters: 50,
+          reconnectInitialMs: 1000,
+          reconnectMaxMs: 30000,
           onPosition: (p) => {
             const key = dedupeKey(p);
             if (seen.has(key)) return;
@@ -635,12 +431,13 @@ export function App() {
             knownDevices.add(Number(p.deviceId));
             processPositions(positionsAll);
           },
-          onOpen: async () => {
-            setWsStatus("connected");
-            setWsError(null);
-            // attempt resync for known devices if any (prefer WS request, fallback to REST)
-            try {
-              // derive base from ws url when possible for REST and devices API
+          onOpen: () => {
+            (async () => {
+              setWsStatus("connected");
+              setWsError(null);
+              // attempt resync for known devices if any (prefer WS request, fallback to REST)
+              try {
+                // derive base from ws url when possible for REST and devices API
               const derivedBase = (() => {
                 try {
                   if (!traccarWsUrl) return undefined;
@@ -656,26 +453,26 @@ export function App() {
               })();
 
               // if we can discover device names via the devices endpoint, fetch them so labels are friendly
-              let deviceNameMap: Record<number, string> | undefined;
+              let deviceNameMap: Record<number, string>;
               if (derivedBase) {
-                try {
-                  const devices = await fetchDevices({ baseUrl: derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined });
-                  const nameMap: Record<number, string> = {};
-                  const iconMap: Record<number, string> = {};
-                  for (const d of devices) {
-                    if (d && d.id != null) {
-                      nameMap[d.id] = d.name ?? String(d.id);
-                      if ((d as any).emoji) iconMap[d.id] = (d as any).emoji;
-                    }
+                const devices = await fetchDevices({ baseUrl: derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : undefined });
+                const nameMap: Record<number, string> = {};
+                const iconMap: Record<number, string> = {};
+                for (const d of devices) {
+                  if (d && d.id != null) {
+                    nameMap[d.id] = d.name;
+                    if (d.emoji) iconMap[d.id] = d.emoji;
                   }
-                  setDeviceNames(nameMap);
-                  setDeviceIcons(iconMap);
-                  deviceNameMap = nameMap;
-                  // include discovered devices in the fetch list
-                  for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
-                  // refresh current positions with names and icons
-                  processPositions(positionsAll, deviceNameMap);
-                } catch (e) { }
+                }
+                setDeviceNames(nameMap);
+                setDeviceIcons(iconMap);
+                deviceNameMap = nameMap;
+                // include discovered devices in the fetch list
+                for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
+                // refresh current positions with names and icons
+                processPositions(positionsAll);
+              } else {
+                deviceNameMap = {};
               }
 
               for (const deviceId of knownDevices) {
@@ -696,24 +493,25 @@ export function App() {
                       seen.add(key);
                       positionsAll.push(p);
                     }
-                    positionsAll.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+                    positionsAll.sort((a, b) => a.timestamp - b.timestamp);
 
-                    processPositions(positionsAll, deviceNameMap);
+                    processPositions(positionsAll);
                   }
                 } catch (e) { }
               }
             } catch (e) { }
+            })().catch(() => {});
           },
           onClose: (ev) => {
-            const code = (ev as any)?.code;
-            const reason = (ev as any)?.reason;
+            const code = ev?.code;
+            const reason = ev?.reason;
             const detail = code != null ? (reason ? `code=${code} reason=${reason}` : `code=${code}`) : "closed";
             setWsStatus((prev) => (prev === "error" ? "error" : "disconnected"));
             setWsError((prev) => prev ?? `WebSocket closed: ${detail}`);
             console.warn("Traccar WS closed:", ev);
           },
           onError: (err) => {
-            const message = err instanceof Event ? "WebSocket connection error (check URL/token and server)" : (err && (err as any).message ? (err as any).message : String(err));
+            const message = err instanceof Event ? "WebSocket connection error (check URL/token and server)" : (err instanceof Error ? err.message : String(err));
             setWsStatus("error");
             setWsError(message);
             console.warn("Traccar WS error:", err);
@@ -721,7 +519,7 @@ export function App() {
         });
 
         // keep a handle for debugging and allow manual close
-        (window as any).__traccarClient = client;
+        (window as unknown as { __traccarClient?: unknown }).__traccarClient = client;
         clientCloseRef.current = () => {
           try {
             client.close();
@@ -743,11 +541,11 @@ export function App() {
   }, [traccarWsUrl, traccarToken, wsApplyCounter]);
 
   // helper to find the most recent snapshot before or at a given time
-  function findLatestSnapshotBeforeOrAt(snaps: Snapshot[], time: number): Snapshot | null {
+  function findLatestSnapshotBeforeOrAt(snaps: DevicePoint[], time: number): DevicePoint | null {
     if (!Array.isArray(snaps) || snaps.length === 0) return null;
     let lo = 0;
     let hi = snaps.length - 1;
-    let result: Snapshot | null = null;
+    let result: DevicePoint | null = null;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
       const s = snaps[mid];
@@ -782,15 +580,21 @@ export function App() {
   }
 
   // Return the visible components at a given time according to UI toggles
-  const visibleComponentsAtTime = (time: number): ComponentUI[] => {
+  const visibleComponentsAtTime = (time: number): DevicePoint[] => {
     const engineComps = showEstimates
-      ? Object.values(engineSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, time)?.data.components ?? [])
+      ? Object.values(engineSnapshotsByDevice).flatMap((arr) => {
+          const p = findLatestSnapshotBeforeOrAt(arr, time);
+          return p ? [p] : [];
+        })
       : [];
 
     const rawComps = showRaw
       ? showAllPast
-        ? rawSnapshots.filter((s) => s.timestamp <= time).flatMap((s) => s.data.components)
-        : Object.values(rawSnapshotsByDevice).flatMap((arr) => findLatestSnapshotBeforeOrAt(arr, time)?.data.components ?? [])
+        ? rawSnapshots.filter((s) => s.timestamp <= time)
+        : Object.values(rawSnapshotsByDevice).flatMap((arr) => {
+            const p = findLatestSnapshotBeforeOrAt(arr, time);
+            return p ? [p] : [];
+          })
       : [];
 
     return [...rawComps, ...engineComps];
@@ -810,8 +614,7 @@ export function App() {
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const c of visibleComponents) {
-      const m = (c as any).mean ?? [0, 0];
-      if (typeof m[0] !== "number" || typeof m[1] !== "number") continue;
+      const m = c.mean;
       minX = Math.min(minX, m[0]);
       minY = Math.min(minY, m[1]);
       maxX = Math.max(maxX, m[0]);
@@ -837,6 +640,8 @@ export function App() {
         height="100vh"
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => setSelectedDeviceId(id)}
+        deviceNames={deviceNames}
+        deviceIcons={deviceIcons}
         overlay={
           <div className="flex flex-col gap-2">
             <div className="w-full">
@@ -912,17 +717,15 @@ export function App() {
                 const rawSnap = findLatestSnapshotBeforeOrAt(rawSnapshotsByDevice[key] ?? [], t);
                 const engSnap = findLatestSnapshotBeforeOrAt(engineSnapshotsByDevice[key] ?? [], t);
                 const chosen = engSnap && (!rawSnap || (engSnap.timestamp ?? 0) >= (rawSnap.timestamp ?? 0)) ? engSnap : rawSnap;
-                const comp = chosen?.data?.components?.[0] ?? null;
-                return comp ? (
+                return chosen ? (
                   <div className="p-2 rounded border bg-white/90 text-foreground">
                     <div className="flex items-start">
                       <div className="flex-1">
-                        <div className="text-sm font-medium">{(comp as any).deviceName ?? (comp as any).device}</div>
-                        <div className="text-xs text-foreground/70">Action: {(comp as any).action ?? ""} • Accuracy: {(comp as any).accuracyMeters ?? ""}m</div>
+                        <div className="text-sm font-medium">{deviceNames[chosen.device] ?? chosen.device}</div>
+                        <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""}m</div>
                       </div>
                       <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
                     </div>
-                    {typeof (comp as any).speed === "number" ? <div className="text-xs text-foreground/70">Speed: {Math.round((comp as any).speed * 3.6)} km/h</div> : null}
                     <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(chosen?.timestamp ?? Date.now())}</div>
                   </div>
                 ) : null;

@@ -1,7 +1,8 @@
-import { Component, type Cov2, type Measurement } from "./component";
+import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
+import { Component } from "./component";
 
 export type ComponentSnapshot = {
-  mean: [number, number];
+  mean: Vec2;
   cov: Cov2;
   consistency: number;
   weight: number;
@@ -70,7 +71,7 @@ export class Mixture {
   pruneBelow = 0.03; // remove components below this consistency
 
   // store last measurement for derived speed/displacement checks
-  lastMeasurement?: Measurement;
+  lastMeasurement?: DevicePoint;
   // last movement confidence at time of last update
   lastLikelyMoving = false;
 
@@ -86,7 +87,7 @@ export class Mixture {
   }
 
   // Create a spawned candidate component (centralizes createdAt and flags)
-  private createSpawnedComponent(m: Measurement, covMultiplier: number, initialConsistency: number, spawnedDuringMovement: boolean): Component {
+  private createSpawnedComponent(m: DevicePoint, covMultiplier: number, initialConsistency: number, spawnedDuringMovement: boolean): Component {
     const spawnCov: Cov2 = [m.cov[0] * covMultiplier, m.cov[1], m.cov[2] * covMultiplier];
     const spawned = new Component([m.mean[0], m.mean[1]], spawnCov, initialConsistency);
     spawned.spawnedDuringMovement = spawnedDuringMovement;
@@ -96,17 +97,15 @@ export class Mixture {
 
   // Add a spawned component and optionally suppress other components. If hardReplace is true,
   // replace the component set with only the spawned one.
-  private addSpawned(spawned: Component, suppressFactor?: number, hardReplace = false): void {
+  private addSpawned(spawned: Component, suppressFactor: number, hardReplace = false): void {
     if (hardReplace) {
       this.components = [spawned];
       return;
     }
     this.components.push(spawned);
-    if (typeof suppressFactor === "number") {
-      this.components.forEach((c) => {
-        if (c !== spawned) c.consistency *= suppressFactor;
-      });
-    }
+    this.components.forEach((c) => {
+      if (c !== spawned) c.consistency *= suppressFactor;
+    });
   }
 
   // Convenience: decay other components by factor (optionally excluding an index)
@@ -120,10 +119,10 @@ export class Mixture {
 
   // Spawn helper to centralize creation, suppression and counter resets
   private spawnAndApply(
-    m: Measurement,
+    m: DevicePoint,
     covScale: number,
     initialConsistency: number,
-    suppressFactor?: number,
+    suppressFactor: number,
     hardReplace = false,
     spawnedDuringMovement = true,
     resetCounters = true
@@ -134,14 +133,12 @@ export class Mixture {
   }
 
   // Compute jitter/dispersion related metrics for the incoming measurement
-  private computeJitterMetrics(m: Measurement) {
+  private computeJitterMetrics(m: DevicePoint) {
     const prevM = this.lastMeasurement;
 
-    // derived speed: prefer explicit report, otherwise compute over last measurement
-    let derivedSpeed: number | undefined = undefined;
-    if (typeof (m as any).speed === "number") {
-      derivedSpeed = (m as any).speed as number;
-    } else if (prevM && typeof prevM.timestamp === "number" && typeof m.timestamp === "number") {
+    // derived speed: compute over last measurement
+    let derivedSpeed: number | undefined;
+    if (prevM) {
       const dt = (m.timestamp - prevM.timestamp) / 1000;
       if (dt > 0) {
         const dx = m.mean[0] - prevM.mean[0];
@@ -151,7 +148,7 @@ export class Mixture {
     }
 
     // update smoothed speed (EMA) for robustness against noisy single-step estimates
-    if (typeof derivedSpeed === "number") {
+    if (derivedSpeed !== undefined) {
       const alpha = Math.max(0.01, Math.min(1, this.speedEmaAlpha));
       this.speedEma = alpha * derivedSpeed + (1 - alpha) * (this.speedEma ?? 0);
     }
@@ -161,19 +158,18 @@ export class Mixture {
     // uncertainty via covariance diagonals (fallback to reported accuracy)
     let measurementUncertainty = 0;
     try {
-      const diagMax = Math.max((m.cov?.[0] ?? 0), (m.cov?.[2] ?? 0));
+      const diagMax = Math.max(m.cov[0], m.cov[2]);
       measurementUncertainty = Math.sqrt(Math.max(1e-6, diagMax));
     } catch (e) {
-      measurementUncertainty = (m as any).accuracy ?? 1;
+      measurementUncertainty = m.accuracy;
     }
 
     // scaled scores (0..1)
     const speedScore = Math.min(1, (this.speedEma || 0) / Math.max(1e-3, this.fastModeSpeedThreshold));
     const dispScore = Math.min(1, recentDisp / Math.max(1, measurementUncertainty) / Math.max(1, this.measurementConfidenceMultiplier));
-    const motionFlag = !!(m as any).motion;
 
-    // moving confidence is the max of speed, displacement, and explicit motion hint
-    const movingConfidence = motionFlag ? 1 : Math.max(speedScore, dispScore);
+    // moving confidence is the max of speed and displacement
+    const movingConfidence = Math.max(speedScore, dispScore);
 
     // simplified booleans derived from smoothed metrics
     const displacementSignificant = recentDisp > Math.max(this.minDisplacementMeters, measurementUncertainty * 1.0);
@@ -181,7 +177,7 @@ export class Mixture {
     const singlePointConfident = dispScore >= 1;
 
     // detect a stationary candidate: low smoothed speed, small displacement, and no motion hint
-    const stationaryCandidate = !motionFlag && (this.speedEma || 0) < this.stationarySpeedThreshold && recentDisp < Math.max(this.stationaryDispThreshold, measurementUncertainty * 0.5);
+    const stationaryCandidate = (this.speedEma || 0) < this.stationarySpeedThreshold && recentDisp < Math.max(this.stationaryDispThreshold, measurementUncertainty * 0.5);
 
     return {
       derivedSpeed,
@@ -211,8 +207,7 @@ export class Mixture {
     return this.components.map((c) => ({ mean: [c.mean[0], c.mean[1]], cov: [c.cov[0], c.cov[1], c.cov[2]], consistency: c.consistency, weight: c.consistency, action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt }));
   }
 
-  update(m: Measurement): void {
-    if (!m) return;
+  update(m: DevicePoint): void {
     if (this.components.length === 0) {
       // initialize with a wide component to reflect initial uncertainty
       const init = new Component([m.mean[0], m.mean[1]], [m.cov[0] * 4, m.cov[1], m.cov[2] * 4], 1);
@@ -263,7 +258,7 @@ export class Mixture {
       this.consecStationaryCount = 0;
     }
 
-    const isLikelyMoving = (jitter.movingConfidence ?? 0) >= this.movementConfidenceThreshold || this.consecDispCount >= this.displacementConsecNeeded;
+    const isLikelyMoving = jitter.movingConfidence >= this.movementConfidenceThreshold || this.consecDispCount >= this.displacementConsecNeeded;
 
     // store last movement confidence for snapshots
     this.lastLikelyMoving = isLikelyMoving;

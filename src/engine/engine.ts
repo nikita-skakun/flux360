@@ -1,4 +1,4 @@
-import type { Measurement } from "./component";
+import type { DevicePoint } from "@/ui/types";
 import { Mixture, type ComponentSnapshot } from "./mixture";
 
 export type EngineSnapshot = { timestamp: number; data: { components: ComponentSnapshot[] } };
@@ -10,7 +10,7 @@ export class Engine {
     this.mixture = new Mixture();
   }
 
-  processMeasurements(ms: Measurement[]): EngineSnapshot[] {
+  processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     if (!Array.isArray(ms)) return [];
     const measurements = ms.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
     const snapshots: EngineSnapshot[] = [];

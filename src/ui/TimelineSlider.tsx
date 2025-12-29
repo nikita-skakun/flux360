@@ -9,7 +9,7 @@ type Props = {
   step?: number;
 };
 
-export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, step = 1000 }) => {
+export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, step = 1000 }: Props) => {
   const hasSnapshots = snapshots && snapshots.length > 0;
 
   if (!hasSnapshots) {
@@ -36,15 +36,17 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, ste
   const sortedTimes = times.slice().sort((a, b) => a - b);
   let prevTime: number | null = null;
   for (let i = sortedTimes.length - 1; i >= 0; i--) {
-    if (sortedTimes[i] < clamped) {
-      prevTime = sortedTimes[i];
+    const t = sortedTimes[i];
+    if (t != null && t < clamped) {
+      prevTime = t;
       break;
     }
   }
   let nextTime: number | null = null;
   for (let i = 0; i < sortedTimes.length; i++) {
-    if (sortedTimes[i] > clamped) {
-      nextTime = sortedTimes[i];
+    const t = sortedTimes[i];
+    if (t != null && t > clamped) {
+      nextTime = t;
       break;
     }
   }

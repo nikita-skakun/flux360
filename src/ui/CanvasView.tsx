@@ -1,18 +1,19 @@
 import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
-import type { ComponentUI } from "@/ui/types";
-import type { Cov2 } from "@/engine/component";
+import type { DevicePoint } from "@/ui/types";
+import type { Cov2 } from "@/ui/types";
 
 import { colorForDevice, rgbaString, type Color } from "./color";
 
 export type CanvasViewHandle = {
-  hitTestPoint: (x: number, y: number) => { items: ComponentUI[]; x: number; y: number } | null;
-  getClusters: () => { items: ComponentUI[]; x: number; y: number }[];
+  hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
+  getClusters: () => { items: DevicePoint[]; x: number; y: number }[];
 };
 
 type Props = {
   width?: number;
   height?: number;
-  components: ComponentUI[];
+  components: DevicePoint[];
+  deviceIcons?: Record<number, string>;
   refMeters?: { x: number; y: number }; // reference coordinate (meters) for centering
   zoom?: number; // pixels per meter
   fitToBounds?: boolean; // if true, zoom to fit all components
@@ -21,8 +22,8 @@ type Props = {
   openClusterPoint?: { x: number; y: number } | null;
 };
 
-export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null }, ref) {
-  type DrawItem = { idx: number; device: number; x: number; y: number; r: number; emoji: string; timestamp: number; color?: [number, number, number]; };
+export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null }, ref) {
+  type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color?: [number, number, number]; };
   type Cluster = { items: DrawItem[]; x: number; y: number; size: number; radius: number };
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -108,12 +109,12 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (!best || hitDist < best.dist) best = { cluster: cl, dist: hitDist, radius: usedRadius };
       }
       if (!best) return null;
-      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, emoji: it.emoji, timestamp: it.timestamp })) as ComponentUI[];
+      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0,0], cov: [0,0,0], lat:0, lon:0, timestamp: it.timestamp })) as DevicePoint[];
       if (items.length === 0) return null;
       return { items, x: best.cluster.x, y: best.cluster.y };
     },
     getClusters: () => {
-      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, emoji: it.emoji, timestamp: it.timestamp })) as ComponentUI[], x: cl.x, y: cl.y }));
+      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0,0], cov: [0,0,0], lat:0, lon:0, timestamp: it.timestamp })) as DevicePoint[], x: cl.x, y: cl.y }));
     },
   }), [components]);
 
@@ -144,7 +145,8 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       const diagMax = Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0));
       const radiusMeters = Math.sqrt(Math.max(1e-6, diagMax));
       const color = colorForDevice(c.device);
-      return { device: c.device, emoji: c.emoji, timestamp: c.timestamp, mean, cov, radiusMeters, color };
+      const iconText = (deviceIcons && typeof deviceIcons[c.device] === 'string') ? String(deviceIcons[c.device]) : String(c.device).charAt(0).toUpperCase();
+      return { device: c.device, iconText, timestamp: c.timestamp, mean, cov, radiusMeters, color };
     });
 
     let anchorX = refMeters?.x ?? 0;
@@ -195,7 +197,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         x,
         y,
         r,
-        emoji: p.emoji,
+        iconText: p.iconText,
         timestamp: p.timestamp,
         color
       };
@@ -326,7 +328,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (shouldHideAt(item.x, item.y, item.r ?? 0)) continue;
 
         const { x, y, color } = item;
-        drawPin(ctx, x, y, item.emoji, color, isSelected(item), undefined);
+        drawPin(ctx, x, y, item.iconText, color, isSelected(item), undefined);
       }
 
       // draw cluster markers (pin with icon and count badge)
@@ -341,10 +343,10 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         // select icon: selected device if present, otherwise latest by timestamp
         let iconText: string;
         if (sel) {
-          iconText = sel.emoji;
+          iconText = sel.iconText;
         } else {
           const latest = items.reduce((a: DrawItem, b: DrawItem) => (a.timestamp > b.timestamp ? a : b));
-          iconText = latest.emoji;
+          iconText = latest.iconText;
         }
         const color = pickClusterColor(items, selDeviceNum);
         drawPin(ctx, x, y, iconText, color, isClusterSelected, String(size));

@@ -1,17 +1,4 @@
-export type Vec2 = [number, number];
-export type Cov2 = [number, number, number];
-
-export type Measurement = {
-  mean: Vec2;
-  cov: Cov2;
-  timestamp?: number;
-  accuracy?: number;
-  raw?: unknown;
-  lat?: number;
-  lon?: number;
-  // optional motion hints
-  speed?: number; // meters/second if available
-};
+import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
 
 export type ComponentState = {
   mean: Vec2;
@@ -93,7 +80,7 @@ export class Component implements ComponentState {
   }
 
   // Mahalanobis squared distance between this component and a measurement
-  mahalanobis2(m: Measurement): number {
+  mahalanobis2(m: DevicePoint): number {
     const r: Vec2 = [m.mean[0] - this.mean[0], m.mean[1] - this.mean[1]];
     const S = addCov(this.cov, m.cov);
     const Si = invertCov(S);
@@ -102,7 +89,7 @@ export class Component implements ComponentState {
   }
 
   // A simple log-likelihood proxy (not normalized) for comparing measurements
-  logLikelihood(m: Measurement): number {
+  logLikelihood(m: DevicePoint): number {
     const d2 = this.mahalanobis2(m);
     const S = addCov(this.cov, m.cov);
     const determinant = Math.max(1e-12, detCov(S));
@@ -110,7 +97,7 @@ export class Component implements ComponentState {
   }
 
   // Kalman-style update with optional gainScale between 0 (no update) and 1 (full Kalman gain)
-  kalmanUpdate(m: Measurement, gainScale = 1): void {
+  kalmanUpdate(m: DevicePoint, gainScale = 1): void {
     // P = this.cov, R = m.cov, S = P + R
     const P = this.cov;
     const R = m.cov;

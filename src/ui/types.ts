@@ -1,16 +1,12 @@
-export type ComponentUI = {
+export type Vec2 = [number, number];
+export type Cov2 = [number, number, number];
+
+export type DevicePoint = {
   device: number;
   lat: number;
   lon: number;
-  mean: [number, number];
-  cov: [number, number,number];
-  emoji: string;
+  mean: Vec2;
+  cov: Cov2;
   timestamp: number;
-  // optional metadata
-  deviceName?: string;
-  accuracy?: number;
-  accuracyMeters?: number;
-  speed?: number;
-  action?: string;
-  raw?: boolean;
+  accuracy: number;
 };

@@ -6,13 +6,13 @@ test("pruneSnapshots keeps only the last-day entries", () => {
   const oneDay = 24 * 60 * 60 * 1000;
   const cutoff = now - oneDay;
 
-  const snaps = [
-    { timestamp: cutoff - 1000, data: { components: [] } },
-    { timestamp: cutoff + 1000, data: { components: [] } },
-    { timestamp: now, data: { components: [] } },
+  const points = [
+    { timestamp: cutoff - 1000, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
+    { timestamp: cutoff + 1000, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
+    { timestamp: now, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
   ];
 
-  const pruned = pruneSnapshots(snaps, cutoff);
+  const pruned = pruneSnapshots(points, cutoff);
   expect(pruned.length).toBe(2);
   expect(pruned.map((s) => s.timestamp)).toEqual([cutoff + 1000, now]);
 });
