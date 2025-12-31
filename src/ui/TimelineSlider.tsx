@@ -5,10 +5,9 @@ type Props = {
   snapshots: DevicePoint[];
   time: number;
   onChange: (time: number) => void;
-  step?: number;
 };
 
-export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, step = 1000 }: Props) => {
+export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange }: Props) => {
   const hasSnapshots = snapshots && snapshots.length > 0;
 
   if (!hasSnapshots) {
@@ -68,7 +67,6 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange, ste
             type="range"
             min={minTime}
             max={maxTime}
-            step={step}
             value={clamped}
             onChange={(e) => onChange(Number(e.target.value))}
             onKeyDown={(e) => {
