@@ -28,6 +28,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
   const [pixelsPerMeter, setPixelsPerMeter] = useState<number | undefined>(undefined);
 
   const canvasApiRef = useRef<CanvasViewHandle | null>(null);
+  const deviceNamesRef = useRef<Record<number, string>>(deviceNames);
   const [clusterPopup, setClusterPopup] = useState<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const [clusterAnimation, setClusterAnimation] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle');
   const clusterAnimationTimerRef = useRef<number | null>(null);
@@ -40,6 +41,10 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     clusterPopupRef.current = clusterPopup;
     clusterAnimationRef.current = clusterAnimation;
   }, [clusterPopup, clusterAnimation]);
+
+  useEffect(() => {
+    deviceNamesRef.current = deviceNames;
+  }, [deviceNames]);
 
   const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
     if (clusterAnimationTimerRef.current) {
@@ -199,7 +204,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
         container.style.cursor = "pointer";
         if (hit.items.length === 1) {
           const first = hit.items[0];
-          if (first) container.title = deviceNames[first.device] ?? String(first.device);
+          if (first) container.title = deviceNamesRef.current[first.device] ?? String(first.device);
           else container.title = "";
         } else {
           container.title = "";
