@@ -129,7 +129,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       const ne = metersToDegrees(worldBounds.maxX, worldBounds.maxY, initialLat, initialLon);
       try {
         map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40] });
-      } catch (e) {
+      } catch {
         map.setView([initialLat, initialLon], 15);
       }
     } else if (initialLat != null && initialLon != null) {
@@ -151,7 +151,9 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
         } else {
           setCenterMeters({ x: 0, y: 0 });
         }
-      } catch (err) { }
+      } catch {
+        // ignore transform update errors
+      }
     };
 
     updateTransform();
@@ -162,7 +164,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const onMapClick = (ev: L.LeafletMouseEvent) => {
       const pt = map.latLngToContainerPoint(ev.latlng);
       const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-      if (hit && hit.items && hit.items.length > 0) {
+      if (hit?.items?.length) {
         if (hit.items.length === 1) {
           const devKey = hit.items[0]!.device;
           const devNum = Number(devKey);
@@ -179,7 +181,9 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
               const dur = flyDurationForMeters(dist);
               map.flyTo([clusterPoint.lat, clusterPoint.lng], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
             }
-          } catch (e) { }
+          } catch {
+            // ignore map animation errors
+          }
           openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items });
         }
       } else {
@@ -191,7 +195,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       const pt = map.latLngToContainerPoint(ev.latlng);
       const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
       const container = map.getContainer();
-      if (hit && hit.items && hit.items.length > 0) {
+      if (hit?.items?.length) {
         container.style.cursor = "pointer";
         if (hit.items.length === 1) {
           const first = hit.items[0];
@@ -243,7 +247,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       const ne = metersToDegrees(worldBounds.maxX, worldBounds.maxY, refLat, refLon);
       try {
         map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40] });
-      } catch (e) {
+      } catch {
         map.setView([refLat, refLon], 15);
       }
     } else if (refLat != null && refLon != null) {
@@ -303,7 +307,9 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           map.flyTo([deg.lat, deg.lon], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
         }
       }
-    } catch (e) { }
+    } catch {
+      // ignore map animation errors
+    }
   }, [selectedDeviceId, components, refLat, refLon]);
 
   useEffect(() => {

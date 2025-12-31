@@ -130,10 +130,7 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
     if (typeof id !== "number") return [];
 
     const name = (typeof o["name"] === "string" ? o["name"] : null) ?? (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ?? String(id);
-
-    let emoji: string;
-    if (o["attributes"] && typeof (o["attributes"] as any)["emoji"] === "string") emoji = (o["attributes"] as any)["emoji"];
-    else emoji = name.toUpperCase().charAt(0);
+    const emoji = typeof (o["attributes"] as Record<string, unknown>)?.["emoji"] === "string" ? (o["attributes"] as Record<string, unknown>)["emoji"] as string : name.toUpperCase().charAt(0);
 
     return [{ id, name, emoji }];
   });
@@ -198,7 +195,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
 
     ws.onmessage = (ev: MessageEvent) => {
       try {
-        const raw = typeof ev.data === "string" ? JSON.parse(ev.data) : ev.data;
+        const raw: unknown = typeof ev.data === "string" ? JSON.parse(ev.data) as unknown : ev.data;
         const positions = extractPositionsFromMessage(raw);
         if (positions.length > 0) {
           for (const p of positions) opts.onPosition?.(p);
@@ -254,7 +251,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
 
       try {
         ws.send(JSON.stringify(message));
-      } catch (e) {
+      } catch {
         resolve([]);
         return;
       }
@@ -287,26 +284,25 @@ export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] 
 
   const visited = new WeakSet();
 
-  function walk(node: any) {
-    if (!node) return;
-    if (typeof node === "object") {
-      if (visited.has(node)) return;
-      visited.add(node);
-      if (Array.isArray(node)) {
-        for (const v of node) walk(v);
-        return;
-      }
-
-      const tryNorm = normalizePosition(node);
-      if (tryNorm) {
-        out.push(tryNorm);
-        return;
-      }
-      for (const k of ["positions", "data", "payload", "body", "message"]) {
-        if (k in node) walk((node)[k]);
-      }
-      for (const v of Object.values(node)) walk(v);
+  function walk(node: unknown) {
+    if (!node || typeof node !== "object") return;
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) {
+      for (const v of node) walk(v);
+      return;
     }
+
+    const tryNorm = normalizePosition(node);
+    if (tryNorm) {
+      out.push(tryNorm);
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    for (const k of ["positions", "data", "payload", "body", "message"]) {
+      if (obj[k] !== undefined) walk(obj[k]);
+    }
+    for (const v of Object.values(obj)) walk(v);
   }
 
   walk(raw);

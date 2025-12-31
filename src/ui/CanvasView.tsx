@@ -63,7 +63,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       while (stack.length > 0) {
         const v = stack.pop()!;
         idxs.push(v);
-        for (const w of adj[v] || []) {
+        for (const w of adj[v] ?? []) {
           if (!visited[w]) {
             visited[w] = true;
             stack.push(w);

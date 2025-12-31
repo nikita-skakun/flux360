@@ -160,7 +160,7 @@ export class Mixture {
     try {
       const diagMax = Math.max(m.cov[0], m.cov[2]);
       measurementUncertainty = Math.sqrt(Math.max(1e-6, diagMax));
-    } catch (e) {
+    } catch {
       measurementUncertainty = m.accuracy;
     }
 
@@ -274,8 +274,6 @@ export class Mixture {
     // suppress immediate spawn when we've just forced stationarity
     if (stationarityForced) shouldImmediateSpawn = false;
 
-
-
     if (bestD2 <= this.highThresh) {
       // high likelihood: normally we do a full Kalman update, but be conservative for
       // single, significant displaced reports (likely outliers) when we don't see
@@ -371,27 +369,23 @@ export class Mixture {
         }
 
         // Retire old distant components relative to the dominant
-        try {
-          const diagMax = Math.max((dominant.cov?.[0] ?? 0), (dominant.cov?.[2] ?? 0));
-          const dominantRadius = Math.sqrt(Math.max(1e-6, diagMax));
-          const retireDistance = Math.max(this.retireDistanceMeters, dominantRadius * 4);
+        const diagMax = Math.max((dominant.cov?.[0] ?? 0), (dominant.cov?.[2] ?? 0));
+        const dominantRadius = Math.sqrt(Math.max(1e-6, diagMax));
+        const retireDistance = Math.max(this.retireDistanceMeters, dominantRadius * 4);
 
-          for (const c of this.components) {
-            if (c === dominant) continue;
-            const dx = c.mean[0] - dominant.mean[0];
-            const dy = c.mean[1] - dominant.mean[1];
-            const d = Math.hypot(dx, dy);
-            if (d > retireDistance) {
-              if (dominant.consistency >= this.stableRetentionThreshold || (!this.lastLikelyMoving && dominant.consistency >= this.stableConsistencyThreshold)) {
-                c.consistency = 0;
-              } else {
-                c.consistency *= this.oldPositionFadeFactor;
-              }
-              c.spawnedDuringMovement = true;
+        for (const c of this.components) {
+          if (c === dominant) continue;
+          const dx = c.mean[0] - dominant.mean[0];
+          const dy = c.mean[1] - dominant.mean[1];
+          const d = Math.hypot(dx, dy);
+          if (d > retireDistance) {
+            if (dominant.consistency >= this.stableRetentionThreshold || (!this.lastLikelyMoving && dominant.consistency >= this.stableConsistencyThreshold)) {
+              c.consistency = 0;
+            } else {
+              c.consistency *= this.oldPositionFadeFactor;
             }
+            c.spawnedDuringMovement = true;
           }
-        } catch (e) {
-          // ignore decomposition errors and continue
         }
       }
 
@@ -401,7 +395,7 @@ export class Mixture {
           if (c.spawnedDuringMovement && c.createdAt && nowTs - c.createdAt > this.movementSpawnMaxAgeMs) c.consistency *= this.movementSpawnFadeFactor;
         }
       }
-    } catch (e) {
+    } catch {
       // guard against any unexpected errors in cleanup logic
     }
 

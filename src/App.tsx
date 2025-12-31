@@ -1,3 +1,4 @@
+// @ts-ignore - allow importing CSS without type declarations
 import "./index.css";
 import { computeNextTimelineTime } from "@/lib/timeline";
 import { degreesToMeters, metersToDegrees } from "./util/geo";
@@ -40,7 +41,9 @@ export function App() {
       if (typeof window === "undefined") return;
       if (value === null) window.localStorage.removeItem(key);
       else window.localStorage.setItem(key, value);
-    } catch (e) { }
+    } catch {
+      // ignore localStorage errors
+    }
   }
 
   const [showRaw, setShowRaw] = useState<boolean>(() => (safeGetItem(LS_UI_SHOW_RAW) ?? "true") === "true");
@@ -338,9 +341,13 @@ export function App() {
 
                       processPositions(positionsAll);
                     }
-                  } catch (e) { }
+                  } catch {
+                    // ignore processing errors
+                  }
                 }
-              } catch (e) { }
+              } catch {
+                // ignore fetch errors
+              }
             })().catch(() => { });
           },
           onClose: (ev) => {
