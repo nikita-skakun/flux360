@@ -395,19 +395,13 @@ export function App() {
 
   const visibleComponentsAtTime = (time: number): DevicePoint[] => {
     const engineComps = showEstimates
-      ? Object.values(engineSnapshotsByDevice).flatMap((arr) => {
-        const p = findLatestSnapshotBeforeOrAt(arr, time);
-        return p ? [p] : [];
-      })
+      ? Object.values(engineSnapshotsByDevice).map((arr) => findLatestSnapshotBeforeOrAt(arr, time)).filter((p): p is DevicePoint => p !== null)
       : [];
 
     const rawComps = showRaw
       ? showAllPast
         ? rawSnapshots.filter((s) => s.timestamp <= time)
-        : Object.values(rawSnapshotsByDevice).flatMap((arr) => {
-          const p = findLatestSnapshotBeforeOrAt(arr, time);
-          return p ? [p] : [];
-        })
+        : Object.values(rawSnapshotsByDevice).map((arr) => findLatestSnapshotBeforeOrAt(arr, time)).filter((p): p is DevicePoint => p !== null)
       : [];
 
     return [...rawComps, ...engineComps];

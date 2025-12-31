@@ -107,7 +107,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     return Math.max(0.25, Math.min(1.5, v * 0.22 + 0.15));
   };
 
-  const MIN_FLY_METERS = 5;
   useEffect(() => {
     if (prevSelectedRef.current != null && selectedDeviceId == null) {
       skipNextAutoFitRef.current = true;
@@ -115,6 +114,26 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     if (prevSelectedRef.current !== selectedDeviceId) selectedZoomedRef.current = false;
     prevSelectedRef.current = selectedDeviceId;
   }, [selectedDeviceId]);
+
+  const updateTransform = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
+      const ppm = 1 / mpp;
+      setPixelsPerMeter(ppm);
+      if (refLatRef.current != null && refLonRef.current != null) {
+        const cm = degreesToMeters(center.lat, center.lng, refLatRef.current, refLonRef.current);
+        setCenterMeters(cm);
+      } else {
+        setCenterMeters({ x: 0, y: 0 });
+      }
+    } catch {
+      // ignore transform update errors
+    }
+  };
 
   useEffect(() => {
     const mapContainer = mapDivRef.current;
@@ -143,24 +162,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       map.setView([0, 0], 2);
     }
 
-    const updateTransform = () => {
-      try {
-        const center = map.getCenter();
-        const zoom = map.getZoom();
-        const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
-        const ppm = 1 / mpp;
-        setPixelsPerMeter(ppm);
-        if (refLatRef.current != null && refLonRef.current != null) {
-          const cm = degreesToMeters(center.lat, center.lng, refLatRef.current, refLonRef.current);
-          setCenterMeters(cm);
-        } else {
-          setCenterMeters({ x: 0, y: 0 });
-        }
-      } catch {
-        // ignore transform update errors
-      }
-    };
-
     updateTransform();
 
     map.on("move", updateTransform);
@@ -182,7 +183,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
             if (map.stop) map.stop();
             const center = map.getCenter();
             const dist = L.latLng(center.lat, center.lng).distanceTo(L.latLng(clusterPoint.lat, clusterPoint.lng));
-            if (dist >= MIN_FLY_METERS) {
+            if (dist >= 5) {
               const dur = flyDurationForMeters(dist);
               map.flyTo([clusterPoint.lat, clusterPoint.lng], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
             }
@@ -240,8 +241,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    if (selectedDeviceId != null) return;
+    if (!map || selectedDeviceId != null) return;
     if (skipNextAutoFitRef.current) {
       skipNextAutoFitRef.current = false;
       return;
@@ -261,17 +261,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       map.setView([0, 0], 2);
     }
 
-    const center = map.getCenter();
-    const zoom = map.getZoom();
-    const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
-    const ppm = 1 / mpp;
-    setPixelsPerMeter(ppm);
-    if (refLat != null && refLon != null) {
-      const cm = degreesToMeters(center.lat, center.lng, refLat, refLon);
-      setCenterMeters(cm);
-    } else {
-      setCenterMeters({ x: 0, y: 0 });
-    }
+    updateTransform();
   }, [refLat, refLon, worldBounds, selectedDeviceId]);
 
   useEffect(() => {
@@ -297,11 +287,10 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       if (!selectedZoomedRef.current) {
         if (map.stop) map.stop();
         const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
-        const dist = centerLatLng.distanceTo(L.latLng(deg.lat, deg.lon));
-        if (dist < MIN_FLY_METERS) {
+        if (distMeters < 5) {
           map.setZoom(targetZoom, { animate: true });
         } else {
-          const dur = flyDurationForMeters(dist);
+          const dur = flyDurationForMeters(distMeters);
           map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
         }
         selectedZoomedRef.current = true;
@@ -329,16 +318,13 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     return () => ro.disconnect();
   }, []);
 
-  const openClusterPoint = clusterPopup && mapRef.current ? (() => {
+  const clusterPoint = clusterPopup && mapRef.current ? (() => {
     const p = mapRef.current.latLngToContainerPoint(L.latLng(clusterPopup.lat, clusterPopup.lng));
     return { x: p.x, y: p.y };
   })() : null;
 
   let clusterChooser: React.ReactNode = null;
-  if (clusterPopup && mapRef.current) {
-    const map = mapRef.current;
-    const p = map.latLngToContainerPoint(L.latLng(clusterPopup.lat, clusterPopup.lng));
-
+  if (clusterPopup && mapRef.current && clusterPoint) {
     const backdropStyle: React.CSSProperties = {
       position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
       background: 'transparent',
@@ -347,7 +333,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     const anchorScale = clusterAnimation === 'entering' ? 0.6 : 1;
     const anchorStyle: React.CSSProperties = {
-      position: 'absolute', left: `${p.x}px`, top: `${p.y}px`,
+      position: 'absolute', left: `${clusterPoint.x}px`, top: `${clusterPoint.y}px`,
       width: 14, height: 14, borderRadius: 9999, background: 'rgba(0,0,0,0.06)',
       opacity: clusterAnimation === 'entering' ? 0 : (clusterAnimation === 'visible' ? 1 : 0),
       transformOrigin: 'center', transition: `transform ${CLUSTER_ANIM_MS}ms cubic-bezier(0.2,1.1,0.22,1), opacity ${CLUSTER_ANIM_MS}ms ease`,
@@ -355,7 +341,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     };
 
     const baseStyle: React.CSSProperties = {
-      position: 'absolute', left: `${p.x}px`, top: `${p.y}px`, transform: 'translate(-50%, -56%)', opacity: 1,
+      position: 'absolute', left: `${clusterPoint.x}px`, top: `${clusterPoint.y}px`, transform: 'translate(-50%, -56%)', opacity: 1,
       transition: `opacity ${CLUSTER_ANIM_MS}ms ease, transform ${CLUSTER_ANIM_MS}ms cubic-bezier(0.16,1,0.3,1)`
     };
     if (clusterAnimation === 'entering') {
@@ -438,7 +424,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           fitToBounds={false}
           worldBounds={null}
           selectedDeviceId={selectedDeviceId}
-          openClusterPoint={openClusterPoint}
+          openClusterPoint={clusterPoint}
         />
       </div>
       {clusterChooser}
