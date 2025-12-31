@@ -4,7 +4,6 @@ import { degreesToMeters, metersToDegrees } from "./util/geo";
 import { pruneSnapshots } from "@/lib/snapshots";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import { useEffect, useState, useRef, useMemo } from "react";
-import { useLocalStorageBoolean } from "@/hooks/useLocalStorage";
 import MapView from "./ui/MapView";
 import type { DevicePoint } from "@/ui/types";
 import type { Cov2 } from "@/ui/types";
@@ -22,8 +21,6 @@ export function App() {
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
-  const LS_RAW_SNAPSHOTS = "traccar:rawSnapshots";
-  const LS_RAW_BY_DEVICE = "traccar:rawSnapshotsByDevice";
   const LS_UI_SHOW_RAW = "ui:showRaw";
   const LS_UI_SHOW_ESTIMATES = "ui:showEstimates";
   const LS_UI_SHOW_HISTORY = "ui:showHistory";
@@ -37,6 +34,7 @@ export function App() {
       return null;
     }
   }
+
   function safeSetItem(key: string, value: string | null): void {
     try {
       if (typeof window === "undefined") return;
@@ -44,30 +42,14 @@ export function App() {
       else window.localStorage.setItem(key, value);
     } catch (e) { }
   }
-  function safeGetJSON<T = unknown>(key: string): T | null {
-    const v = safeGetItem(key);
-    if (v == null) return null;
-    try { return JSON.parse(v) as T; } catch (e) { return null; }
-  }
 
-  const [showRaw, setShowRaw] = useLocalStorageBoolean(LS_UI_SHOW_RAW, true);
-  const [showEstimates, setShowEstimates] = useLocalStorageBoolean(LS_UI_SHOW_ESTIMATES, true);
-  const [showAllPast, setShowAllPast] = useLocalStorageBoolean(LS_UI_SHOW_HISTORY, false);
+  const [showRaw, setShowRaw] = useState<boolean>(() => (safeGetItem(LS_UI_SHOW_RAW) ?? "true") === "true");
+  const [showEstimates, setShowEstimates] = useState<boolean>(() => (safeGetItem(LS_UI_SHOW_ESTIMATES) ?? "true") === "true");
+  const [showAllPast, setShowAllPast] = useState<boolean>(() => (safeGetItem(LS_UI_SHOW_HISTORY) ?? "false") === "true");
 
-  useEffect(() => {
-    const existing = safeGetItem(LS_RAW_SNAPSHOTS);
-    if (Array.isArray(rawSnapshots) && rawSnapshots.length === 0 && existing && existing !== "[]") {
-      return;
-    }
-    safeSetItem(LS_RAW_SNAPSHOTS, JSON.stringify(rawSnapshots));
-  }, [rawSnapshots]);
-
-  useEffect(() => {
-    const existing = safeGetItem(LS_RAW_BY_DEVICE);
-    if (rawSnapshotsByDevice && Object.keys(rawSnapshotsByDevice).length === 0 && existing && existing !== "{}") return;
-    safeSetItem(LS_RAW_BY_DEVICE, JSON.stringify(rawSnapshotsByDevice));
-  }, [rawSnapshotsByDevice]);
-
+  useEffect(() => safeSetItem(LS_UI_SHOW_RAW, showRaw.toString()), [showRaw]);
+  useEffect(() => safeSetItem(LS_UI_SHOW_ESTIMATES, showEstimates.toString()), [showEstimates]);
+  useEffect(() => safeSetItem(LS_UI_SHOW_HISTORY, showAllPast.toString()), [showAllPast]);
 
   function measurementCovFromAccuracy(accuracyMeters: number): Cov2 {
     const v = accuracyMeters * accuracyMeters;
@@ -141,56 +123,6 @@ export function App() {
     return prunedMergedArray;
   }
 
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-
-      const parsedByDevice = safeGetJSON<Record<string, DevicePoint[]>>(LS_RAW_BY_DEVICE);
-      if (parsedByDevice && typeof parsedByDevice === "object") {
-        const byDevice: Record<string, DevicePoint[]> = {};
-        const reconstructed: DevicePoint[] = [];
-        for (const [k, arr] of Object.entries(parsedByDevice)) {
-          if (!Array.isArray(arr)) continue;
-          const re = (
-            arr
-              .map((p) => {
-                if (!p) return null;
-                if (typeof p.timestamp !== "number" || typeof p.lat !== "number" || typeof p.lon !== "number") return null;
-                return { ...p };
-              })
-              .filter(Boolean) as DevicePoint[]
-          ).sort((a, b) => a.timestamp - b.timestamp);
-          if (re.length > 0) {
-            byDevice[k] = re;
-            reconstructed.push(...re);
-          }
-        }
-        if (reconstructed.length === 0) return;
-        const baseLat = reconstructed[0]?.lat;
-        const baseLon = reconstructed[0]?.lon;
-        if (typeof baseLat !== "number" || typeof baseLon !== "number") return;
-
-        setRefLat(baseLat);
-        setRefLon(baseLon);
-        const cutoff = Date.now() - HISTORY_MS;
-
-        mergeAndApplyRawSnapshots(byDevice, cutoff);
-
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const s of reconstructed) {
-          minX = Math.min(minX, s.mean[0]);
-          minY = Math.min(minY, s.mean[1]);
-          maxX = Math.max(maxX, s.mean[0]);
-          maxY = Math.max(maxY, s.mean[1]);
-        }
-
-        setTimelineTime(reconstructed[reconstructed.length - 1]?.timestamp ?? Date.now());
-
-        buildEngineSnapshotsFromByDevice(byDevice, cutoff);
-      }
-    } catch (e) { }
-  }, []);
-
   const [baseUrlInput, setBaseUrlInput] = useState<string>(() => safeGetItem("traccar:baseUrl") ?? "");
   const [secureInput, setSecureInput] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
   const [tokenInput, setTokenInput] = useState<string>(() => safeGetItem("traccar:token") ?? "");
@@ -208,8 +140,6 @@ export function App() {
   useEffect(() => {
     deviceIconsRef.current = deviceIcons;
   }, [deviceIcons]);
-
-
 
   const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
   const [wsError, setWsError] = useState<string | null>(null);
