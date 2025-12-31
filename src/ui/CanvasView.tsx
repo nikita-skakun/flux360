@@ -1,4 +1,4 @@
-import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
+import { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
 import type { Cov2 } from "@/ui/types";
 import type { DevicePoint } from "@/ui/types";
 
@@ -23,12 +23,14 @@ type Props = {
 };
 
 export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null }, ref) {
-  type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color?: [number, number, number]; };
+  type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color: [number, number, number]; };
   type Cluster = { items: DrawItem[]; x: number; y: number; size: number; radius: number };
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
+
+  const [pinOpacity, setPinOpacity] = useState(1);
 
   const CLUSTER_DISTANCE_PX = 36;
   const PIN_R = 24;
@@ -36,6 +38,21 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
   function clusterRadius(size: number) {
     return Math.max(8, Math.ceil(6 + Math.sqrt(size) * 6));
   }
+
+  useEffect(() => {
+    const target = openClusterPoint ? 0.3 : 1;
+    let animationId: number;
+    const animate = () => {
+      setPinOpacity(current => {
+        const diff = target - current;
+        if (Math.abs(diff) < 0.01) return target;
+        animationId = requestAnimationFrame(animate);
+        return current + diff * 0.1; // slower lerp for smoother fade
+      });
+    };
+    animationId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationId);
+  }, [openClusterPoint]);
 
   function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_PX): Cluster[] {
     const n = items.length;
@@ -141,12 +158,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     const processed = components.map(c => {
       const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
       const cov: Cov2 = Array.isArray(c.cov) && c.cov.length === 3 ? (c.cov) : [100, 0, 100];
-      // derive radial uncertainty from covariance diagonals (avoid full eigen decomposition)
-      const diagMax = Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0));
-      const radiusMeters = Math.sqrt(Math.max(1e-6, diagMax));
-      const color = colorForDevice(c.device);
-      const iconText = deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase();
-      return { device: c.device, iconText, timestamp: c.timestamp, mean, cov, radiusMeters, color };
+      return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, cov, radiusMeters: Math.sqrt(Math.max(1e-6, Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0)))), color: colorForDevice(c.device) };
     });
 
     let anchorX = refMeters.x;
@@ -169,9 +181,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         }
         const widthMeters = Math.max(1, maxX - minX);
         const heightMeters = Math.max(1, maxY - minY);
-        const xScale = (width * 0.86) / widthMeters;
-        const yScale = (height * 0.86) / heightMeters;
-        localZoom = Math.min(xScale, yScale);
+        localZoom = Math.min((width * 0.86) / widthMeters, (height * 0.86) / heightMeters);
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
         anchorX = fitToBounds ? centerX : refMeters.x;
@@ -183,75 +193,42 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       localZoom = zoom;
     }
 
-    let cx = width / 2;
-    let cy = height / 2;
-    const drawItems = processed.map((p, idx) => {
-      const x = cx + (p.mean[0] - anchorX) * localZoom;
-      const y = cy - (p.mean[1] - anchorY) * localZoom;
-      const r = Math.max(1, p.radiusMeters * localZoom + 4);
-      const color = colorForDevice(p.device);
-
-      return {
-        idx,
-        device: p.device,
-        x,
-        y,
-        r,
-        iconText: p.iconText,
-        timestamp: p.timestamp,
-        color
-      };
-    });
-
-    // Draw circles sorted so that larger radii are drawn first (smaller radii on top)
-    drawItems.sort((u, v) => (v.r || 0) - (u.r || 0));
+    const drawItems = processed.map((p, idx) => ({
+      idx,
+      device: p.device,
+      x: width / 2 + (p.mean[0] - anchorX) * localZoom,
+      y: height / 2 - (p.mean[1] - anchorY) * localZoom,
+      r: Math.max(1, p.radiusMeters * localZoom + 4),
+      iconText: p.iconText,
+      timestamp: p.timestamp,
+      color: p.color,
+    }));
 
     // stash latest draw items and clusters for hit testing
     drawItemsRef.current = drawItems;
-    // precompute a numeric selected device id to avoid repeated conversions
-    const selDeviceNum = selectedDeviceId != null ? Number(selectedDeviceId) : null;
-    const computedClusters = computeClusters(drawItems, CLUSTER_DISTANCE_PX);
-    const adjustedClusters = selDeviceNum == null ? computedClusters : computedClusters.map((cl) => {
-      const sel = cl.items.find((it) => it.device === selDeviceNum);
+    clustersRef.current = selectedDeviceId == null ? computeClusters(drawItems, CLUSTER_DISTANCE_PX) : computeClusters(drawItems, CLUSTER_DISTANCE_PX).map((cl) => {
+      const sel = cl.items.find((it) => it.device === selectedDeviceId);
       return sel ? { ...cl, x: sel.x, y: sel.y } : cl;
     });
-    clustersRef.current = adjustedClusters;
-
-    // consolidated selection helper (accepts item or component-like obj)
-    const isSelected = (obj: DrawItem) => selDeviceNum != null && obj.device === selDeviceNum;
-
-    function pickRepresentativeItem(items: DrawItem[], selDeviceNum: number | null): DrawItem {
-      const sel = selDeviceNum != null ? items.find(it => it.device === selDeviceNum) : undefined;
-      if (sel) return sel;
-      // otherwise, latest by timestamp
-      return items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-    }
-
-    function pickClusterColor(items: DrawItem[], selDeviceNum: number | null) {
-      const rep = pickRepresentativeItem(items, selDeviceNum);
-      return rep.color || colorForDevice(rep.device);
-    }
 
     // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.
     function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText: string, iconColor: Color, isSelected = false, badgeText?: string) {
-      const r = PIN_R;
-
       // overall proportions tuned to SVG
-      const bodyHeight = r * 1.5;
+      const bodyHeight = PIN_R * 1.5;
       const headY = tipY - bodyHeight;
 
       ctx.save();
       ctx.beginPath();
 
       // head
-      ctx.moveTo(tipX - r, headY);
-      ctx.arc(tipX, headY, r, Math.PI, 0);
+      ctx.moveTo(tipX - PIN_R, headY);
+      ctx.arc(tipX, headY, PIN_R, Math.PI, 0);
 
       // right side
-      ctx.bezierCurveTo(tipX + r, headY + r * 0.9, tipX + r * 0.35, headY + bodyHeight * 0.65, tipX, tipY);
+      ctx.bezierCurveTo(tipX + PIN_R, headY + PIN_R * 0.9, tipX + PIN_R * 0.35, headY + bodyHeight * 0.65, tipX, tipY);
 
       // left side
-      ctx.bezierCurveTo(tipX - r * 0.35, headY + bodyHeight * 0.65, tipX - r, headY + r * 0.9, tipX - r, headY);
+      ctx.bezierCurveTo(tipX - PIN_R * 0.35, headY + bodyHeight * 0.65, tipX - PIN_R, headY + PIN_R * 0.9, tipX - PIN_R, headY);
 
       ctx.closePath();
 
@@ -269,7 +246,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         ctx.fillStyle = rgbaString(iconColor, 1);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.font = `${r}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
+        ctx.font = `${PIN_R}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
         ctx.fillText(String(iconText), tipX, headY + 1);
         ctx.restore();
       }
@@ -277,8 +254,8 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       // small badge (bottom-right) for cluster size
       if (badgeText) {
         const badgeRadius = 10;
-        const bx = tipX + r * 0.75;
-        const by = headY + r * 0.6;
+        const bx = tipX + PIN_R * 0.75;
+        const by = headY + PIN_R * 0.6;
         ctx.beginPath();
         ctx.fillStyle = "rgb(230, 230, 230)";
         ctx.arc(bx, by, badgeRadius, 0, Math.PI * 2);
@@ -293,10 +270,9 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       ctx.restore();
     }
 
-    function shouldHideAt(x: number, y: number, radius: number) {
+    function shouldHideAt(x: number, y: number) {
       if (!openClusterPoint) return false;
-      const hideRadius = radius + 100;
-      return Math.hypot(x - openClusterPoint.x, y - openClusterPoint.y) <= hideRadius;
+      return Math.hypot(x - openClusterPoint.x, y - openClusterPoint.y) <= 60 || Math.hypot(x - openClusterPoint.x, (y - PIN_R * 1.5) - openClusterPoint.y) <= 60;
     }
 
     function render() {
@@ -305,7 +281,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       // Draw circle highlight for the selected device (if any)
       for (const item of drawItems) {
         const { x, y, r, color } = item;
-        if (!isSelected(item)) continue;
+        if (selectedDeviceId == null || item.device !== selectedDeviceId) continue;
 
         ctx.save();
         ctx.fillStyle = rgbaString(color, 0.25);
@@ -324,29 +300,49 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (cl.size > 1) for (const it of cl.items) clusteredIdxs.add(it.idx);
       }
 
-      // draw unclustered item markers (pin with icon)
+      // draw item markers
       for (const item of drawItems) {
-        if (clusteredIdxs.has(item.idx)) continue;
-
-        // if cluster chooser is open, hide individual pins that overlap the open point
-        if (shouldHideAt(item.x, item.y, item.r ?? 0)) continue;
-
         const { x, y, color } = item;
-        drawPin(ctx, x, y, item.iconText, color, isSelected(item), undefined);
+        const isClustered = clusteredIdxs.has(item.idx);
+        if (isClustered) {
+          // draw clustered dot
+          ctx.fillStyle = rgbaString(color, 1);
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // unclustered
+          if (shouldHideAt(x, y)) {
+            ctx.save();
+            ctx.globalAlpha = pinOpacity;
+            ctx.fillStyle = rgbaString(color, 1);
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+          } else {
+            drawPin(ctx, x, y, item.iconText, color, selectedDeviceId != null && item.device === selectedDeviceId, undefined);
+          }
+        }
       }
 
       // draw cluster markers (pin with icon and count badge)
       for (const cl of clustersRef.current) {
         if (cl.size <= 1) continue;
         // hide cluster marker if the open chooser overlaps it
-        if (shouldHideAt(cl.x, cl.y, cl.radius ?? clusterRadius(cl.size))) continue;
-
         const { x, y, size, items } = cl;
-        const rep = pickRepresentativeItem(items, selDeviceNum);
-        const isClusterSelected = selDeviceNum != null && rep.device === selDeviceNum;
-        const iconText = rep.iconText;
-        const color = pickClusterColor(items, selDeviceNum);
-        drawPin(ctx, x, y, iconText, color, isClusterSelected, String(size));
+        const rep = (selectedDeviceId != null ? items.find(it => it.device === selectedDeviceId) : undefined) || items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        if (shouldHideAt(cl.x, cl.y)) {
+          ctx.save();
+          ctx.globalAlpha = pinOpacity;
+          ctx.fillStyle = rgbaString(rep.color, 1);
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else {
+          drawPin(ctx, x, y, rep.iconText, rep.color, selectedDeviceId != null && rep.device === selectedDeviceId, String(size));
+        }
       }
     }
 
