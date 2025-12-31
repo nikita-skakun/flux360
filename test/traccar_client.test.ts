@@ -7,7 +7,7 @@ test("normalizePosition extracts deviceId", async () => {
     latitude: 49.0,
     longitude: -122.0,
     deviceId: 42,
-    time: "2025-12-01T00:00:00Z",
+    fixTime: "2025-12-01T00:00:00Z",
     accuracy: 10,
   };
 
