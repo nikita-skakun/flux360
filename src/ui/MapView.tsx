@@ -1,25 +1,24 @@
+import { colorForDevice } from "./color";
 import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import React, { useEffect, useRef, useState } from "react";
 import type { DevicePoint } from "@/ui/types";
 
-import { colorForDevice } from "./color";
-
 type Props = {
   components: DevicePoint[];
-  deviceNames?: Record<number, string>;
-  deviceIcons?: Record<number, string>;
+  deviceNames: Record<number, string>;
+  deviceIcons: Record<number, string>;
   refLat: number | null;
   refLon: number | null;
-  worldBounds?: { minX: number; minY: number; maxX: number; maxY: number } | null;
-  height?: number | string;
-  overlay?: React.ReactNode;
-  onSelectDevice?: (id: number | null) => void;
-  selectedDeviceId?: number | null;
+  worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  height: number | string;
+  overlay: React.ReactNode;
+  onSelectDevice: (id: number | null) => void;
+  selectedDeviceId: number | null;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = null, height = 600, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -29,39 +28,28 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
   const [pixelsPerMeter, setPixelsPerMeter] = useState<number | undefined>(undefined);
 
   const canvasApiRef = useRef<CanvasViewHandle | null>(null);
-  // store anchor as map lat/lng so the chooser stays pinned to the map
   const [clusterPopup, setClusterPopup] = useState<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
-
-  // animation state for the cluster popup so we can animate open/close
   const [clusterAnimation, setClusterAnimation] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle');
   const clusterAnimationTimerRef = useRef<number | null>(null);
   const CLUSTER_ANIM_MS = 150;
 
-  // refs to hold latest values so event handlers registered once can see them
   const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
 
   useEffect(() => {
     clusterPopupRef.current = clusterPopup;
-  }, [clusterPopup]);
-  useEffect(() => {
     clusterAnimationRef.current = clusterAnimation;
-  }, [clusterAnimation]);
+  }, [clusterPopup, clusterAnimation]);
 
-  // open helper (animated) — now accepts lat/lng anchor
   const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
     if (clusterAnimationTimerRef.current) {
       window.clearTimeout(clusterAnimationTimerRef.current);
       clusterAnimationTimerRef.current = null;
     }
-    // set both state and refs immediately so handlers see the popup
     clusterPopupRef.current = popup;
     setClusterPopup(popup);
-
     clusterAnimationRef.current = 'entering';
     setClusterAnimation('entering');
-
-    // small tick so CSS transition can go from initial -> visible
     clusterAnimationTimerRef.current = window.setTimeout(() => {
       clusterAnimationRef.current = 'visible';
       setClusterAnimation('visible');
@@ -69,7 +57,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     }, 10);
   };
 
-  // close helper (animated)
   const closeClusterPopupAnimated = () => {
     if (!clusterPopupRef.current || clusterAnimationRef.current === 'exiting') return;
     if (clusterAnimationTimerRef.current) {
@@ -87,20 +74,17 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     }, CLUSTER_ANIM_MS);
   };
 
-  // ensure timers are cleared if the component unmounts
   useEffect(() => {
     return () => {
       if (clusterAnimationTimerRef.current) {
         window.clearTimeout(clusterAnimationTimerRef.current);
         clusterAnimationTimerRef.current = null;
       }
-      // clear refs on unmount
       clusterPopupRef.current = null;
       clusterAnimationRef.current = 'idle';
     };
   }, []);
 
-  // keep latest refLat/refLon in refs to avoid stale closures
   const refLatRef = useRef<number | null>(refLat);
   const refLonRef = useRef<number | null>(refLon);
   useEffect(() => {
@@ -108,35 +92,25 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     refLonRef.current = refLon;
   }, [refLat, refLon]);
 
-  // Track selection transitions so we don't auto-fit right after deselection
   const prevSelectedRef = useRef<number | null>(selectedDeviceId);
   const skipNextAutoFitRef = useRef(false);
-  // Track whether we've already performed the initial zoom for the current selection
   const selectedZoomedRef = useRef(false);
 
-  // Compute fly duration from distance (meters). Uses a small logarithmic curve so
-  // longer moves take slightly more time but are still bounded.
   const flyDurationForMeters = (meters: number) => {
     const m = Math.max(1, meters);
     const v = Math.log10(m);
     return Math.max(0.25, Math.min(1.5, v * 0.22 + 0.15));
   };
 
-  // Minimum distance (meters) below which we won't flyTo to avoid tiny jitter
   const MIN_FLY_METERS = 5;
   useEffect(() => {
     if (prevSelectedRef.current != null && selectedDeviceId == null) {
-      // we just deselected a device — skip the next auto-fit to avoid jumping the map
       skipNextAutoFitRef.current = true;
     }
-    // When selection changes (including new selection), reset the "zoomed" flag so the
-    // first update zooms in; subsequent updates will pan more gently.
     if (prevSelectedRef.current !== selectedDeviceId) selectedZoomedRef.current = false;
-
     prevSelectedRef.current = selectedDeviceId;
   }, [selectedDeviceId]);
 
-  // Initialize map once and wire move/zoom listeners
   useEffect(() => {
     const mapContainer = mapDivRef.current;
     if (!mapContainer) return;
@@ -148,7 +122,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
 
-    // Ensure the map has an initial view to avoid Leaflet throwing "Set map center and zoom first."
     const initialLat = refLatRef.current;
     const initialLon = refLonRef.current;
     if (worldBounds && initialLat != null && initialLon != null) {
@@ -178,9 +151,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
         } else {
           setCenterMeters({ x: 0, y: 0 });
         }
-      } catch (err) {
-        // map may not be ready yet; ignore and wait for move/zoom or view set in other effect
-      }
+      } catch (err) { }
     };
 
     updateTransform();
@@ -188,7 +159,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     map.on("move", updateTransform);
     map.on("zoom", updateTransform);
 
-    // click handler to detect clusters via CanvasView's hit tester
     const onMapClick = (ev: L.LeafletMouseEvent) => {
       const pt = map.latLngToContainerPoint(ev.latlng);
       const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
@@ -196,12 +166,11 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
         if (hit.items.length === 1) {
           const devKey = hit.items[0]!.device;
           const devNum = Number(devKey);
-          if (Number.isFinite(devNum)) onSelectDevice?.(devNum);
+          if (Number.isFinite(devNum)) onSelectDevice(devNum);
           closeClusterPopupAnimated();
         } else {
-          onSelectDevice?.(null);
+          onSelectDevice(null);
           const clusterPoint = map.containerPointToLatLng(L.point(hit.x, hit.y));
-          // Center the map on the clicked cluster with a smooth flight
           try {
             if (map.stop) map.stop();
             const center = map.getCenter();
@@ -218,7 +187,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
       }
     };
 
-    // change pointer when hovering over a device or cluster
     const onMapMove = (ev: L.LeafletMouseEvent) => {
       const pt = map.latLngToContainerPoint(ev.latlng);
       const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
@@ -227,7 +195,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
         container.style.cursor = "pointer";
         if (hit.items.length === 1) {
           const first = hit.items[0];
-          if (first) container.title = (deviceNames && deviceNames[first.device]) ?? String(first.device);
+          if (first) container.title = deviceNames[first.device] ?? String(first.device);
           else container.title = "";
         } else {
           container.title = "";
@@ -261,15 +229,10 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     };
   }, []);
 
-  // Update view when refLat/refLon/worldBounds change (only when NO device is selected)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
-    // When a device is selected we DON'T auto-fit the world bounds — selection controls the view
     if (selectedDeviceId != null) return;
-
-    // If we recently deselected a device, skip a single auto-fit to avoid jumping the view
     if (skipNextAutoFitRef.current) {
       skipNextAutoFitRef.current = false;
       return;
@@ -289,7 +252,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
       map.setView([0, 0], 2);
     }
 
-    // Force update of local transform
     const center = map.getCenter();
     const zoom = map.getZoom();
     const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
@@ -303,7 +265,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     }
   }, [refLat, refLon, worldBounds, selectedDeviceId]);
 
-  // When a device is selected, center and zoom to it and keep following as components update
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -317,30 +278,25 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
 
     try {
       const ZOOM_FOR_SELECTED = 16;
-      const PAN_DISTANCE_METERS = 20; // minimum distance to trigger a pan
+      const PAN_DISTANCE_METERS = 20;
 
       const center = map.getCenter();
       const centerLatLng = L.latLng(center.lat, center.lng);
       const targetLatLng = L.latLng(deg.lat, deg.lon);
       const distMeters = centerLatLng.distanceTo(targetLatLng);
 
-      // If this is the first update since selection, perform an initial zoom+center
       if (!selectedZoomedRef.current) {
-        // stop any in-flight animations before starting a new zoom
         if (map.stop) map.stop();
         const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
         const dist = centerLatLng.distanceTo(L.latLng(deg.lat, deg.lon));
         if (dist < MIN_FLY_METERS) {
-          // too close to bother flying — just adjust zoom (no center movement)
           map.setZoom(targetZoom, { animate: true });
         } else {
           const dur = flyDurationForMeters(dist);
-          // use flyTo for a smoother curved flight
           map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
         }
         selectedZoomedRef.current = true;
       } else {
-        // After initial zoom: only pan (no zoom unless user changes it) and only when necessary
         if (distMeters > PAN_DISTANCE_METERS) {
           if (map.stop) map.stop();
           const dur = flyDurationForMeters(distMeters);
@@ -372,7 +328,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
     const map = mapRef.current;
     const p = map.latLngToContainerPoint(L.latLng(clusterPopup.lat, clusterPopup.lng));
 
-    // backdrop (invisible click-catcher)
     const backdropStyle: React.CSSProperties = {
       position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
       background: 'transparent',
@@ -414,7 +369,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
           <div style={{ position: 'relative', width: 0, height: 0 }}>
             {clusterPopup.items.filter(Boolean).map((it, i) => {
               const n = clusterPopup.items.length;
-              const angle = (i / n) * Math.PI * 2 - Math.PI / 2; // start at top
+              const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
               const radius = Math.max(40, 22 + n * 6);
               const left = Math.round(radius * Math.cos(angle));
               const top = Math.round(radius * Math.sin(angle));
@@ -443,10 +398,10 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
                   <div
                     className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center cursor-pointer hover:scale-110"
                     style={innerStyle}
-                    onClick={(e) => { e.stopPropagation(); onSelectDevice?.(it.device); closeClusterPopupAnimated(); }}
-                    title={(deviceNames && deviceNames[it.device]) ?? String(it.device)}
+                    onClick={(e) => { e.stopPropagation(); onSelectDevice(it.device); closeClusterPopupAnimated(); }}
+                    title={deviceNames[it.device] ?? String(it.device)}
                   >
-                    <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{(deviceIcons && deviceIcons[it.device]) ?? String(it.device).charAt(0).toUpperCase()}</span>
+                    <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{deviceIcons[it.device] ?? String(it.device).charAt(0).toUpperCase()}</span>
                   </div>
                 </div>
               );
@@ -475,18 +430,12 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds = nu
           openClusterPoint={openClusterPoint}
         />
       </div>
-
-      {/* cluster chooser: radial device icon layout (anchored to clicked map point) */}
       {clusterChooser}
-
-      {/* Floating overlay (top-right on desktop, bottom full-width on mobile) */}
-      {overlay && (
-        <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
-          <div className="w-full sm:w-80 bg-white/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
-            {overlay}
-          </div>
+      <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
+        <div className="w-full sm:w-80 bg-white/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
+          {overlay}
         </div>
-      )}
+      </div>
     </div>
   );
 };

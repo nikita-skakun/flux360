@@ -1,6 +1,6 @@
 import { useRef, useEffect, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint } from "@/ui/types";
 import type { Cov2 } from "@/ui/types";
+import type { DevicePoint } from "@/ui/types";
 
 import { colorForDevice, rgbaString, type Color } from "./color";
 
@@ -10,16 +10,16 @@ export type CanvasViewHandle = {
 };
 
 type Props = {
-  width?: number;
-  height?: number;
+  width: number;
+  height: number;
   components: DevicePoint[];
-  deviceIcons?: Record<number, string>;
-  refMeters?: { x: number; y: number };
-  zoom?: number;
-  fitToBounds?: boolean;
-  worldBounds?: { minX: number; minY: number; maxX: number; maxY: number } | null;
-  selectedDeviceId?: number | null;
-  openClusterPoint?: { x: number; y: number } | null;
+  deviceIcons: Record<number, string>;
+  refMeters: { x: number; y: number };
+  zoom: number | undefined;
+  fitToBounds: boolean;
+  worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
+  selectedDeviceId: number | null;
+  openClusterPoint: { x: number; y: number } | null;
 };
 
 export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null }, ref) {
@@ -145,14 +145,14 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       const diagMax = Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0));
       const radiusMeters = Math.sqrt(Math.max(1e-6, diagMax));
       const color = colorForDevice(c.device);
-      const iconText = (deviceIcons && typeof deviceIcons[c.device] === 'string') ? String(deviceIcons[c.device]) : String(c.device).charAt(0).toUpperCase();
+      const iconText = deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase();
       return { device: c.device, iconText, timestamp: c.timestamp, mean, cov, radiusMeters, color };
     });
 
-    let anchorX = refMeters?.x ?? 0;
-    let anchorY = refMeters?.y ?? 0;
+    let anchorX = refMeters.x;
+    let anchorY = refMeters.y;
 
-    if (fitToBounds || !refMeters || zoom == null) {
+    if (fitToBounds || zoom == null) {
       if (processed.length > 0) {
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
         for (const p of processed) {
@@ -174,8 +174,8 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         localZoom = Math.min(xScale, yScale);
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
-        anchorX = fitToBounds ? centerX : refMeters?.x ?? 0;
-        anchorY = fitToBounds ? centerY : refMeters?.y ?? 0;
+        anchorX = fitToBounds ? centerX : refMeters.x;
+        anchorY = fitToBounds ? centerY : refMeters.y;
       } else {
         localZoom = 1;
       }
