@@ -11,16 +11,9 @@ export class Engine {
   }
 
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
-    if (!Array.isArray(ms)) return [];
-    const measurements = ms.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-    const snapshots: EngineSnapshot[] = [];
-
-    for (const m of measurements) {
+    return ms.map(m => {
       this.mixture.update(m);
-      const compSnap = this.mixture.snapshot().map((c: ComponentSnapshot) => ({ mean: [c.mean[0], c.mean[1]], cov: [c.cov[0], c.cov[1], c.cov[2]], consistency: c.consistency, weight: c.weight, action: c.action, spawnedDuringMovement: c.spawnedDuringMovement, createdAt: c.createdAt } as ComponentSnapshot));
-      snapshots.push({ timestamp: m.timestamp ?? Date.now(), data: { components: compSnap } });
-    }
-
-    return snapshots;
+      return { timestamp: m.timestamp, data: { components: this.mixture.snapshot() } };
+    });
   }
 }
