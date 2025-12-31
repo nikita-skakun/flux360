@@ -70,7 +70,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
           }
         }
       }
-      const clusterItems = idxs.map((id) => items[id]!) as DrawItem[];
+      const clusterItems = idxs.map((id) => items[id]!);
       const avgX = clusterItems.reduce((s, it) => s + it.x, 0) / clusterItems.length;
       const avgY = clusterItems.reduce((s, it) => s + it.y, 0) / clusterItems.length;
       const size = clusterItems.length;
@@ -140,7 +140,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     let localZoom = zoom ?? 1;
     const processed = components.map(c => {
       const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
-      const cov: Cov2 = Array.isArray(c.cov) && c.cov.length === 3 ? (c.cov as Cov2) : [100, 0, 100];
+      const cov: Cov2 = Array.isArray(c.cov) && c.cov.length === 3 ? (c.cov) : [100, 0, 100];
       // derive radial uncertainty from covariance diagonals (avoid full eigen decomposition)
       const diagMax = Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0));
       const radiusMeters = Math.sqrt(Math.max(1e-6, diagMax));
@@ -222,10 +222,10 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
 
     function pickClusterColor(items: DrawItem[], selDeviceNum: number | null) {
       const sel = selDeviceNum != null ? items.find((it) => it.device === selDeviceNum) : undefined;
-      if (sel && sel.color) return sel.color;
-      if (items && items[0] && items[0].color) return items[0].color;
+      if (sel?.color) return sel.color;
+      if (items?.[0]?.color) return items[0].color;
       // fallback to stable color for the first item if available
-      return items && items[0] ? colorForDevice(items[0].device) : colorForDevice(0);
+      return items?.[0] ? colorForDevice(items[0].device) : colorForDevice(0);
     }
 
     // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.

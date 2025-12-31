@@ -126,12 +126,10 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
     if (!d || typeof d !== "object") return [];
     const o = d as Record<string, unknown>;
 
-    const idRaw = o["id"];
-    if (typeof idRaw !== "number") return [];
-    const id = idRaw as number;
+    const id = o["id"];
+    if (typeof id !== "number") return [];
 
-    const nameRaw = o["name"] ?? o["uniqueId"] ?? id;
-    const name = String(nameRaw);
+    const name = (typeof o["name"] === "string" ? o["name"] : null) ?? (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ?? String(id);
 
     let emoji: string;
     if (o["attributes"] && typeof (o["attributes"] as any)["emoji"] === "string") emoji = (o["attributes"] as any)["emoji"];
@@ -180,7 +178,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     }
 
     let wsUrl = base;
-    if (opts.auth && opts.auth.type === "token") {
+    if (opts.auth?.type === "token") {
       const sep = wsUrl.includes("?") ? "&" : "?";
       wsUrl = `${wsUrl}${sep}token=${encodeURIComponent(opts.auth.token)}`;
     }
@@ -208,7 +206,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
 
           for (let i = pendingRequests.length - 1; i >= 0; i--) {
             const pr = pendingRequests[i];
-            if (pr && pr.matcher(positions)) {
+            if (pr?.matcher(positions)) {
               clearTimeout(pr.timeoutId);
               pr.resolve(positions);
               pendingRequests.splice(i, 1);
@@ -305,7 +303,7 @@ export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] 
         return;
       }
       for (const k of ["positions", "data", "payload", "body", "message"]) {
-        if (k in node) walk((node as any)[k]);
+        if (k in node) walk((node)[k]);
       }
       for (const v of Object.values(node)) walk(v);
     }

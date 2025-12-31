@@ -271,7 +271,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     if (selectedDeviceId == null) return;
 
     const sel = components.find((c) => Number(c.device) === Number(selectedDeviceId));
-    if (!sel || !sel.mean || refLat == null || refLon == null)
+    if (!sel?.mean || refLat == null || refLon == null)
       return;
 
     const deg = metersToDegrees(sel.mean[0], sel.mean[1], refLat, refLon);

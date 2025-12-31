@@ -305,7 +305,7 @@ export function App() {
                   const nameMap: Record<number, string> = {};
                   const iconMap: Record<number, string> = {};
                   for (const d of devices) {
-                    if (d && d.id != null) {
+                    if (d?.id != null) {
                       nameMap[d.id] = d.name;
                       iconMap[d.id] = d.emoji;
                     }

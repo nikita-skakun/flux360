@@ -24,6 +24,8 @@
     "noImplicitOverride": true,
     "noUncheckedIndexedAccess": true,
     "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noUncheckedSideEffectImports": true,
     // Dead code and useless constructs
     "noUnusedLocals": true,
     "noUnusedParameters": true,
