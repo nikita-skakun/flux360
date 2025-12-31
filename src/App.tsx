@@ -3,7 +3,7 @@ import "./index.css";
 import { computeNextTimelineTime } from "@/lib/timeline";
 import { degreesToMeters, metersToDegrees } from "./util/geo";
 import { TimelineSlider } from "./ui/TimelineSlider";
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import MapView from "./ui/MapView";
 import type { DevicePoint } from "@/ui/types";
 import type { Cov2 } from "@/ui/types";
@@ -394,7 +394,7 @@ export function App() {
     return `${d}d ago`;
   }
 
-  const visibleComponentsAtTime = (time: number): DevicePoint[] => {
+  const visibleComponentsAtTime = useCallback((time: number): DevicePoint[] => {
     const engineComps = showEstimates
       ? Object.values(engineSnapshotsByDevice).map((arr) => findLatestSnapshotBeforeOrAt(arr, time)).filter((p): p is DevicePoint => p !== null)
       : [];
@@ -406,10 +406,10 @@ export function App() {
       : [];
 
     return [...rawComps, ...engineComps];
-  };
+  }, [showAllPast, showRaw, showEstimates, rawSnapshots, rawSnapshotsByDevice, engineSnapshotsByDevice]);
 
   const effectiveTime = useMemo(() => getEffectiveTimelineTime(), [timelineTime, rawSnapshots]);
-  const visibleComponents = useMemo(() => visibleComponentsAtTime(effectiveTime), [effectiveTime, showAllPast, showRaw, showEstimates, rawSnapshots, rawSnapshotsByDevice, engineSnapshotsByDevice]);
+  const visibleComponents = useMemo(() => visibleComponentsAtTime(effectiveTime), [effectiveTime, visibleComponentsAtTime]);
 
   const frame = { components: visibleComponents };
 
