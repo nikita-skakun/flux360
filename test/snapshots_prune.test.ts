@@ -11,7 +11,7 @@ test("pruneSnapshots keeps only the last-day entries", () => {
     { timestamp: now, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
   ];
 
-  const pruned = points.filter((p) => typeof p?.timestamp === "number" && p.timestamp >= cutoff).sort((a, b) => a.timestamp - b.timestamp);
+  const pruned = points.filter((p) => p.timestamp >= cutoff).sort((a, b) => a.timestamp - b.timestamp);
   expect(pruned.length).toBe(2);
   expect(pruned.map((s) => s.timestamp)).toEqual([cutoff + 1000, now]);
 });

@@ -109,7 +109,5 @@ export class Component implements ComponentState {
 
     const newP = addCov(APA, KRKT);
     this.cov = symmetric(newP);
-
-    this.consistency = Math.max(0, Math.min(1, this.consistency));
   }
 }

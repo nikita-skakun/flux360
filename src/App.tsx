@@ -2,13 +2,11 @@
 import "./index.css";
 import { computeNextTimelineTime } from "@/lib/timeline";
 import { degreesToMeters, metersToDegrees } from "./util/geo";
-import { pruneSnapshots } from "@/lib/snapshots";
 import { TimelineSlider } from "./ui/TimelineSlider";
 import { useEffect, useState, useRef, useMemo } from "react";
 import MapView from "./ui/MapView";
 import type { DevicePoint } from "@/ui/types";
 import type { Cov2 } from "@/ui/types";
-import type { EngineSnapshot } from "@/engine/engine";
 import type { ComponentSnapshot } from "@/engine/mixture";
 import type { NormalizedPosition } from "@/api/traccarClient";
 
@@ -59,42 +57,33 @@ export function App() {
     return [v, 0, v];
   }
 
+  function createDevicePoint(c: ComponentSnapshot, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null): DevicePoint {
+    const diagMax = Math.max(c.cov[0], c.cov[2]);
+    const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
+    const { lat: compLat, lon: compLon } = (refLat != null && refLon != null) ? metersToDegrees(c.mean[0], c.mean[1], refLat, refLon) : { lat: 0, lon: 0 };
+    return { mean: c.mean, cov: c.cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal };
+  }
+
+  function pruneSnapshots(points: DevicePoint[], sinceMs: number) {
+    return points.filter((p) => p.timestamp >= sinceMs).sort((a, b) => a.timestamp - b.timestamp);
+  }
+
   async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, DevicePoint[]>, cutoff: number): Promise<DevicePoint[]> {
     try {
       const { Engine } = await import("@/engine/engine");
-      const engineByDevice: Record<number, DevicePoint[]> = {};
-      const mergedEngine: DevicePoint[] = [];
-
-      for (const [deviceKey, arr] of Object.entries(byDevice)) {
-        const deviceId = Number(deviceKey);
-        const measurements = arr.slice().sort((a: DevicePoint, b: DevicePoint) => (a.timestamp - b.timestamp));
-
-        if (measurements.length === 0) {
-          engineByDevice[deviceId] = [];
-          continue;
-        }
-
-        const enginePerDevice = new Engine();
-        const engineSnapRaw: EngineSnapshot[] = enginePerDevice.processMeasurements(measurements);
-
-        const engineSnap: DevicePoint[] = engineSnapRaw.flatMap((s_: EngineSnapshot) => {
-          return s_.data.components.map((c: ComponentSnapshot) => {
-            const diagMax = Math.max(c.cov[0], c.cov[2]);
-            const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
-            const { lat: compLat, lon: compLon } = typeof refLat === "number" && typeof refLon === "number" ? metersToDegrees(c.mean[0], c.mean[1], refLat, refLon) : { lat: 0, lon: 0 };
-            return { mean: c.mean, cov: c.cov, timestamp: s_.timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal } as DevicePoint;
-          });
-        });
-
-        engineSnap.sort((a, b) => a.timestamp - b.timestamp);
-        engineByDevice[deviceId] = pruneSnapshots(engineSnap, cutoff);
-        mergedEngine.push(...engineByDevice[deviceId]);
-      }
-
-      mergedEngine.sort((a, b) => a.timestamp - b.timestamp);
+      const engineByDevice = Object.fromEntries(
+        Object.entries(byDevice).map(([deviceKey, arr]) => {
+          const deviceId = Number(deviceKey);
+          const engine = new Engine();
+          const snapshots = engine.processMeasurements(arr);
+          const points = snapshots.flatMap(s => s.data.components.map(c => createDevicePoint(c, s.timestamp, deviceId, refLat, refLon)));
+          return [deviceId, pruneSnapshots(points, cutoff)];
+        })
+      );
       setEngineSnapshotsByDevice(engineByDevice);
-      return pruneSnapshots(mergedEngine, cutoff);
+      return pruneSnapshots(Object.values(engineByDevice).flat(), cutoff);
     } catch (e) {
+      console.error("Error building engine snapshots:", e);
       return [];
     }
   }
@@ -112,13 +101,12 @@ export function App() {
   function mergeAndApplyRawSnapshots(incomingByDevice: Record<string, DevicePoint[]>, cutoff: number): DevicePoint[] {
     let prunedMergedArray: DevicePoint[] = [];
     setRawSnapshotsByDevice((prevByDevice) => {
-      const mergedByDevice: Record<string, DevicePoint[]> = { ...(prevByDevice ?? {}) };
+      const mergedByDevice: Record<string, DevicePoint[]> = { ...prevByDevice };
       for (const [deviceKey, arr] of Object.entries(incomingByDevice)) {
         const existing = mergedByDevice[deviceKey] ?? [];
-        const merged = [...existing, ...arr].sort((a, b) => a.timestamp - b.timestamp);
-        mergedByDevice[deviceKey] = pruneSnapshots(merged, cutoff);
+        mergedByDevice[deviceKey] = pruneSnapshots([...existing, ...arr], cutoff);
       }
-      const mergedArray = Object.values(mergedByDevice).flat().sort((a, b) => a.timestamp - b.timestamp);
+      const mergedArray = Object.values(mergedByDevice).flat();
       prunedMergedArray = pruneSnapshots(mergedArray, cutoff);
       ensureTimelineTimeWithinCutoff(prunedMergedArray, cutoff);
       return mergedByDevice;
@@ -299,7 +287,6 @@ export function App() {
                   setDeviceNames(nameMap);
                   setDeviceIcons(iconMap);
                   for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
-                  processPositions(positionsAll);
                 }
 
                 for (const deviceId of knownDevices) {
@@ -315,7 +302,6 @@ export function App() {
                       seen.add(key);
                       positionsAll.push(p);
                     }
-                    positionsAll.sort((a, b) => a.timestamp - b.timestamp);
                     processPositions(positionsAll);
                   } catch {
                     // ignore processing errors
