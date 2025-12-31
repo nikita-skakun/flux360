@@ -193,42 +193,29 @@ export function App() {
     setRefLat(baseLat);
     setRefLon(baseLon);
 
-    const posByDevice = new Map<number, NormalizedPosition[]>();
-    for (const p of positions) {
-      const key = p.device;
-      if (!posByDevice.has(key)) posByDevice.set(key, []);
-      posByDevice.get(key)!.push(p);
-    }
-    for (const arr of posByDevice.values()) arr.sort((a, b) => a.timestamp - b.timestamp);
+    const posByDevice = positions.reduce((acc, p) => {
+      (acc[p.device] ||= []).push(p);
+      return acc;
+    }, {} as Record<number, NormalizedPosition[]>);
+    for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
 
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const arr of posByDevice.values()) {
-      for (const p of arr) {
-        const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
-    }
-
-    const rawByDevice: Record<string, DevicePoint[]> = {};
-    for (const [deviceKey, arr] of posByDevice) {
+    const rawByDevice: Record<number, DevicePoint[]> = {};
+    for (const [deviceKey, arr] of Object.entries(posByDevice)) {
+      const deviceId = Number(deviceKey);
       const rawArr: DevicePoint[] = arr.map((p) => {
         const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
         const comp: DevicePoint = {
-          mean: [x, y] as [number, number],
+          mean: [x, y],
           cov: measurementCovFromAccuracy(p.accuracy),
           accuracy: p.accuracy,
           lat: p.lat,
           lon: p.lon,
-          device: deviceKey,
+          device: deviceId,
           timestamp: p.timestamp,
         };
         return comp;
       });
-      rawArr.sort((a, b) => a.timestamp - b.timestamp);
-      rawByDevice[deviceKey] = rawArr;
+      rawByDevice[deviceId] = rawArr;
     }
 
     const cutoff = Date.now() - HISTORY_MS;
