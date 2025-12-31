@@ -214,7 +214,6 @@ export function App() {
     }
 
     const rawByDevice: Record<string, DevicePoint[]> = {};
-    let mergedRaw: DevicePoint[] = [];
     for (const [deviceKey, arr] of posByDevice) {
       const rawArr: DevicePoint[] = arr.map((p) => {
         const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
@@ -231,21 +230,17 @@ export function App() {
       });
       rawArr.sort((a, b) => a.timestamp - b.timestamp);
       rawByDevice[deviceKey] = rawArr;
-      mergedRaw.push(...rawArr);
     }
-    mergedRaw.sort((a, b) => a.timestamp - b.timestamp);
 
     const cutoff = Date.now() - HISTORY_MS;
 
     const prevMergedArray = mergedArrayFromByDevice(rawSnapshotsByDevice ?? {});
     const prevLatest = prevMergedArray[prevMergedArray.length - 1]?.timestamp ?? null;
     const prunedMergedArray = mergeAndApplyRawSnapshots(rawByDevice, cutoff);
-    mergedRaw = prunedMergedArray;
     const newLatest = prunedMergedArray[prunedMergedArray.length - 1]?.timestamp ?? null;
     setTimelineTime((prev) => computeNextTimelineTime(prev, prevLatest, newLatest, cutoff));
 
     buildEngineSnapshotsFromByDevice(rawByDevice, cutoff);
-    setTimelineTime((prev) => prev == null ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev < cutoff ? mergedRaw[mergedRaw.length - 1]?.timestamp ?? Date.now() : prev);
   }
 
   useEffect(() => {
@@ -277,22 +272,6 @@ export function App() {
       }
       arr.splice(lo, 0, item);
     }
-
-    try {
-      if (rawSnapshots && rawSnapshots.length > 0) {
-        for (const s of rawSnapshots) {
-          const comp = s;
-          const p: NormalizedPosition = { timestamp: comp.timestamp, lat: comp.lat, lon: comp.lon, accuracy: typeof comp.accuracy === "number" ? comp.accuracy : 50, deviceId: comp.device };
-          const key = dedupeKey(p);
-          if (seen.has(key)) continue;
-          seen.add(key);
-          insertSortedByTimestamp(positionsAll, p);
-          knownDevices.add(Number(comp.device));
-        }
-        setTimelineTime(positionsAll[positionsAll.length - 1]?.timestamp ?? Date.now());
-        processPositions(positionsAll);
-      }
-    } catch (e) { }
 
     clientCloseRef.current?.();
 
