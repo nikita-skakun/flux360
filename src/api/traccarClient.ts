@@ -11,7 +11,7 @@ export type TraccarClientOptions = {
 };
 
 export type NormalizedPosition = {
-  deviceId: number;
+  device: number;
   timestamp: number; // epoch ms
   lat: number;
   lon: number;
@@ -44,7 +44,7 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
   if (typeof deviceId !== "number") return null;
 
   return {
-    deviceId,
+    device: deviceId,
     timestamp: ts,
     lat,
     lon,
@@ -63,7 +63,7 @@ async function performGet(fetcher: typeof fetch, url: string, headers: Record<st
 
 export async function fetchPositions(
   opts: TraccarClientOptions,
-  deviceId: number,
+  device: number,
   from: Date,
   to: Date | null = null,
   params: Record<string, string | number | boolean> = {}
@@ -72,7 +72,7 @@ export async function fetchPositions(
   const protocol = opts.secure ? 'https' : 'http';
   const base = `${protocol}://${opts.baseUrl}/api`;
   const paramsBase: Record<string, string> = {
-    deviceId: String(deviceId),
+    deviceId: String(device),
     from: from.toISOString(),
   };
   if (to) paramsBase["to"] = to.toISOString();
@@ -252,6 +252,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
       try {
         ws.send(JSON.stringify(message));
       } catch {
+        // ignore send errors
         resolve([]);
         return;
       }
@@ -263,7 +264,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
         resolve([]);
       }, timeoutMs);
 
-      pendingRequests.push({ resolve, reject: () => { }, timeoutId, matcher: (ps: NormalizedPosition[]) => ps.some((p) => p.deviceId === params.deviceId) });
+      pendingRequests.push({ resolve, reject: () => { }, timeoutId, matcher: (ps: NormalizedPosition[]) => ps.some((p) => p.device === params.deviceId) });
     });
   }
 

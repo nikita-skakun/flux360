@@ -1,6 +1,6 @@
 import { test, expect } from "bun:test";
 
-test("normalizePosition extracts deviceId", async () => {
+test("normalizePosition extracts device", async () => {
   const { normalizePosition } = await import("../src/api/traccarClient");
 
   const raw = {
@@ -13,6 +13,6 @@ test("normalizePosition extracts deviceId", async () => {
 
   const norm = normalizePosition(raw);
   expect(norm).toBeTruthy();
-  expect(norm!.deviceId).toBe(42);
+  expect(norm!.device).toBe(42);
   expect(typeof norm!.timestamp).toBe("number");
 });

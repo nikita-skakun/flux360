@@ -186,11 +186,7 @@ export function App() {
   function processPositions(positions: NormalizedPosition[]) {
     if (!positions || positions.length === 0) return;
 
-    const positionsWithDevice = positions.map((p) => {
-      return { ...p, device: p.deviceId };
-    });
-
-    const first = positionsWithDevice[0];
+    const first = positions[0];
     if (!first) return;
     const baseLat = first.lat;
     const baseLon = first.lon;
@@ -198,7 +194,7 @@ export function App() {
     setRefLon(baseLon);
 
     const posByDevice = new Map<number, NormalizedPosition[]>();
-    for (const p of positionsWithDevice) {
+    for (const p of positions) {
       const key = p.device;
       if (!posByDevice.has(key)) posByDevice.set(key, []);
       posByDevice.get(key)!.push(p);
@@ -261,8 +257,8 @@ export function App() {
     let seen = new Set<string>();
     let positionsAll: NormalizedPosition[] = [];
 
-    function dedupeKey(p: { deviceId?: number; timestamp?: number; lat?: number; lon?: number }) {
-      return `${p.deviceId}:${p.timestamp}:${p.lat}:${p.lon}`;
+    function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
+      return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
     }
 
     function insertSortedByTimestamp(arr: NormalizedPosition[], item: NormalizedPosition) {
@@ -293,7 +289,7 @@ export function App() {
             if (seen.has(key)) return;
             seen.add(key);
             insertSortedByTimestamp(positionsAll, p);
-            knownDevices.add(Number(p.deviceId));
+            knownDevices.add(p.device);
             processPositions(positionsAll);
           },
           onOpen: () => {
@@ -320,27 +316,20 @@ export function App() {
                 }
 
                 for (const deviceId of knownDevices) {
-                  if (deviceId == null || Number.isNaN(Number(deviceId))) continue;
+                  if (deviceId == null || Number.isNaN(deviceId) || derivedBase == null) continue;
                   const from = new Date(Math.max(0, Date.now() - HISTORY_MS));
                   const to = new Date();
 
                   try {
-                    if (!derivedBase) {
-                      continue;
+                    const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } }, deviceId, from, to, {});
+                    for (const p of fetched) {
+                      const key = dedupeKey(p);
+                      if (seen.has(key)) continue;
+                      seen.add(key);
+                      positionsAll.push(p);
                     }
-
-                    const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } }, Number(deviceId), from, to, {});
-                    if (fetched && fetched.length > 0) {
-                      for (const p of fetched) {
-                        const key = dedupeKey(p);
-                        if (seen.has(key)) continue;
-                        seen.add(key);
-                        positionsAll.push(p);
-                      }
-                      positionsAll.sort((a, b) => a.timestamp - b.timestamp);
-
-                      processPositions(positionsAll);
-                    }
+                    positionsAll.sort((a, b) => a.timestamp - b.timestamp);
+                    processPositions(positionsAll);
                   } catch {
                     // ignore processing errors
                   }
