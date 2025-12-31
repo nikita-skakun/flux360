@@ -359,7 +359,6 @@ export function App() {
           },
         });
 
-        (window as unknown as { __traccarClient?: unknown }).__traccarClient = client;
         clientCloseRef.current = () => {
           client.close();
         };
