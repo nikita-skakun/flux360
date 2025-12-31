@@ -40,42 +40,42 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
   function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_PX): Cluster[] {
     const n = items.length;
     if (n === 0) return [];
-    const adj: number[][] = Array.from({ length: n }, () => []);
+    const parent = Array.from({ length: n }, (_, i) => i);
+    const find = (i: number): number => parent[i]! === i ? i : parent[i]! = find(parent[i]!);
+    const union = (i: number, j: number) => { const pi = find(i), pj = find(j); if (pi !== pj) parent[pi]! = pj; };
+    const cellSize = threshold;
+    const grid = new Map<string, number[]>();
     for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const a = items[i]!;
-        const b = items[j]!;
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        if (Math.hypot(dx, dy) <= threshold) {
-          adj[i]!.push(j);
-          adj[j]!.push(i);
-        }
-      }
+      const item = items[i]!;
+      const key = `${Math.floor(item.x / cellSize)},${Math.floor(item.y / cellSize)}`;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key)!.push(i);
     }
-    const visited = new Array(n).fill(false);
-    const clusters: Cluster[] = [];
     for (let i = 0; i < n; i++) {
-      if (visited[i]) continue;
-      const stack = [i];
-      visited[i] = true;
-      const idxs: number[] = [];
-      while (stack.length > 0) {
-        const v = stack.pop()!;
-        idxs.push(v);
-        for (const w of adj[v] ?? []) {
-          if (!visited[w]) {
-            visited[w] = true;
-            stack.push(w);
+      const item = items[i]!;
+      const cellX = Math.floor(item.x / cellSize);
+      const cellY = Math.floor(item.y / cellSize);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const cell = grid.get(`${cellX + dx},${cellY + dy}`);
+          if (!cell) continue;
+          for (const j of cell) {
+            if (j <= i) continue;
+            const other = items[j]!;
+            if (Math.hypot(item.x - other.x, item.y - other.y) <= threshold) union(i, j);
           }
         }
       }
-      const clusterItems = idxs.map((id) => items[id]!);
+    }
+    const groups = Array.from({ length: n }, () => [] as DrawItem[]);
+    for (let i = 0; i < n; i++) groups[find(i)]!.push(items[i]!);
+    const clusters: Cluster[] = [];
+    for (let i = 0; i < n; i++) {
+      const clusterItems = groups[i]!;
+      if (clusterItems.length === 0) continue;
       const avgX = clusterItems.reduce((s, it) => s + it.x, 0) / clusterItems.length;
       const avgY = clusterItems.reduce((s, it) => s + it.y, 0) / clusterItems.length;
-      const size = clusterItems.length;
-      const radius = clusterRadius(size);
-      clusters.push({ items: clusterItems, x: avgX, y: avgY, size, radius });
+      clusters.push({ items: clusterItems, x: avgX, y: avgY, size: clusterItems.length, radius: clusterRadius(clusterItems.length) });
     }
     return clusters;
   }
@@ -109,12 +109,12 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (!best || hitDist < best.dist) best = { cluster: cl, dist: hitDist, radius: usedRadius };
       }
       if (!best) return null;
-      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0,0], cov: [0,0,0], lat:0, lon:0, timestamp: it.timestamp })) as DevicePoint[];
+      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp })) as DevicePoint[];
       if (items.length === 0) return null;
       return { items, x: best.cluster.x, y: best.cluster.y };
     },
     getClusters: () => {
-      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0,0], cov: [0,0,0], lat:0, lon:0, timestamp: it.timestamp })) as DevicePoint[], x: cl.x, y: cl.y }));
+      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp })) as DevicePoint[], x: cl.x, y: cl.y }));
     },
   }), [components]);
 
@@ -220,12 +220,16 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     // consolidated selection helper (accepts item or component-like obj)
     const isSelected = (obj: DrawItem) => selDeviceNum != null && obj.device === selDeviceNum;
 
+    function pickRepresentativeItem(items: DrawItem[], selDeviceNum: number | null): DrawItem {
+      const sel = selDeviceNum != null ? items.find(it => it.device === selDeviceNum) : undefined;
+      if (sel) return sel;
+      // otherwise, latest by timestamp
+      return items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+    }
+
     function pickClusterColor(items: DrawItem[], selDeviceNum: number | null) {
-      const sel = selDeviceNum != null ? items.find((it) => it.device === selDeviceNum) : undefined;
-      if (sel?.color) return sel.color;
-      if (items?.[0]?.color) return items[0].color;
-      // fallback to stable color for the first item if available
-      return items?.[0] ? colorForDevice(items[0].device) : colorForDevice(0);
+      const rep = pickRepresentativeItem(items, selDeviceNum);
+      return rep.color || colorForDevice(rep.device);
     }
 
     // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.
@@ -338,16 +342,9 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (shouldHideAt(cl.x, cl.y, cl.radius ?? clusterRadius(cl.size))) continue;
 
         const { x, y, size, items } = cl;
-        const sel = selDeviceNum != null ? items.find((it: DrawItem) => it.device === selDeviceNum) : undefined;
-        const isClusterSelected = !!sel;
-        // select icon: selected device if present, otherwise latest by timestamp
-        let iconText: string;
-        if (sel) {
-          iconText = sel.iconText;
-        } else {
-          const latest = items.reduce((a: DrawItem, b: DrawItem) => (a.timestamp > b.timestamp ? a : b));
-          iconText = latest.iconText;
-        }
+        const rep = pickRepresentativeItem(items, selDeviceNum);
+        const isClusterSelected = selDeviceNum != null && rep.device === selDeviceNum;
+        const iconText = rep.iconText;
         const color = pickClusterColor(items, selDeviceNum);
         drawPin(ctx, x, y, iconText, color, isClusterSelected, String(size));
       }
