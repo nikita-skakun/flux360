@@ -365,6 +365,21 @@ export function App() {
     return result;
   }
 
+  function findSnapshotsUpToTime(snaps: DevicePoint[], time: number): DevicePoint[] {
+    if (!Array.isArray(snaps) || snaps.length === 0) return [];
+    let lo = 0;
+    let hi = snaps.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (snaps[mid]!.timestamp <= time) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return snaps.slice(0, lo);
+  }
+
   const getEffectiveTimelineTime = () => timelineTime ?? (rawSnapshots[rawSnapshots.length - 1]?.timestamp ?? Date.now());
 
   function humanDurationSince(ts: number): string {
@@ -386,7 +401,7 @@ export function App() {
 
     const rawComps = showRaw
       ? showAllPast
-        ? rawSnapshots.filter((s) => s.timestamp <= time)
+        ? findSnapshotsUpToTime(rawSnapshots, time)
         : Object.values(rawSnapshotsByDevice).map((arr) => findLatestSnapshotBeforeOrAt(arr, time)).filter((p): p is DevicePoint => p !== null)
       : [];
 
