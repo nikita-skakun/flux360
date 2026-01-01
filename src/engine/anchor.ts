@@ -8,6 +8,7 @@ export class Anchor {
   mean: Vec2;
   cov: Cov2;
   startTimestamp: number;
+  endTimestamp: number | null;
   confidence: number;
   lastUpdateTimestamp: number;
 
@@ -15,12 +16,15 @@ export class Anchor {
     this.mean = mean;
     this.cov = symmetric(cov);
     this.startTimestamp = startTimestamp;
+    this.endTimestamp = null;
     this.confidence = confidence;
     this.lastUpdateTimestamp = lastUpdateTimestamp ?? startTimestamp;
   }
 
   clone(): Anchor {
-    return new Anchor([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
+    const cloned = new Anchor([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
+    cloned.endTimestamp = this.endTimestamp;
+    return cloned;
   }
 
   getConfidence(currentTime: number, decayRate: number): number {

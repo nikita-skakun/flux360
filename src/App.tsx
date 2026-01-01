@@ -61,10 +61,14 @@ export function App() {
       const currentSnapshots: Record<number, DevicePoint[]> = {};
       for (const [deviceId, engine] of Object.entries(enginesRef.current)) {
         const snapshot = engine.getCurrentSnapshot();
-        const timestamp = engine.lastTimestamp ?? Date.now();
-        const anchorAgeMs = Date.now() - snapshot.activeAnchor.startTimestamp;
-        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat, refLon, anchorAgeMs, snapshot.activeConfidence);
-        currentSnapshots[Number(deviceId)] = [point];
+        if (snapshot.activeAnchor) {
+          const timestamp = engine.lastTimestamp ?? Date.now();
+          const anchorAgeMs = Date.now() - snapshot.activeAnchor.startTimestamp;
+          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat, refLon, anchorAgeMs, snapshot.activeConfidence);
+          currentSnapshots[Number(deviceId)] = [point];
+        } else {
+          currentSnapshots[Number(deviceId)] = [];
+        }
       }
       setEngineSnapshotsByDevice(currentSnapshots);
       return Object.values(currentSnapshots).flat();

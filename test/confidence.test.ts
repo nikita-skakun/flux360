@@ -1,5 +1,6 @@
-import { test, expect } from "bun:test";
 import { Anchor } from "../src/engine/anchor";
+import { Engine } from "../src/engine/engine";
+import { test, expect } from "bun:test";
 import type { DevicePoint } from "../src/ui/types";
 
 const makePoint = (mean: [number, number], cov: [number, number, number], timestamp: number, accuracy: number = 10): DevicePoint => ({
@@ -86,4 +87,29 @@ test("single outliers do not spike confidence", () => {
   const confAfter = anchor.getConfidence(1000, decayRate);
   expect(confAfter).toBeGreaterThan(initialConf);
   expect(confAfter).toBeLessThan(0.9); // not spike high
+});
+
+test("anchor timestamps: active anchor has endTimestamp null", async () => {
+  const engine = new Engine();
+  const m = makePoint([0, 0], [1, 0, 1], 1000);
+  engine.processMeasurements([m]);
+  expect(engine.activeAnchor!.endTimestamp).toBeNull();
+});
+
+test("anchor timestamps: closed anchors have endTimestamp set", async () => {
+  const engine = new Engine();
+  const ms = [
+    makePoint([0, 0], [1, 0, 1], 1000),
+    makePoint([0, 0], [1, 0, 1], 2000),
+    makePoint([10, 10], [1, 0, 1], 3000), // outlier to create candidate
+    makePoint([10, 10], [1, 0, 1], 4000), // update candidate
+    makePoint([10, 10], [1, 0, 1], 5000), // promote
+  ];
+  engine.processMeasurements(ms);
+  expect(engine.closedAnchors.length).toBe(1);
+  const closed = engine.closedAnchors[0]!;
+  expect(closed.startTimestamp).toBe(1000);
+  expect(closed.endTimestamp).toBe(4000);
+  expect(engine.activeAnchor!.startTimestamp).toBe(3000);
+  expect(engine.activeAnchor!.endTimestamp).toBeNull();
 });

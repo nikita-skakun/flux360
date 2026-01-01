@@ -1,11 +1,12 @@
 import type { DevicePoint } from "@/ui/types";
 import { Anchor } from "./anchor";
 
-export type EngineSnapshot = { activeAnchor: Anchor; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number; activeConfidence: number };
+export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number; activeConfidence: number };
 
 const DECAY_RATE_ACTIVE = 0.001;
 const DECAY_RATE_CANDIDATE = 0.01;
 const GAIN_RATE = 2.0;
+const MIN_USABLE_CONFIDENCE = 0.1;
 
 export class Engine {
   activeAnchor: Anchor | null = null;
@@ -36,6 +37,7 @@ export class Engine {
               // check promotion
               if (this.candidateAnchor.getConfidence(m.timestamp, DECAY_RATE_CANDIDATE) > this.activeAnchor.getConfidence(m.timestamp, DECAY_RATE_ACTIVE)) {
                 // promote
+                this.activeAnchor.endTimestamp = m.timestamp;
                 this.closedAnchors.push(this.activeAnchor);
                 this.activeAnchor = this.candidateAnchor;
                 this.candidateAnchor = null;
@@ -50,16 +52,18 @@ export class Engine {
           }
         }
       }
+      if (this.activeAnchor && this.activeAnchor.getConfidence(m.timestamp, DECAY_RATE_ACTIVE) < MIN_USABLE_CONFIDENCE) {
+        this.activeAnchor.endTimestamp = m.timestamp;
+        this.closedAnchors.push(this.activeAnchor);
+        this.activeAnchor = null;
+      }
       this.lastTimestamp = m.timestamp;
-      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor.getConfidence(this.lastTimestamp, DECAY_RATE_ACTIVE) });
+      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp, DECAY_RATE_ACTIVE) : 0 });
     }
     return snapshots;
   }
 
   getCurrentSnapshot(): EngineSnapshot {
-    if (this.activeAnchor === null) {
-      throw new Error("No measurements processed yet");
-    }
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp!, activeConfidence: this.activeAnchor.getConfidence(this.lastTimestamp!, DECAY_RATE_ACTIVE) };
+    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp!, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp!, DECAY_RATE_ACTIVE) : 0 };
   }
 }
