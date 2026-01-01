@@ -8,8 +8,8 @@ test("parsing DevicePoint arrays yields positions with normalized timestamps", (
 
   const storedByDevice = {
     d1: [
-      { timestamp: t1, lat: 1.1, lon: -2.2, accuracy: 5, device: 1, mean: [1.1, -2.2], cov: [25, 0, 25] },
-      { timestamp: t2, lat: 1.2, lon: -2.3, accuracy: 6, device: 1, mean: [1.2, -2.3], cov: [36, 0, 36] },
+      { timestamp: t1, lat: 1.1, lon: -2.2, accuracy: 5, device: 1, mean: [1.1, -2.2], cov: [25, 0, 25], anchorAgeMs: 0 },
+      { timestamp: t2, lat: 1.2, lon: -2.3, accuracy: 6, device: 1, mean: [1.2, -2.3], cov: [36, 0, 36], anchorAgeMs: 0 },
     ],
   };
 

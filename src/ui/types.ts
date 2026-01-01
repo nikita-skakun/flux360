@@ -9,4 +9,11 @@ export type DevicePoint = {
   cov: Cov2;
   timestamp: number;
   accuracy: number;
+  anchorAgeMs: number;
+};
+
+export type Anchor = {
+  mean: Vec2;
+  cov: Cov2;
+  startTimestamp: number;
 };

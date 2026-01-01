@@ -15,6 +15,7 @@ test("moderate_uncertainty", async () => {
       accuracy,
       lat: 0,
       lon: 0,
+      anchorAgeMs: 0,
     } as DevicePoint;
   };
 
@@ -32,11 +33,8 @@ test("moderate_uncertainty", async () => {
   const snaps = engine.processMeasurements(measurements);
 
   const firstClose = snaps.findIndex((s) => {
-    const comps = s?.data.components;
-    if (!comps) return false;
-    const best = comps.reduce((a, b) => (a.weight >= b.weight ? a : b));
-    const bestMean = best.mean;
-    const distToNew = Math.hypot(bestMean[0] - 200, bestMean[1] - 0);
+    const comp = s.activeAnchor;
+    const distToNew = Math.hypot(comp.mean[0] - 200, comp.mean[1] - 0);
     return distToNew < 20;
   });
 

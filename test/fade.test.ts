@@ -15,6 +15,7 @@ test("fade", async () => {
       accuracy,
       lat: 0,
       lon: 0,
+      anchorAgeMs: 0,
     } as DevicePoint;
   };
 
@@ -42,17 +43,20 @@ test("fade", async () => {
     for (const idx of keyIndices) {
       const s = snaps[idx];
       if (!s) continue;
-      const comps = s.data.components;
-      console.log(`Snapshot index=${idx}, timestamp=${s.timestamp}`);
-      if (comps.length === 0) console.log(" no components");
-      else console.log(` components: ${comps.map((c, i) => `${i}: mean=${c.mean.map(v => v.toFixed(2)).join(",")}, w=${c.weight.toFixed(3)}, spawnedDuringMovement=${Boolean(c.spawnedDuringMovement)}`).join("; ")}`);
+      const comp = s.activeAnchor;
+      console.log(`Snapshot index=${idx}, timestamp=${s.timestamp}, mean=${comp.mean.map(v => v.toFixed(2)).join(",")}, cov=${comp.cov.map(v => v.toFixed(2)).join(",")}`);
     }
   }
 
   const final = snaps[snaps.length - 1];
-  const finalComps = final?.data.components;
-  const spawnedCount = finalComps ? finalComps.filter((c) => c.spawnedDuringMovement).length : 0;
+  const finalComps = final?.closedAnchors ?? [];
+  const spawnedCount = finalComps.length; // number of closed anchors
 
-  expect(spawnedCount).toBe(0);
-  if (VERBOSE) console.log(`fade spawnedCount=${spawnedCount}`);
+  expect(spawnedCount).toBe(1); // one closed anchor from the move
+  if (VERBOSE) console.log(`fade closedCount=${spawnedCount}`);
+
+  // ensure active anchor is near 120 at the end
+  const endComp = final?.activeAnchor;
+  const distEnd = endComp ? Math.hypot(endComp.mean[0] - 120, endComp.mean[1] - 0) : Infinity;
+  expect(distEnd < 10).toBe(true);
 });

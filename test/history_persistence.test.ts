@@ -9,6 +9,7 @@ const makePoint = (device: number, timestamp: number, lat: number, lon: number) 
   mean: [lat, lon],
   cov: [1, 0, 1],
   accuracy: 10,
+  anchorAgeMs: 0,
 }) as DevicePoint;
 
 test("per-device merge preserves previous history when new locations arrive", () => {

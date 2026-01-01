@@ -15,6 +15,7 @@ test("false_pos", async () => {
       accuracy,
       lat: 0,
       lon: 0,
+      anchorAgeMs: 0,
     } as DevicePoint;
   };
 
@@ -40,27 +41,18 @@ test("false_pos", async () => {
 
   const snaps = engine.processMeasurements(measurements);
 
-  if (VERBOSE) console.log("index,timestamp,bestMeanX,bestMeanY,bestWeight,distToOutlier");
+  if (VERBOSE) console.log("index,timestamp,meanX,meanY,covXX,covXY,covYY,distToOutlier");
   for (let i = 0; i < snaps.length; i++) {
     const s = snaps[i];
     if (!s) continue;
-    const comps = s.data.components;
-    if (comps.length === 0) {
-      if (VERBOSE) console.log(`${i},${s.timestamp ?? ""},,,0,`);
-      continue;
-    }
-    const best = comps.reduce((a, b) => (a.weight >= b.weight ? a : b));
-    const bestMean = best.mean;
-    const distToOutlier = Math.hypot(bestMean[0] - 18, bestMean[1] - -3);
-    if (VERBOSE) console.log(`${i},${s.timestamp},${bestMean[0].toFixed(2)},${bestMean[1].toFixed(2)},${(best.weight).toFixed(3)},${distToOutlier.toFixed(2)}`);
+    const comp = s.activeAnchor;
+    const distToOutlier = Math.hypot(comp.mean[0] - 18, comp.mean[1] - (-3));
+    if (VERBOSE) console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.cov[0].toFixed(2)},${comp.cov[1].toFixed(2)},${comp.cov[2].toFixed(12)},${distToOutlier.toFixed(2)}`);
   }
 
   const firstMoved = snaps.findIndex((s) => {
-    const comps = s.data.components;
-    if (comps.length === 0) return false;
-    const best = comps.reduce((a, b) => (a.weight >= b.weight ? a : b));
-    const bestMean = best.mean;
-    const dist = Math.hypot(bestMean[0] - 18, bestMean[1] - -3);
+    const comp = s.activeAnchor;
+    const dist = Math.hypot(comp.mean[0] - 18, comp.mean[1] - (-3));
     return dist < 8;
   });
 

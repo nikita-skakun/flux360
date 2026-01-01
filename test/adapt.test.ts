@@ -15,6 +15,7 @@ test("adapt", async () => {
       accuracy,
       lat: 0,
       lon: 0,
+      anchorAgeMs: 0,
     } as DevicePoint;
   };
 
@@ -35,28 +36,18 @@ test("adapt", async () => {
   const snaps = engine.processMeasurements(measurements);
 
   if (VERBOSE) {
-    console.log("index,timestamp,bestMeanX,bestMeanY,bestWeight,distToNew");
+    console.log("index,timestamp,meanX,meanY,covXX,covXY,covYY");
     for (let i = 0; i < snaps.length; i++) {
       const s = snaps[i];
       if (!s) continue;
-      const comps = s.data.components;
-      if (comps.length === 0) {
-        console.log(`${i},${s.timestamp},,,0,`);
-        continue;
-      }
-      const best = comps.reduce((a, b) => (a.weight >= b.weight ? a : b));
-      const bestMean = best.mean;
-      const distToNew = Math.hypot(bestMean[0] - 120, bestMean[1] - 0);
-      console.log(`${i},${s.timestamp},${bestMean[0].toFixed(2)},${bestMean[1].toFixed(2)},${(best.weight).toFixed(3)},${distToNew.toFixed(2)}`);
+      const comp = s.activeAnchor;
+      console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.cov[0].toFixed(2)},${comp.cov[1].toFixed(2)},${comp.cov[2].toFixed(2)}`);
     }
   }
 
   const firstClose = snaps.findIndex((s) => {
-    const comps = s.data.components;
-    if (comps.length === 0) return false;
-    const best = comps.reduce((a, b) => ((a.weight ?? 0) >= (b.weight ?? 0) ? a : b));
-    const bestMean = best.mean;
-    const distToNew = Math.hypot(bestMean[0] - 120, bestMean[1] - 0);
+    const comp = s.activeAnchor;
+    const distToNew = Math.hypot(comp.mean[0] - 120, comp.mean[1] - 0);
     return distToNew < 20;
   });
 

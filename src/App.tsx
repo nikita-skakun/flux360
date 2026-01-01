@@ -3,9 +3,9 @@ import "./index.css";
 import { degreesToMeters, metersToDegrees } from "./util/geo";
 import { useEffect, useState, useRef, useMemo } from "react";
 import MapView from "./ui/MapView";
+import { Engine } from "./engine/engine";
 import type { DevicePoint } from "@/ui/types";
-import type { Cov2 } from "@/ui/types";
-import type { ComponentSnapshot } from "@/engine/mixture";
+import type { Cov2, Vec2 } from "@/ui/types";
 import type { NormalizedPosition } from "@/api/traccarClient";
 
 export function App() {
@@ -41,16 +41,15 @@ export function App() {
     return [v, 0, v];
   }
 
-  function createDevicePoint(c: ComponentSnapshot, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null): DevicePoint {
-    const diagMax = Math.max(c.cov[0], c.cov[2]);
+  function createDevicePoint(mean: Vec2, cov: Cov2, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number): DevicePoint {
+    const diagMax = Math.max(cov[0], cov[2]);
     const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
-    const { lat: compLat, lon: compLon } = (refLat != null && refLon != null) ? metersToDegrees(c.mean[0], c.mean[1], refLat, refLon) : { lat: 0, lon: 0 };
-    return { mean: c.mean, cov: c.cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal };
+    const { lat: compLat, lon: compLon } = (refLat != null && refLon != null) ? metersToDegrees(mean[0], mean[1], refLat, refLon) : { lat: 0, lon: 0 };
+    return { mean, cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs };
   }
 
-  async function buildEngineSnapshotsFromByDevice(byDevice: Record<string, DevicePoint[]>): Promise<DevicePoint[]> {
+  function buildEngineSnapshotsFromByDevice(byDevice: Record<string, DevicePoint[]>): DevicePoint[] {
     try {
-      const { Engine } = await import("@/engine/engine");
       const engineByDevice: Record<number, InstanceType<typeof Engine>> = {};
       for (const [deviceKey, arr] of Object.entries(byDevice)) {
         const deviceId = Number(deviceKey);
@@ -63,8 +62,9 @@ export function App() {
       for (const [deviceId, engine] of Object.entries(engineByDevice)) {
         const snapshot = engine.getCurrentSnapshot();
         const timestamp = engine.lastTimestamp ?? Date.now();
-        const points = snapshot.data.components.map((c: ComponentSnapshot) => createDevicePoint(c, timestamp, Number(deviceId), refLat, refLon));
-        currentSnapshots[Number(deviceId)] = points;
+        const anchorAgeMs = Date.now() - snapshot.activeAnchor.startTimestamp;
+        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat, refLon, anchorAgeMs);
+        currentSnapshots[Number(deviceId)] = [point];
       }
       setEngineSnapshotsByDevice(currentSnapshots);
       return Object.values(currentSnapshots).flat();
@@ -153,6 +153,7 @@ export function App() {
           lon: p.lon,
           device: deviceId,
           timestamp: p.timestamp,
+          anchorAgeMs: 0, // raw measurements don't have anchor age
         };
         return comp;
       });
@@ -301,13 +302,13 @@ export function App() {
   function humanDurationSince(ts: number): string {
     const s = Math.round((Date.now() - (ts ?? Date.now())) / 1000);
     if (s < 5) return "just now";
-    if (s < 60) return `${s}s ago`;
+    if (s < 60) return `${s}s`;
     const m = Math.round(s / 60);
-    if (m < 60) return `${m}m ago`;
+    if (m < 60) return `${m}m`;
     const h = Math.round(m / 60);
-    if (h < 24) return `${h}h ago`;
+    if (h < 24) return `${h}h`;
     const d = Math.round(h / 24);
-    return `${d}d ago`;
+    return `${d}d`;
   }
 
   const visibleComponents = useMemo(() => {
@@ -430,6 +431,7 @@ export function App() {
                       <div className="flex-1">
                         <div className="text-sm font-medium">{deviceNames[chosen.device] ?? chosen.device}</div>
                         <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""}m</div>
+                        <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
                       </div>
                       <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
                     </div>

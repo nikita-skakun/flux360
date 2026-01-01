@@ -15,6 +15,7 @@ test("stationary_transition", async () => {
       accuracy,
       lat: 0,
       lon: 0,
+      anchorAgeMs: 0,
     } as DevicePoint;
   };
 
@@ -37,10 +38,9 @@ test("stationary_transition", async () => {
   const snaps = engine.processMeasurements(measurements);
 
   const final = snaps[snaps.length - 1];
-  const comps = final?.data.components;
-  const best = comps && comps.length ? comps.reduce((a, b) => (a.weight >= b.weight ? a : b)) : null;
-  const action = best?.action ?? null;
+  const comp = final?.activeAnchor;
+  const distToNew = comp ? Math.hypot(comp.mean[0] - 120, comp.mean[1] - 0) : Infinity;
 
-  expect(action).toBe('still');
-  if (VERBOSE) console.log(`stationary_transition finalAction=${String(action)}`);
+  expect(distToNew < 10).toBe(true);
+  if (VERBOSE) console.log(`stationary_transition distToNew=${distToNew.toFixed(2)}`);
 });

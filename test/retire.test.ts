@@ -15,6 +15,7 @@ test("retire", async () => {
       accuracy,
       lat: 0,
       lon: 0,
+      anchorAgeMs: 0,
     } as DevicePoint;
   };
 
@@ -41,13 +42,13 @@ test("retire", async () => {
   const snaps = engine.processMeasurements(measurements);
 
   const final = snaps[snaps.length - 1];
-  const finalComps = final?.data.components;
-  const farCount = (finalComps ?? []).filter((c) => {
+  const finalComps = final?.closedAnchors ?? [];
+  const farCount = finalComps.filter((c) => {
     const dx = c.mean[0] - 120;
     const dy = c.mean[1] - 0;
     return Math.hypot(dx, dy) > 40;
   }).length;
 
-  expect(farCount).toBe(0);
+  expect(farCount).toBe(1); // the old anchor at 0,0 is far
   if (VERBOSE) console.log(`retire farCount=${farCount}`);
 });
