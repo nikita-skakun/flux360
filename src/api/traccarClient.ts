@@ -102,7 +102,7 @@ export async function fetchPositions(
   throw new Error("Unexpected Traccar response format: expected JSON array");
 }
 
-export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: number; name: string; emoji: string }[]> {
+export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: number; name: string; emoji: string; lastSeen: number | null }[]> {
   const fetcher = opts.fetchImpl ?? fetch;
   const protocol = opts.secure ? 'https' : 'http';
   const base = `${protocol}://${opts.baseUrl}/api`;
@@ -132,7 +132,10 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
     const name = (typeof o["name"] === "string" ? o["name"] : null) ?? (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ?? String(id);
     const emoji = typeof (o["attributes"] as Record<string, unknown>)?.["emoji"] === "string" ? (o["attributes"] as Record<string, unknown>)["emoji"] as string : name.toUpperCase().charAt(0);
 
-    return [{ id, name, emoji }];
+    const lastUpdate = o["lastUpdate"];
+    const lastSeen = typeof lastUpdate === "string" ? Date.parse(lastUpdate) : null;
+
+    return [{ id, name, emoji, lastSeen }];
   });
 }
 

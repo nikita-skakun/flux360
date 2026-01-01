@@ -46,24 +46,25 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
       setPinOpacity(current => {
         const diff = target - current;
         if (Math.abs(diff) < 0.01) return target;
-        animationId = requestAnimationFrame(animate);
+        animationId = window.requestAnimationFrame(animate);
         return current + diff * 0.1; // slower lerp for smoother fade
       });
     };
-    animationId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationId);
+    animationId = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(animationId);
   }, [openClusterPoint]);
 
   function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_PX): Cluster[] {
     const n = items.length;
     if (n === 0) return [];
-    const parent = Array.from({ length: n }, (_, i) => i);
-    const find = (i: number): number => parent[i]! === i ? i : parent[i]! = find(parent[i]!);
-    const union = (i: number, j: number) => { const pi = find(i), pj = find(j); if (pi !== pj) parent[pi]! = pj; };
+    const parent: number[] = Array.from({ length: n }, (_, i) => i);
+    const find = (i: number): number => parent[i] === i ? i : parent[i] = find(parent[i]!);
+    const union = (i: number, j: number) => { const pi = find(i), pj = find(j); if (pi !== pj) parent[pi] = pj; };
     const cellSize = threshold;
     const grid = new Map<string, number[]>();
     for (let i = 0; i < n; i++) {
-      const item = items[i]!;
+      const item = items[i];
+      if (!item) continue;
       const key = `${Math.floor(item.x / cellSize)},${Math.floor(item.y / cellSize)}`;
       if (!grid.has(key)) grid.set(key, []);
       grid.get(key)!.push(i);
@@ -331,7 +332,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (cl.size <= 1) continue;
         // hide cluster marker if the open chooser overlaps it
         const { x, y, size, items } = cl;
-        const rep = (selectedDeviceId != null ? items.find(it => it.device === selectedDeviceId) : undefined) || items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        const rep = (selectedDeviceId != null ? items.find(it => it.device === selectedDeviceId) : undefined) ?? items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
         if (shouldHideAt(cl.x, cl.y)) {
           ctx.save();
           ctx.globalAlpha = pinOpacity;

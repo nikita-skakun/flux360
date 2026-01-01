@@ -1,13 +1,5 @@
 import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
 
-export type ComponentState = {
-  mean: Vec2;
-  cov: Cov2;
-  consistency: number;
-  spawnedDuringMovement: boolean;
-  createdAt: number;
-};
-
 function addCov(a: Cov2, b: Cov2): Cov2 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 }
@@ -51,7 +43,7 @@ function symmetric(c: Cov2): Cov2 {
   return [c[0], (c[1] + c[1]) / 2, c[2]];
 }
 
-export class Component implements ComponentState {
+export class Component {
   mean: Vec2;
   cov: Cov2;
   consistency: number;
