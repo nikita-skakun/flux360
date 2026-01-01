@@ -1,11 +1,11 @@
 // @ts-ignore - allow importing CSS without type declarations
 import "./index.css";
+import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "./engine/anchor";
 import { degreesToMeters, metersToDegrees } from "./util/geo";
+import { Engine } from "./engine/engine";
 import { useEffect, useState, useRef, useMemo } from "react";
 import MapView from "./ui/MapView";
-import { Engine } from "./engine/engine";
-import type { DevicePoint } from "@/ui/types";
-import type { Cov2, Vec2 } from "@/ui/types";
+import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
 import type { NormalizedPosition } from "@/api/traccarClient";
 
 export function App() {
@@ -15,6 +15,7 @@ export function App() {
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
+  const enginesRef = useRef<Record<number, Engine>>({});
   const RECENT_DEVICE_CUTOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
 
   function safeGetItem(key: string): string | null {
@@ -41,29 +42,28 @@ export function App() {
     return [v, 0, v];
   }
 
-  function createDevicePoint(mean: Vec2, cov: Cov2, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number): DevicePoint {
+  function createDevicePoint(mean: Vec2, cov: Cov2, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
     const diagMax = Math.max(cov[0], cov[2]);
     const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
     const { lat: compLat, lon: compLon } = (refLat != null && refLon != null) ? metersToDegrees(mean[0], mean[1], refLat, refLon) : { lat: 0, lon: 0 };
-    return { mean, cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs };
+    return { mean, cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs, confidence };
   }
 
   function buildEngineSnapshotsFromByDevice(byDevice: Record<string, DevicePoint[]>): DevicePoint[] {
     try {
-      const engineByDevice: Record<number, InstanceType<typeof Engine>> = {};
       for (const [deviceKey, arr] of Object.entries(byDevice)) {
         const deviceId = Number(deviceKey);
-        if (!engineByDevice[deviceId]) {
-          engineByDevice[deviceId] = new Engine();
+        if (!enginesRef.current[deviceId]) {
+          enginesRef.current[deviceId] = new Engine();
         }
-        engineByDevice[deviceId].processMeasurements(arr);
+        enginesRef.current[deviceId].processMeasurements(arr);
       }
       const currentSnapshots: Record<number, DevicePoint[]> = {};
-      for (const [deviceId, engine] of Object.entries(engineByDevice)) {
+      for (const [deviceId, engine] of Object.entries(enginesRef.current)) {
         const snapshot = engine.getCurrentSnapshot();
         const timestamp = engine.lastTimestamp ?? Date.now();
         const anchorAgeMs = Date.now() - snapshot.activeAnchor.startTimestamp;
-        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat, refLon, anchorAgeMs);
+        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat, refLon, anchorAgeMs, snapshot.activeConfidence);
         currentSnapshots[Number(deviceId)] = [point];
       }
       setEngineSnapshotsByDevice(currentSnapshots);
@@ -154,6 +154,7 @@ export function App() {
           device: deviceId,
           timestamp: p.timestamp,
           anchorAgeMs: 0, // raw measurements don't have anchor age
+          confidence: 0,
         };
         return comp;
       });
@@ -430,7 +431,7 @@ export function App() {
                     <div className="flex items-start">
                       <div className="flex-1">
                         <div className="text-sm font-medium">{deviceNames[chosen.device] ?? chosen.device}</div>
-                        <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""}m</div>
+                        <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
                         <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
                       </div>
                       <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>

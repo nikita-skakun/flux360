@@ -127,12 +127,12 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         if (!best || hitDist < best.dist) best = { cluster: cl, dist: hitDist, radius: usedRadius };
       }
       if (!best) return null;
-      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0 } as DevicePoint));
+      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint));
       if (items.length === 0) return null;
       return { items, x: best.cluster.x, y: best.cluster.y };
     },
     getClusters: () => {
-      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
+      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
     },
   }), [components]);
 
