@@ -5,15 +5,17 @@ export class Anchor {
   mean: Vec2;
   cov: Cov2;
   startTimestamp: number;
+  supportCount: number;
 
-  constructor(mean: Vec2, cov: Cov2, startTimestamp: number) {
+  constructor(mean: Vec2, cov: Cov2, startTimestamp: number, supportCount: number = 1) {
     this.mean = [mean[0], mean[1]];
     this.cov = symmetric(cov);
     this.startTimestamp = startTimestamp;
+    this.supportCount = supportCount;
   }
 
   clone(): Anchor {
-    return new Anchor([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.startTimestamp);
+    return new Anchor([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.startTimestamp, this.supportCount);
   }
 
   mahalanobis2(m: DevicePoint): number {

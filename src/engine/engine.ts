@@ -1,11 +1,12 @@
 import type { DevicePoint } from "@/ui/types";
 import { Anchor } from "./anchor";
 
-export type EngineSnapshot = { activeAnchor: Anchor; closedAnchors: Anchor[]; timestamp: number };
+export type EngineSnapshot = { activeAnchor: Anchor; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number };
 
 export class Engine {
   activeAnchor: Anchor | null = null;
   closedAnchors: Anchor[] = [];
+  candidateAnchor: Anchor | null = null;
   lastTimestamp: number | null = null;
 
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
@@ -19,15 +20,35 @@ export class Engine {
         if (dist2 < 9) { // threshold for 3-sigma
           // update the anchor using Kalman
           this.activeAnchor.kalmanUpdate(m);
+          // discard candidate
+          this.candidateAnchor = null;
         } else {
-          // close the current anchor
-          this.closedAnchors.push(this.activeAnchor);
-          // create a new anchor
-          this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
+          // not consistent with active
+          if (this.candidateAnchor !== null) {
+            const candDist2 = this.candidateAnchor.mahalanobis2(m);
+            if (candDist2 < 9) {
+              // update candidate
+              this.candidateAnchor.kalmanUpdate(m);
+              this.candidateAnchor.supportCount++;
+              // check promotion
+              if (this.candidateAnchor.supportCount >= 2) {
+                // promote
+                this.closedAnchors.push(this.activeAnchor);
+                this.activeAnchor = this.candidateAnchor;
+                this.candidateAnchor = null;
+              }
+            } else {
+              // not consistent with candidate, create new candidate
+              this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
+            }
+          } else {
+            // create candidate
+            this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
+          }
         }
       }
       this.lastTimestamp = m.timestamp;
-      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp });
+      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp });
     }
     return snapshots;
   }
@@ -36,6 +57,6 @@ export class Engine {
     if (this.activeAnchor === null) {
       throw new Error("No measurements processed yet");
     }
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp! };
+    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp! };
   }
 }
