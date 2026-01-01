@@ -10,7 +10,7 @@ test("fetchPositions uses Authorization header and omits token query parameter",
     return { ok: true, json: async () => [] };
   };
 
-  await fetchPositions({ baseUrl: "example", auth: { type: "token", token: "abc123" }, fetchImpl: fakeFetch as typeof fetch }, 42, new Date(1600000000000));
+  await fetchPositions({ baseUrl: "example", secure: true, auth: { type: "token", token: "abc123" }, fetchImpl: fakeFetch as typeof fetch }, 42, new Date(1600000000000));
 
   expect(recordedUrl).toBeTruthy();
   const u = new URL(recordedUrl!);
@@ -33,7 +33,7 @@ test("fetchDevices uses Authorization header and omits token query parameter", a
     return { ok: true, json: async () => [] };
   };
 
-  await fetchDevices({ baseUrl: "example", auth: { type: "token", token: "t0k" }, fetchImpl: fakeFetch as typeof fetch });
+  await fetchDevices({ baseUrl: "example", secure: true, auth: { type: "token", token: "t0k" }, fetchImpl: fakeFetch as typeof fetch });
 
   expect(recordedUrl).toBeTruthy();
   const u = new URL(recordedUrl!);

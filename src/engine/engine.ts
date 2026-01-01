@@ -66,4 +66,27 @@ export class Engine {
   getCurrentSnapshot(): EngineSnapshot {
     return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp!, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp!, DECAY_RATE_ACTIVE) : 0 };
   }
+
+  getDominantAnchorAt(timestamp: number): Anchor | null {
+    const candidates: Anchor[] = [];
+    if (this.activeAnchor && this.activeAnchor.startTimestamp <= timestamp) {
+      candidates.push(this.activeAnchor);
+    }
+    for (const anchor of this.closedAnchors) {
+      if (anchor.startTimestamp <= timestamp && (anchor.endTimestamp === null || timestamp <= anchor.endTimestamp)) {
+        candidates.push(anchor);
+      }
+    }
+    if (candidates.length === 0) return null;
+    let best: Anchor | null = null;
+    let bestConf = -1;
+    for (const anchor of candidates) {
+      const conf = anchor.getConfidence(timestamp, DECAY_RATE_ACTIVE);
+      if (conf > bestConf) {
+        bestConf = conf;
+        best = anchor;
+      }
+    }
+    return best;
+  }
 }

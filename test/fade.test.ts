@@ -44,6 +44,7 @@ test("fade", async () => {
       const s = snaps[idx];
       if (!s) continue;
       const comp = s.activeAnchor;
+      if (!comp) continue;
       console.log(`Snapshot index=${idx}, timestamp=${s.timestamp}, mean=${comp.mean.map(v => v.toFixed(2)).join(",")}, cov=${comp.cov.map(v => v.toFixed(2)).join(",")}`);
     }
   }

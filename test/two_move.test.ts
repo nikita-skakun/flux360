@@ -37,12 +37,14 @@ test("two_move", async () => {
     const s = snaps[i];
     if (!s) continue;
     const comp = s.activeAnchor;
+    if (!comp) continue;
     const distToNew = Math.hypot(comp.mean[0] - 120, comp.mean[1] - 0);
     if (VERBOSE) console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.cov[0].toFixed(2)},${comp.cov[1].toFixed(2)},${comp.cov[2].toFixed(2)},${distToNew.toFixed(2)}`);
   }
 
   const firstClose = snaps.findIndex((s) => {
     const comp = s.activeAnchor;
+    if (!comp) return false;
     const distToNew = Math.hypot(comp.mean[0] - 120, comp.mean[1] - 0);
     return distToNew < 20;
   });

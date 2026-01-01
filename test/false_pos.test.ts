@@ -46,12 +46,14 @@ test("false_pos", async () => {
     const s = snaps[i];
     if (!s) continue;
     const comp = s.activeAnchor;
+    if (!comp) continue;
     const distToOutlier = Math.hypot(comp.mean[0] - 18, comp.mean[1] - (-3));
     if (VERBOSE) console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.cov[0].toFixed(2)},${comp.cov[1].toFixed(2)},${comp.cov[2].toFixed(12)},${distToOutlier.toFixed(2)}`);
   }
 
   const firstMoved = snaps.findIndex((s) => {
     const comp = s.activeAnchor;
+    if (!comp) return false;
     const dist = Math.hypot(comp.mean[0] - 18, comp.mean[1] - (-3));
     return dist < 8;
   });

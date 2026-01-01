@@ -1,7 +1,7 @@
 import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
 
-const VERBOSE = process.env.VERBOSE === "1" || process.argv.includes("--verbose");
+const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 
 test("adapt", async () => {
   const { Engine } = await import("../src/engine/engine");
@@ -41,12 +41,14 @@ test("adapt", async () => {
       const s = snaps[i];
       if (!s) continue;
       const comp = s.activeAnchor;
+      if (!comp) continue;
       console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.cov[0].toFixed(2)},${comp.cov[1].toFixed(2)},${comp.cov[2].toFixed(2)}`);
     }
   }
 
   const firstClose = snaps.findIndex((s) => {
     const comp = s.activeAnchor;
+    if (!comp) return false;
     const distToNew = Math.hypot(comp.mean[0] - 120, comp.mean[1] - 0);
     return distToNew < 20;
   });

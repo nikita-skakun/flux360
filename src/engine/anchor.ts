@@ -27,13 +27,13 @@ export class Anchor {
     return cloned;
   }
 
-  getConfidence(currentTime: number, decayRate: number): number {
-    const timeDiff = currentTime - this.lastUpdateTimestamp;
+  getConfidence(timestamp: number, decayRate: number): number {
+    const timeDiff = timestamp - this.lastUpdateTimestamp;
     return Math.max(0, Math.min(1, this.confidence * Math.exp(-decayRate * timeDiff)));
   }
 
-  getConfidenceLevel(currentTime: number, decayRate: number): "high" | "medium" | "low" {
-    const conf = this.getConfidence(currentTime, decayRate);
+  getConfidenceLevel(timestamp: number, decayRate: number): "high" | "medium" | "low" {
+    const conf = this.getConfidence(timestamp, decayRate);
     if (conf >= CONFIDENCE_HIGH_THRESHOLD) return "high";
     if (conf >= CONFIDENCE_MEDIUM_THRESHOLD) return "medium";
     return "low";

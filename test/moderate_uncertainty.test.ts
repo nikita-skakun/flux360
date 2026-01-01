@@ -34,6 +34,7 @@ test("moderate_uncertainty", async () => {
 
   const firstClose = snaps.findIndex((s) => {
     const comp = s.activeAnchor;
+    if (!comp) return false;
     const distToNew = Math.hypot(comp.mean[0] - 200, comp.mean[1] - 0);
     return distToNew < 100;
   });
