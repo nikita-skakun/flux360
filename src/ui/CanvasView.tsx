@@ -9,6 +9,8 @@ export type CanvasViewHandle = {
   getClusters: () => { items: DevicePoint[]; x: number; y: number }[];
 };
 
+import type { DebugFrame } from "@/engine/engine";
+
 type Props = {
   width: number;
   height: number;
@@ -20,9 +22,10 @@ type Props = {
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   selectedDeviceId: number | null;
   openClusterPoint: { x: number; y: number } | null;
+  debugFrame?: DebugFrame | null;
 };
 
-export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null }, ref) {
+export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null, debugFrame = null }, ref) {
   type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color: [number, number, number]; };
   type Cluster = { items: DrawItem[]; x: number; y: number; size: number; radius: number };
 
@@ -345,12 +348,74 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
           drawPin(ctx, x, y, rep.iconText, rep.color, selectedDeviceId != null && rep.device === selectedDeviceId, String(size));
         }
       }
+
+      // Debug overlay: draw measurement, line to anchor, and anchor ellipse for a selected debug frame (if any)
+      if (debugFrame) {
+        try {
+          const df = debugFrame;
+          const mean = df.after?.mean ?? df.before?.mean ?? df.measurement.mean;
+          const meas = df.measurement.mean;
+
+          const ax = width / 2 + (mean[0] - anchorX) * localZoom;
+          const ay = height / 2 - (mean[1] - anchorY) * localZoom;
+
+          const mx = width / 2 + (meas[0] - anchorX) * localZoom;
+          const my = height / 2 - (meas[1] - anchorY) * localZoom;
+
+          // approximate anchor ellipse using diagonal variances
+          const anchorCov = df.after?.cov ?? df.before?.cov ?? [100,0,100];
+          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, Math.max(anchorCov[0], anchorCov[2])));
+          const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
+
+          // measurement accuracy circle
+          const measAccMeters = df.measurement.accuracy ?? 0;
+          const measR = Math.max(2, (measAccMeters || 5) * localZoom);
+
+          // draw connecting line
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,0,0,0.9)';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(ax, ay);
+          ctx.lineTo(mx, my);
+          ctx.stroke();
+          ctx.restore();
+
+          // measurement point
+          ctx.save();
+          ctx.fillStyle = 'rgba(255,0,0,0.95)';
+          ctx.beginPath();
+          ctx.arc(mx, my, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.12;
+          ctx.beginPath();
+          ctx.arc(mx, my, measR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          // anchor ellipse (simple circle-ish representation)
+          ctx.save();
+          ctx.strokeStyle = 'rgba(0,0,200,0.95)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = 'rgba(0,0,200,0.12)';
+          ctx.beginPath();
+          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } catch {
+          // swallow debug drawing errors
+        }
+      }
     }
 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 });

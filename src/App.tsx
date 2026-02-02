@@ -16,7 +16,8 @@ export function App() {
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
   const enginesRef = useRef<Record<number, Engine>>({});
-  const RECENT_DEVICE_CUTOFF_MS = 24 * 60 * 60 * 1000; // 24 hours
+  const firstPositionRef = useRef<{ lat: number; lon: number } | null>(null);
+  const RECENT_DEVICE_CUTOFF_MS = 96 * 60 * 60 * 1000; // 96 hours
 
   function safeGetItem(key: string): string | null {
     try {
@@ -63,8 +64,9 @@ export function App() {
         const snapshot = engine.getCurrentSnapshot();
         if (snapshot.activeAnchor) {
           const timestamp = engine.lastTimestamp ?? Date.now();
-          const anchorAgeMs = Date.now() - snapshot.activeAnchor.startTimestamp;
-          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat, refLon, anchorAgeMs, snapshot.activeConfidence);
+          const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
+          const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
+          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, Number(deviceId), refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
           currentSnapshots[Number(deviceId)] = [point];
         } else {
           currentSnapshots[Number(deviceId)] = [];
@@ -88,6 +90,14 @@ export function App() {
   const [deviceNames, setDeviceNames] = useState<Record<number, string>>({});
   const [deviceIcons, setDeviceIcons] = useState<Record<number, string>>({});
   const [deviceLastSeen, setDeviceLastSeen] = useState<Record<number, number | null>>({});
+
+  const seenRef = useRef<Set<string>>(new Set());
+  const processedKeysRef = useRef<Set<string>>(new Set());
+  const positionsAllRef = useRef<NormalizedPosition[]>([]);
+
+  function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
+    return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
+  }
 
   const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
   const [wsError, setWsError] = useState<string | null>(null);
@@ -131,14 +141,15 @@ export function App() {
   function processPositions(positions: NormalizedPosition[]) {
     if (!positions || positions.length === 0) return;
 
-    const first = positions[0];
-    if (!first) return;
-    const baseLat = first.lat;
-    const baseLon = first.lon;
-    setRefLat(baseLat);
-    setRefLon(baseLon);
+    const newPositions = positions.filter(p => {
+      const key = dedupeKey(p);
+      if (processedKeysRef.current.has(key)) return false;
+      processedKeysRef.current.add(key);
+      return true;
+    });
+    if (newPositions.length === 0) return;
 
-    const posByDevice = positions.reduce((acc, p) => {
+    const posByDevice = newPositions.reduce((acc, p) => {
       (acc[p.device] ||= []).push(p);
       return acc;
     }, {} as Record<number, NormalizedPosition[]>);
@@ -148,7 +159,8 @@ export function App() {
     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
       const deviceId = Number(deviceKey);
       const rawArr: DevicePoint[] = arr.map((p) => {
-        const { x, y } = degreesToMeters(p.lat, p.lon, baseLat, baseLon);
+        const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
+        const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
         const comp: DevicePoint = {
           mean: [x, y],
           cov: measurementCovFromAccuracy(p.accuracy),
@@ -157,12 +169,19 @@ export function App() {
           lon: p.lon,
           device: deviceId,
           timestamp: p.timestamp,
-          anchorAgeMs: 0, // raw measurements don't have anchor age
+          anchorAgeMs: 0,
           confidence: 0,
         };
         return comp;
       });
       rawByDevice[deviceId] = rawArr;
+    }
+
+    if (!firstPositionRef.current && newPositions.length > 0) {
+      const first = newPositions[0]!;
+      firstPositionRef.current = { lat: first.lat, lon: first.lon };
+      if (refLat == null) setRefLat(first.lat);
+      if (refLon == null) setRefLon(first.lon);
     }
 
     buildEngineSnapshotsFromByDevice(rawByDevice);
@@ -187,12 +206,6 @@ export function App() {
     setWsError(null);
 
     const knownDevices = new Set<number>();
-    let seen = new Set<string>();
-    let positionsAll: NormalizedPosition[] = [];
-
-    function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
-      return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
-    }
 
     function insertSortedByTimestamp(arr: NormalizedPosition[], item: NormalizedPosition) {
       let lo = 0;
@@ -219,11 +232,11 @@ export function App() {
           reconnectMaxMs: 30000,
           onPosition: (p) => {
             const key = dedupeKey(p);
-            if (seen.has(key)) return;
-            seen.add(key);
-            insertSortedByTimestamp(positionsAll, p);
+            if (seenRef.current.has(key)) return;
+            seenRef.current.add(key);
+            insertSortedByTimestamp(positionsAllRef.current, p);
             knownDevices.add(p.device);
-            processPositions(positionsAll);
+            processPositions(positionsAllRef.current);
           },
           onOpen: () => {
             (async () => {
@@ -259,11 +272,11 @@ export function App() {
                     const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } }, deviceId, from, to, {});
                     for (const p of fetched) {
                       const key = dedupeKey(p);
-                      if (seen.has(key)) continue;
-                      seen.add(key);
-                      positionsAll.push(p);
+                      if (seenRef.current.has(key)) continue;
+                      seenRef.current.add(key);
+                      positionsAllRef.current.push(p);
                     }
-                    processPositions(positionsAll);
+                    processPositions(positionsAllRef.current);
                   } catch {
                     // ignore processing errors
                   }
@@ -304,8 +317,8 @@ export function App() {
     };
   }, [traccarBaseUrl, traccarSecure, traccarToken, wsApplyCounter]);
 
-  function humanDurationSince(ts: number): string {
-    const s = Math.round((Date.now() - (ts ?? Date.now())) / 1000);
+  function humanDurationSince(ts: number, now: number = Date.now()): string {
+    const s = Math.round((now - (ts ?? now)) / 1000);
     if (s < 5) return "just now";
     if (s < 60) return `${s}s`;
     const m = Math.round(s / 60);
@@ -357,9 +370,30 @@ export function App() {
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
 
+  // Debug mode: show per-device ring buffer and scrub frames
+  const [debugMode, setDebugMode] = useState<boolean>(false);
+  const [debugFrameIndex, setDebugFrameIndex] = useState<number>(0);
+
+  // Reset debug index when device or frame count changes
+  useEffect(() => {
+    if (selectedDeviceId == null || !debugMode) return;
+    const frames = enginesRef.current[selectedDeviceId]?.getDebugFrames() ?? [];
+    if (frames.length === 0) setDebugFrameIndex(0);
+    else setDebugFrameIndex(Math.max(0, frames.length - 1));
+  }, [selectedDeviceId, debugMode]);
+
+  // current debug frame to render on the map (if any)
+  const currentDebugFrame = (selectedDeviceId != null && debugMode && enginesRef.current[selectedDeviceId]) ? (() => {
+    const fr = enginesRef.current[selectedDeviceId].getDebugFrames();
+    if (!fr || fr.length === 0) return null;
+    const idx = Math.max(0, Math.min(fr.length - 1, debugFrameIndex));
+    return fr[idx] ?? null;
+  })() : null;
+
   return (
     <div className="h-screen w-screen">
       <MapView
+        debugFrame={currentDebugFrame}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
@@ -417,6 +451,10 @@ export function App() {
                   <button className="px-3 py-1 rounded border" onClick={() => { clientCloseRef.current?.(); setWsStatus("disconnected"); }}>
                     Disconnect
                   </button>
+                  <label className="flex items-center gap-1 px-2">
+                    <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
+                    <span className="text-xs">Debug</span>
+                  </label>
                 </div>
                 <div className="text-xs mt-2">
                   <span className="mr-2">Status: <strong>{wsStatus}</strong></span>
@@ -430,6 +468,15 @@ export function App() {
                 const engArr = engineSnapshotsByDevice[selectedDeviceId] ?? [];
                 const chosen = engArr.length > 0 ? engArr[engArr.length - 1] : null;
                 if (!chosen) return null;
+
+                // debug frames for this device (if debug enabled)
+                const engineForDevice = enginesRef.current[selectedDeviceId];
+                const frames = debugMode && engineForDevice 
+                  ? [...engineForDevice.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp)
+                  : [];
+                const frameIndex = Math.max(0, Math.min(frames.length - 1, debugFrameIndex));
+                const chosenFrame = frames.length > 0 ? frames[frameIndex] : null;
+
                 return (
                   <div className="p-2 rounded border bg-white/90 text-foreground">
                     <div className="flex items-start">
@@ -441,6 +488,33 @@ export function App() {
                       <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
                     </div>
                     <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
+
+                    {debugMode ? (
+                      <div className="mt-2 text-xs">
+                        <div className="mb-2">Debug frames: {frames.length}</div>
+                        {frames.length > 0 ? (
+                          <div className="flex gap-2 items-center">
+                            <input type="range" min={0} max={Math.max(0, frames.length - 1)} value={debugFrameIndex} onChange={(e) => setDebugFrameIndex(Number(e.target.value))} />
+                            <div className="w-20 text-right">#{frameIndex}</div>
+                          </div>
+                        ) : <div className="text-xs text-foreground/60">No debug frames</div>}
+
+                        {chosenFrame ? (
+                          <div className="mt-2 text-xs bg-muted/20 p-2 rounded">
+                            <div>Accuracy: {Math.round(chosenFrame.measurement.accuracy)} m</div>
+                            <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
+                            <div>Confidence: {chosenFrame.before ? chosenFrame.before.confidence.toFixed(2) : '—'} → {chosenFrame.after ? chosenFrame.after.confidence.toFixed(2) : '—'}</div>
+                            <div>Decision: <strong>{chosenFrame.decision}</strong></div>
+                            <div>Anchor start: {(chosenFrame.after?.startTimestamp ?? chosenFrame.before?.startTimestamp) != null ? humanDurationSince((chosenFrame.after?.startTimestamp ?? chosenFrame.before?.startTimestamp) as number) : '—'}</div>
+                            <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
+                            <div>Anchor lat/lon: {(() => { if (chosenFrame.after?.mean == null) return '—'; const d = metersToDegrees(chosenFrame.after.mean[0], chosenFrame.after.mean[1], refLat ?? 0, refLon ?? 0); return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`; })()}</div>
+                            <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
+                          </div>
+                        ) : null}
+
+                      </div>
+                    ) : null}
+
                   </div>
                 );
               })()

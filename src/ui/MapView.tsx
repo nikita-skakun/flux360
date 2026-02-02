@@ -16,9 +16,10 @@ type Props = {
   overlay: React.ReactNode;
   onSelectDevice: (id: number | null) => void;
   selectedDeviceId: number | null;
+  debugFrame?: import("@/engine/engine").DebugFrame | null;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, debugFrame }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -425,6 +426,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           worldBounds={null}
           selectedDeviceId={selectedDeviceId}
           openClusterPoint={clusterPoint}
+          debugFrame={debugFrame ?? null}
         />
       </div>
       {clusterChooser}
