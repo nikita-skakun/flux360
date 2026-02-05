@@ -5,6 +5,7 @@ import { degreesToMeters, metersToDegrees } from "./util/geo";
 import { Engine } from "./engine/engine";
 import { useEffect, useState, useRef, useMemo } from "react";
 import MapView from "./ui/MapView";
+import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
 import type { NormalizedPosition } from "@/api/traccarClient";
 
@@ -369,6 +370,7 @@ export function App() {
   }, [visibleComponents]);
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(true);
 
   // Debug mode: show per-device ring buffer and scrub frames
   const [debugMode, setDebugMode] = useState<boolean>(false);
@@ -390,8 +392,33 @@ export function App() {
     return fr[idx] ?? null;
   })() : null;
 
+  const deviceList = Object.entries(deviceNames).map(([id, name]) => {
+    const numId = Number(id);
+    return {
+      id: numId,
+      name,
+      icon: deviceIcons[numId] || "device_unknown",
+      lastSeen: deviceLastSeen[numId] ?? null,
+      hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
+    };
+  }).filter((device) => {
+    // Filter using same rule as map: devices seen in last 96 hours
+    const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
+    return device.lastSeen && device.lastSeen > cutoff;
+  });
+
   return (
     <div className="h-screen w-screen">
+      <DeviceListSidePanel
+        devices={deviceList}
+        selectedDeviceId={selectedDeviceId}
+        onSelectDevice={(id) => {
+          setSelectedDeviceId(id);
+          setIsSidePanelOpen(false);
+        }}
+        isOpen={isSidePanelOpen}
+        onToggle={() => setIsSidePanelOpen(!isSidePanelOpen)}
+      />
       <MapView
         debugFrame={currentDebugFrame}
         components={frame.components}
