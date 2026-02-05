@@ -1,10 +1,10 @@
 import { serve } from "bun";
-import index from "./index.html";
+import indexHtml from "./index.html";
 
 const port = Number(process.env["PORT"] || 3000);
 const server = serve({
   routes: {
-    "/*": index,
+    "/*": indexHtml,
   },
 
   development: process.env.NODE_ENV !== "production" && {

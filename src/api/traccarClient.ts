@@ -157,7 +157,7 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarD
 
     const name = (typeof o["name"] === "string" ? o["name"] : null) ?? (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ?? String(id);
     const attrs = typeof o["attributes"] === "object" ? (o["attributes"] as Record<string, unknown>) : {};
-    const emoji = typeof attrs["emoji"] === "string" ? attrs["emoji"] as string : name.toUpperCase().charAt(0);
+    const emoji = typeof attrs["emoji"] === "string" ? attrs["emoji"] : name.toUpperCase().charAt(0);
 
     const lastUpdate = o["lastUpdate"];
     const lastSeen = typeof lastUpdate === "string" ? Date.parse(lastUpdate) : null;

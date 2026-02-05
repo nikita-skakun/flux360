@@ -149,7 +149,7 @@ const DeviceListSidePanel: React.FC<Props> = ({
                                 zIndex: 10,
                               }}
                             >
-                              {device.memberDeviceIds && device.memberDeviceIds.length}
+                              {device.memberDeviceIds?.length}
                             </div>
                           )}
                         </div>

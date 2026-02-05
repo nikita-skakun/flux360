@@ -19,7 +19,7 @@ export function colorForDevice(deviceId: number): Color {
 
 export function parseHexColor(hex: string): Color | null {
   const match = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
-  if (!match || !match[1] || !match[2] || !match[3]) return null;
+  if (!match?.[1] || !match[2] || !match[3]) return null;
   return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
 }
 
