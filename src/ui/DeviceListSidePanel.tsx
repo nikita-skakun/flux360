@@ -3,14 +3,16 @@ import { colorForDevice } from "./color";
 
 type Props = {
   devices: Array<{
-    id: number;
+    id: number | string;
+    isGroup?: boolean;
     name: string;
     icon: string;
     lastSeen: number | null;
     hasPosition: boolean;
+    memberDeviceIds?: number[];
   }>;
-  selectedDeviceId: number | null;
-  onSelectDevice: (id: number) => void;
+  selectedDeviceId: number | string | null;
+  onSelectDevice: (id: number | string) => void;
   isOpen: boolean;
   onToggle: () => void;
 };
@@ -68,9 +70,8 @@ const DeviceListSidePanel: React.FC<Props> = ({
       </button>
 
       <div
-        className={`fixed top-0 left-0 h-full bg-white shadow-xl z-[1001] transition-all duration-300 ease-in-out ${
-          isOpen ? "translate-x-0 pointer-events-auto" : "-translate-x-full pointer-events-none"
-        }`}
+        className={`fixed top-0 left-0 h-full bg-white shadow-xl z-[1001] transition-all duration-300 ease-in-out ${isOpen ? "translate-x-0 pointer-events-auto" : "-translate-x-full pointer-events-none"
+          }`}
         style={{ width: "280px" }}
       >
         <div className="p-4 border-b bg-gray-50 flex items-center gap-4 pl-16">
@@ -88,37 +89,68 @@ const DeviceListSidePanel: React.FC<Props> = ({
           ) : (
             <ul className="divide-y">
               {sortedDevices.map((device) => {
-                const [r, g, b] = colorForDevice(device.id);
+                // Convert string IDs to hash for color generation
+                const colorId = typeof device.id === "string"
+                  ? device.id.split("-").pop()?.charCodeAt(0) ?? 0
+                  : device.id;
+                const [r, g, b] = colorForDevice(colorId);
                 const colorStr = `rgb(${r}, ${g}, ${b})`;
                 const status = getOnlineStatus(device.lastSeen);
                 const isSelected = selectedDeviceId === device.id;
 
+                const shouldShowBadge = !!(device.isGroup && device.memberDeviceIds && device.memberDeviceIds.length > 0);
+
                 return (
-                  <li key={device.id}>
+                  <li key={`${device.isGroup ? "group" : "device"}-${device.id}`}>
                     <button
                       onClick={() => onSelectDevice(device.id)}
-                      className={`w-full p-3 text-left transition-colors ${
-                        isSelected
+                      className={`w-full p-3 text-left transition-colors relative ${isSelected
                           ? "bg-blue-50 border-l-4 border-blue-500"
                           : "hover:bg-gray-50 border-l-4 border-transparent"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-start gap-3">
-                        <div
-                          className="w-10 h-10 rounded-full bg-white border-2 flex items-center justify-center flex-shrink-0"
-                          style={{ borderColor: colorStr }}
-                        >
-                          {device.icon && device.icon.length > 1 ? (
-                            <span
-                              className="material-symbols-outlined text-lg"
-                              style={{ color: colorStr }}
+                        <div className="w-10 h-10 relative">
+                          <div
+                            className="w-10 h-10 rounded-full bg-white border-2 flex items-center justify-center"
+                            style={{ borderColor: colorStr }}
+                          >
+                            {device.icon && device.icon.length > 1 ? (
+                              <span
+                                className="material-symbols-outlined text-lg"
+                                style={{ color: colorStr }}
+                              >
+                                {device.icon}
+                              </span>
+                            ) : (
+                              <span style={{ color: colorStr, fontSize: "16px", fontWeight: "600" }}>
+                                {device.icon || device.name.charAt(0).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          {shouldShowBadge && (
+                            <div
+                              style={{
+                                position: "absolute",
+                                bottom: "-6px",
+                                right: "-6px",
+                                width: "24px",
+                                height: "24px",
+                                borderRadius: "50%",
+                                backgroundColor: "rgb(230, 230, 230)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                border: "2px solid white",
+                                color: "rgb(0, 0, 0)",
+                                fontWeight: "bold",
+                                fontSize: "12px",
+                                pointerEvents: "none",
+                                zIndex: 10,
+                              }}
                             >
-                              {device.icon}
-                            </span>
-                          ) : (
-                            <span style={{ color: colorStr, fontSize: "16px", fontWeight: "600" }}>
-                              {device.icon || device.name.charAt(0).toUpperCase()}
-                            </span>
+                              {device.memberDeviceIds && device.memberDeviceIds.length}
+                            </div>
                           )}
                         </div>
                         <div className="flex-1 min-w-0">

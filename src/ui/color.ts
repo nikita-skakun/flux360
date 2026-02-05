@@ -17,6 +17,26 @@ export function colorForDevice(deviceId: number): Color {
   return rgb;
 }
 
+export function parseHexColor(hex: string): Color | null {
+  const match = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (!match || !match[1] || !match[2] || !match[3]) return null;
+  return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
+}
+
+export function getColorForDevice(
+  deviceId: number,
+  deviceColor?: string | null
+): Color {
+  // If device has a custom color, use it
+  if (deviceColor) {
+    const parsed = parseHexColor(deviceColor);
+    if (parsed) return parsed;
+  }
+
+  // Fall back to generated color
+  return colorForDevice(deviceId);
+}
+
 export function rgbaString(color: Color, a: number = 1): string {
   const [r, g, b] = color;
   return `rgba(${r}, ${g}, ${b}, ${a})`;

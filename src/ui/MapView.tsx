@@ -1,4 +1,4 @@
-import { colorForDevice } from "./color";
+import { getColorForDevice } from "./color";
 import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
@@ -14,8 +14,8 @@ type Props = {
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   height: number | string;
   overlay: React.ReactNode;
-  onSelectDevice: (id: number | null) => void;
   selectedDeviceId: number | null;
+  onSelectDevice: (id: number) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
 };
 
@@ -178,7 +178,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           if (Number.isFinite(devNum)) onSelectDevice(devNum);
           closeClusterPopupAnimated();
         } else {
-          onSelectDevice(null);
           const clusterPoint = map.containerPointToLatLng(L.point(hit.x, hit.y));
           try {
             if (map.stop) map.stop();
@@ -372,8 +371,8 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
               const left = Math.round(radius * Math.cos(angle));
               const top = Math.round(radius * Math.sin(angle));
 
-              const col: [number, number, number] = colorForDevice(it.device);
-              const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+                const col: [number, number, number] = getColorForDevice(it.device);
+                const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
 
               const enterDelay = i * 20;
               const exitDelay = (n - i - 1) * 15;

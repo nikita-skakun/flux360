@@ -53,13 +53,39 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
 }
 
 async function performGet(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown> {
-  const res = await fetcher(url, { method: "GET", headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
-  }
-  return await res.json().catch(() => null);
-}
+   const res = await fetcher(url, { method: "GET", headers });
+   if (!res.ok) {
+     const body = await res.text().catch(() => "<no body>");
+     throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
+   }
+   return await res.json().catch(() => null);
+ }
+
+ async function performPost(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
+   const res = await fetcher(url, { method: "POST", headers, body: JSON.stringify(body) });
+   if (!res.ok) {
+     const resBody = await res.text().catch(() => "<no body>");
+     throw new Error(`Traccar POST failed: ${res.status} ${res.statusText} - ${resBody}`);
+   }
+   return await res.json().catch(() => null);
+ }
+
+ async function performPut(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
+   const res = await fetcher(url, { method: "PUT", headers, body: JSON.stringify(body) });
+   if (!res.ok) {
+     const resBody = await res.text().catch(() => "<no body>");
+     throw new Error(`Traccar PUT failed: ${res.status} ${res.statusText} - ${resBody}`);
+   }
+   return await res.json().catch(() => null);
+ }
+
+ async function performDelete(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<void> {
+   const res = await fetcher(url, { method: "DELETE", headers });
+   if (!res.ok) {
+     const body = await res.text().catch(() => "<no body>");
+     throw new Error(`Traccar DELETE failed: ${res.status} ${res.statusText} - ${body}`);
+   }
+ }
 
 export async function fetchPositions(
   opts: TraccarClientOptions,
@@ -102,7 +128,7 @@ export async function fetchPositions(
   throw new Error("Unexpected Traccar response format: expected JSON array");
 }
 
-export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: number; name: string; emoji: string; lastSeen: number | null }[]> {
+export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarDevice[]> {
   const fetcher = opts.fetchImpl ?? fetch;
   const protocol = opts.secure ? 'https' : 'http';
   const base = `${protocol}://${opts.baseUrl}/api`;
@@ -130,12 +156,13 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<{ id: nu
     if (typeof id !== "number") return [];
 
     const name = (typeof o["name"] === "string" ? o["name"] : null) ?? (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ?? String(id);
-    const emoji = typeof (o["attributes"] as Record<string, unknown>)?.["emoji"] === "string" ? (o["attributes"] as Record<string, unknown>)["emoji"] as string : name.toUpperCase().charAt(0);
+    const attrs = typeof o["attributes"] === "object" ? (o["attributes"] as Record<string, unknown>) : {};
+    const emoji = typeof attrs["emoji"] === "string" ? attrs["emoji"] as string : name.toUpperCase().charAt(0);
 
     const lastUpdate = o["lastUpdate"];
     const lastSeen = typeof lastUpdate === "string" ? Date.parse(lastUpdate) : null;
 
-    return [{ id, name, emoji, lastSeen }];
+    return [{ id, name, emoji, lastSeen, attributes: attrs }];
   });
 }
 
@@ -313,9 +340,118 @@ export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] 
   return out;
 }
 
+export type TraccarDevice = {
+  id: number;
+  name: string;
+  emoji: string;
+  lastSeen: number | null;
+  attributes: Record<string, unknown>;
+};
+
+export async function createGroupDevice(
+  opts: TraccarClientOptions,
+  name: string,
+  emoji: string,
+  memberDeviceIds: number[]
+): Promise<TraccarDevice> {
+  const fetcher = opts.fetchImpl ?? fetch;
+  const protocol = opts.secure ? 'https' : 'http';
+  const base = `${protocol}://${opts.baseUrl}/api`;
+  const url = `${base}/devices`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  };
+  const authHeader = buildAuthHeader(opts.auth);
+  if (authHeader) headers["Authorization"] = authHeader;
+
+   const payload = {
+     name,
+     uniqueId: `group-${Date.now()}`,
+     attributes: {
+       emoji,
+       memberDeviceIds: JSON.stringify(memberDeviceIds),
+     },
+   };
+
+  const json = await performPost(fetcher, url, headers, payload);
+  if (!json || typeof json !== "object") {
+    throw new Error("Failed to create group device");
+  }
+  const obj = json as Record<string, unknown>;
+  return {
+    id: typeof obj["id"] === "number" ? obj["id"] : 0,
+    name: typeof obj["name"] === "string" ? obj["name"] : name,
+    emoji: emoji,
+    lastSeen: null,
+    attributes: typeof obj["attributes"] === "object" ? (obj["attributes"] as Record<string, unknown>) : {},
+  };
+}
+
+export async function updateGroupDevice(
+  opts: TraccarClientOptions,
+  deviceId: number,
+  updates: {
+    name?: string;
+    emoji?: string;
+    color?: string;
+    memberDeviceIds?: number[];
+  }
+): Promise<void> {
+  const fetcher = opts.fetchImpl ?? fetch;
+  const protocol = opts.secure ? 'https' : 'http';
+  const base = `${protocol}://${opts.baseUrl}/api`;
+  const url = `${base}/devices/${deviceId}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  };
+  const authHeader = buildAuthHeader(opts.auth);
+  if (authHeader) headers["Authorization"] = authHeader;
+
+  // Build the attributes object with updated values
+  const attributes: Record<string, unknown> = {};
+  if (updates.emoji !== undefined) attributes["emoji"] = updates.emoji;
+  if (updates.color !== undefined) attributes["color"] = updates.color;
+  if (updates.memberDeviceIds !== undefined) {
+    attributes["memberDeviceIds"] = JSON.stringify(updates.memberDeviceIds);
+  }
+
+  const payload: Record<string, unknown> = {};
+  if (updates.name !== undefined) payload["name"] = updates.name;
+  if (Object.keys(attributes).length > 0) payload["attributes"] = attributes;
+
+  await performPut(fetcher, url, headers, payload);
+}
+
+export async function deleteGroupDevice(
+  opts: TraccarClientOptions,
+  deviceId: number
+): Promise<void> {
+  const fetcher = opts.fetchImpl ?? fetch;
+  const protocol = opts.secure ? 'https' : 'http';
+  const base = `${protocol}://${opts.baseUrl}/api`;
+  const url = `${base}/devices/${deviceId}`;
+
+  const headers: Record<string, string> = {
+    "Accept": "application/json",
+  };
+  const authHeader = buildAuthHeader(opts.auth);
+  if (authHeader) headers["Authorization"] = authHeader;
+
+  await performDelete(fetcher, url, headers);
+}
+
+
 export default {
   normalizePosition,
   fetchPositions,
+  fetchDevices,
   connectRealtime,
   extractPositionsFromMessage,
+  createGroupDevice,
+  updateGroupDevice,
+  deleteGroupDevice,
 };
