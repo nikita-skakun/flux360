@@ -129,7 +129,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                           onChange={(e) => setEditingGroupName(e.target.value)}
                           onBlur={() => {
                             if (editingGroupName.trim()) {
-                              saveGroupEdit(group.id);
+                              void saveGroupEdit(group.id);
                             } else {
                               setEditingGroupId(null);
                             }
@@ -148,7 +148,18 @@ const TrackerGroupsModal: React.FC<Props> = ({
                       )}
                     </div>
                     <button
-                      onClick={() => onDeleteGroup(group.id)}
+                      onClick={() => {
+                        void (async () => {
+                          setIsLoading(true);
+                          try {
+                            await onDeleteGroup(group.id);
+                          } catch (error) {
+                            console.error("Failed to delete group:", error);
+                          } finally {
+                            setIsLoading(false);
+                          }
+                        })();
+                      }}
                       className="text-red-600 hover:text-red-700 text-sm px-2 py-1 rounded border border-red-200 disabled:opacity-50"
                       disabled={isLoading}
                     >
@@ -165,7 +176,18 @@ const TrackerGroupsModal: React.FC<Props> = ({
                         >
                           {device?.name ?? `Device ${deviceId}`}
                           <button
-                            onClick={() => onRemoveDeviceFromGroup(group.id, deviceId)}
+                            onClick={() => {
+                              void (async () => {
+                                setIsLoading(true);
+                                try {
+                                  await onRemoveDeviceFromGroup(group.id, deviceId);
+                                } catch (error) {
+                                  console.error("Failed to remove device from group:", error);
+                                } finally {
+                                  setIsLoading(false);
+                                }
+                              })();
+                            }}
                             className="hover:text-blue-900 disabled:opacity-50"
                             disabled={isLoading}
                           >
@@ -181,8 +203,17 @@ const TrackerGroupsModal: React.FC<Props> = ({
                         onChange={(e) => {
                           const deviceId = Number(e.target.value);
                           if (deviceId) {
-                            onAddDeviceToGroup(group.id, deviceId);
-                            e.target.value = "";
+                            void (async () => {
+                              setIsLoading(true);
+                              try {
+                                await onAddDeviceToGroup(group.id, deviceId);
+                                e.target.value = "";
+                              } catch (error) {
+                                console.error("Failed to add device to group:", error);
+                              } finally {
+                                setIsLoading(false);
+                              }
+                            })();
                           }
                         }}
                         className="border rounded px-2 py-1 text-sm disabled:opacity-50"
@@ -270,13 +301,13 @@ const TrackerGroupsModal: React.FC<Props> = ({
               </div>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={handleCreateGroup}
-                disabled={!newGroupName.trim() || selectedDevices.length === 0 || isLoading}
-                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                {isLoading ? "Creating..." : "Create Group"}
-              </button>
+               <button
+                 onClick={() => void handleCreateGroup()}
+                 disabled={!newGroupName.trim() || selectedDevices.length === 0 || isLoading}
+                 className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+               >
+                 {isLoading ? "Creating..." : "Create Group"}
+               </button>
               <button
                 onClick={onClose}
                 className="px-4 py-2 border rounded hover:bg-gray-50 disabled:opacity-50"
