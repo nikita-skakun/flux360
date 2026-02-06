@@ -28,8 +28,8 @@ export class Anchor {
   }
 
   getConfidence(timestamp: number, decayRate: number): number {
-    const timeDiff = timestamp - this.lastUpdateTimestamp;
-    return Math.max(0, Math.min(1, this.confidence * Math.exp(-decayRate * timeDiff)));
+    const timeDiffMinutes = (timestamp - this.lastUpdateTimestamp) / 60000;
+    return Math.max(0, Math.min(1, this.confidence * Math.exp(-decayRate * timeDiffMinutes)));
   }
 
   getConfidenceLevel(timestamp: number, decayRate: number): "high" | "medium" | "low" {

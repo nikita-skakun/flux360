@@ -2,7 +2,7 @@ import { getColorForDevice } from "./color";
 import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { DevicePoint } from "@/ui/types";
 
 type Props = {
@@ -17,9 +17,10 @@ type Props = {
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
+  debugAnchors?: Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, debugFrame }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, debugFrame, debugAnchors }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -34,6 +35,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
   const [clusterAnimation, setClusterAnimation] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle');
   const clusterAnimationTimerRef = useRef<number | null>(null);
   const CLUSTER_ANIM_MS = 150;
+  const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
 
   const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
@@ -197,13 +199,19 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       }
     };
 
-    const onMapMove = (ev: L.LeafletMouseEvent) => {
-      const pt = map.latLngToContainerPoint(ev.latlng);
-      const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-      const container = map.getContainer();
-      if (hit?.items?.length) {
-        container.style.cursor = "pointer";
-        if (hit.items.length === 1) {
+  const onMapMove = (ev: L.LeafletMouseEvent) => {
+    const pt = map.latLngToContainerPoint(ev.latlng);
+    const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
+    const anchorHit = canvasApiRef.current?.hitTestAnchor(pt.x, pt.y) ?? null;
+    if (anchorHit) {
+      setAnchorHover({ x: anchorHit.x, y: anchorHit.y, anchor: anchorHit.anchor });
+    } else {
+      setAnchorHover(null);
+    }
+    const container = map.getContainer();
+    if (hit?.items?.length) {
+      container.style.cursor = "pointer";
+      if (hit.items.length === 1) {
           const first = hit.items[0];
           if (first) container.title = deviceNamesRef.current[first.device] ?? String(first.device);
           else container.title = "";
@@ -216,11 +224,12 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       }
     };
 
-    const container = map.getContainer();
-    const onMouseLeave = () => {
-      container.style.cursor = "";
-      container.title = "";
-    };
+  const container = map.getContainer();
+  const onMouseLeave = () => {
+    container.style.cursor = "";
+    container.title = "";
+    setAnchorHover(null);
+  };
 
     map.on("click", onMapClick);
     map.on("mousemove", onMapMove);
@@ -323,6 +332,16 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     return { x: p.x, y: p.y };
   })() : null;
 
+  const anchorHoverLabel = useMemo(() => {
+    if (!anchorHover) return null;
+    const { anchor } = anchorHover;
+    const typeLabel = anchor.type === "active" ? "Active" : anchor.type === "candidate" ? "Candidate" : anchor.type === "frame" ? "Frame" : "Closed";
+    const started = new Date(anchor.startTimestamp).toLocaleString();
+    const ended = anchor.endTimestamp ? new Date(anchor.endTimestamp).toLocaleString() : null;
+    const updated = new Date(anchor.lastUpdateTimestamp).toLocaleString();
+    return { typeLabel, started, ended, updated, confidence: anchor.confidence };
+  }, [anchorHover]);
+
   let clusterChooser: React.ReactNode = null;
   if (clusterPopup && mapRef.current && clusterPoint) {
     const backdropStyle: React.CSSProperties = {
@@ -414,20 +433,35 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
       <div className="absolute inset-0 pointer-events-none z-[1000]">
         <CanvasView
-          ref={canvasApiRef}
-          components={components}
-          deviceIcons={deviceIcons}
-          width={size.width}
-          height={size.height}
-          zoom={pixelsPerMeter}
-          refMeters={centerMeters}
-          fitToBounds={false}
-          worldBounds={null}
-          selectedDeviceId={selectedDeviceId}
-          openClusterPoint={clusterPoint}
+            ref={canvasApiRef}
+            components={components}
+            deviceIcons={deviceIcons}
+            width={size.width}
+            height={size.height}
+            zoom={pixelsPerMeter}
+            refMeters={centerMeters}
+            fitToBounds={false}
+            worldBounds={null}
+            selectedDeviceId={selectedDeviceId}
+            openClusterPoint={clusterPoint}
           debugFrame={debugFrame ?? null}
+          debugAnchors={debugAnchors ?? []}
         />
       </div>
+      {anchorHover && anchorHoverLabel ? (
+        <div
+          className="absolute z-[1003] pointer-events-none"
+          style={{ left: anchorHover.x + 12, top: anchorHover.y + 12 }}
+        >
+          <div className="text-xs bg-white/90 border shadow rounded px-2 py-1">
+            <div className="font-medium">{anchorHoverLabel.typeLabel} anchor</div>
+            <div>Confidence: {anchorHoverLabel.confidence.toFixed(2)}</div>
+            <div>Started: {anchorHoverLabel.started}</div>
+            {anchorHoverLabel.ended ? <div>Ended: {anchorHoverLabel.ended}</div> : null}
+            <div>Updated: {anchorHoverLabel.updated}</div>
+          </div>
+        </div>
+      ) : null}
       {clusterChooser}
       <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
         <div className="w-full sm:w-80 bg-white/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">

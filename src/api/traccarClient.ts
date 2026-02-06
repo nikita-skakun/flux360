@@ -53,39 +53,39 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
 }
 
 async function performGet(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown> {
-   const res = await fetcher(url, { method: "GET", headers });
-   if (!res.ok) {
-     const body = await res.text().catch(() => "<no body>");
-     throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
-   }
-   return await res.json().catch(() => null);
- }
+  const res = await fetcher(url, { method: "GET", headers });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "<no body>");
+    throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
+  }
+  return await res.json().catch(() => null);
+}
 
- async function performPost(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
-   const res = await fetcher(url, { method: "POST", headers, body: JSON.stringify(body) });
-   if (!res.ok) {
-     const resBody = await res.text().catch(() => "<no body>");
-     throw new Error(`Traccar POST failed: ${res.status} ${res.statusText} - ${resBody}`);
-   }
-   return await res.json().catch(() => null);
- }
+async function performPost(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
+  const res = await fetcher(url, { method: "POST", headers, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const resBody = await res.text().catch(() => "<no body>");
+    throw new Error(`Traccar POST failed: ${res.status} ${res.statusText} - ${resBody}`);
+  }
+  return await res.json().catch(() => null);
+}
 
- async function performPut(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
-   const res = await fetcher(url, { method: "PUT", headers, body: JSON.stringify(body) });
-   if (!res.ok) {
-     const resBody = await res.text().catch(() => "<no body>");
-     throw new Error(`Traccar PUT failed: ${res.status} ${res.statusText} - ${resBody}`);
-   }
-   return await res.json().catch(() => null);
- }
+async function performPut(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
+  const res = await fetcher(url, { method: "PUT", headers, body: JSON.stringify(body) });
+  if (!res.ok) {
+    const resBody = await res.text().catch(() => "<no body>");
+    throw new Error(`Traccar PUT failed: ${res.status} ${res.statusText} - ${resBody}`);
+  }
+  return await res.json().catch(() => null);
+}
 
- async function performDelete(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<void> {
-   const res = await fetcher(url, { method: "DELETE", headers });
-   if (!res.ok) {
-     const body = await res.text().catch(() => "<no body>");
-     throw new Error(`Traccar DELETE failed: ${res.status} ${res.statusText} - ${body}`);
-   }
- }
+async function performDelete(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<void> {
+  const res = await fetcher(url, { method: "DELETE", headers });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "<no body>");
+    throw new Error(`Traccar DELETE failed: ${res.status} ${res.statusText} - ${body}`);
+  }
+}
 
 export async function fetchPositions(
   opts: TraccarClientOptions,
@@ -366,14 +366,14 @@ export async function createGroupDevice(
   const authHeader = buildAuthHeader(opts.auth);
   if (authHeader) headers["Authorization"] = authHeader;
 
-   const payload = {
-     name,
-     uniqueId: `group-${Date.now()}`,
-     attributes: {
-       emoji,
-       memberDeviceIds: JSON.stringify(memberDeviceIds),
-     },
-   };
+  const payload = {
+    name,
+    uniqueId: `group-${Date.now()}`,
+    attributes: {
+      emoji,
+      memberDeviceIds: JSON.stringify(memberDeviceIds),
+    },
+  };
 
   const json = await performPost(fetcher, url, headers, payload);
   if (!json || typeof json !== "object") {
@@ -426,6 +426,34 @@ export async function updateGroupDevice(
   await performPut(fetcher, url, headers, payload);
 }
 
+export async function updateDeviceAttributes(
+  opts: TraccarClientOptions,
+  deviceId: number,
+  updates: Record<string, unknown>
+): Promise<unknown> {
+  const fetcher = opts.fetchImpl ?? fetch;
+  const protocol = opts.secure ? "https" : "http";
+  const base = `${protocol}://${opts.baseUrl}/api`;
+  const url = `${base}/devices/${deviceId}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  };
+  const authHeader = buildAuthHeader(opts.auth);
+  if (authHeader) headers["Authorization"] = authHeader;
+
+  const existing = await performGet(fetcher, url, headers);
+  const device = (existing && typeof existing === "object") ? (existing as Record<string, unknown>) : {};
+  const existingAttributes = (device["attributes"] && typeof device["attributes"] === "object")
+    ? (device["attributes"] as Record<string, unknown>)
+    : {};
+  const attributes: Record<string, unknown> = { ...existingAttributes, ...updates };
+
+  const payload: Record<string, unknown> = { ...device, attributes };
+  return await performPut(fetcher, url, headers, payload);
+}
+
 export async function deleteGroupDevice(
   opts: TraccarClientOptions,
   deviceId: number
@@ -453,5 +481,6 @@ export default {
   extractPositionsFromMessage,
   createGroupDevice,
   updateGroupDevice,
+  updateDeviceAttributes,
   deleteGroupDevice,
 };

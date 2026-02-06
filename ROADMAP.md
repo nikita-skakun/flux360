@@ -24,8 +24,9 @@
    - Use reported accuracy as noise estimate
    - Use dt since last anchor-confirming report
    - Score formula:
-     score = (distance / (accuracy + k)) * log1p(dtMinutes)
+      score = (distance / (accuracy + k)) * log1p(dtMinutes)
    - Add coherence bonus when outliers align in direction from anchor
+   - Car profile uses higher single-point threshold to avoid single-report motion
 
 3) Outlier buffer (time-ordered)
    - Store non-anchor points since last anchor confirmation

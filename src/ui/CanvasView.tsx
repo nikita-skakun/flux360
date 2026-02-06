@@ -7,6 +7,7 @@ import { colorForDevice, rgbaString, type Color } from "./color";
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
   getClusters: () => { items: DevicePoint[]; x: number; y: number }[];
+  hitTestAnchor: (x: number, y: number) => { anchor: DebugAnchor; x: number; y: number } | null;
 };
 
 import type { DebugFrame } from "@/engine/engine";
@@ -23,15 +24,27 @@ type Props = {
   selectedDeviceId: number | null;
   openClusterPoint: { x: number; y: number } | null;
   debugFrame?: DebugFrame | null;
+  debugAnchors?: DebugAnchor[];
 };
 
-export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null, debugFrame = null }, ref) {
+type DebugAnchor = {
+  mean: [number, number];
+  cov: [number, number, number];
+  type: "active" | "candidate" | "closed" | "frame";
+  startTimestamp: number;
+  endTimestamp: number | null;
+  confidence: number;
+  lastUpdateTimestamp: number;
+};
+
+export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null, debugFrame = null, debugAnchors = [] }, ref) {
   type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color: [number, number, number]; };
   type Cluster = { items: DrawItem[]; x: number; y: number; size: number; radius: number };
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
+  const debugAnchorsRef = useRef<Array<{ anchor: DebugAnchor; x: number; y: number; r: number }>>([]);
 
   const [pinOpacity, setPinOpacity] = useState(1);
 
@@ -136,6 +149,20 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     },
     getClusters: () => {
       return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
+    },
+    hitTestAnchor: (px: number, py: number) => {
+      if (!debugAnchorsRef.current.length) return null;
+      let best: { anchor: DebugAnchor; x: number; y: number; dist: number } | null = null;
+      for (const it of debugAnchorsRef.current) {
+        const dist = Math.hypot(it.x - px, it.y - py);
+        const extra = it.anchor.type === "frame" ? 12 : 6;
+        const pick = Math.max(10, it.r + extra);
+        if (dist > pick) continue;
+        if (!best || dist < best.dist) {
+          best = { anchor: it.anchor, x: it.x, y: it.y, dist };
+        }
+      }
+      return best ? { anchor: best.anchor, x: best.x, y: best.y } : null;
     },
   }), [components]);
 
@@ -349,6 +376,38 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
         }
       }
 
+      // Debug overlay: draw all anchors for selected device (if any)
+      if (debugAnchors.length > 0) {
+        debugAnchorsRef.current = [];
+        for (const anchor of debugAnchors) {
+          const ax = width / 2 + (anchor.mean[0] - anchorX) * localZoom;
+          const ay = height / 2 - (anchor.mean[1] - anchorY) * localZoom;
+          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, Math.max(anchor.cov[0], anchor.cov[2])));
+          const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
+          debugAnchorsRef.current.push({ anchor, x: ax, y: ay, r: anchorR });
+          const stroke = anchor.type === "active" ? 'rgba(0,120,255,0.9)'
+            : anchor.type === "candidate" ? 'rgba(255,165,0,0.9)'
+              : anchor.type === "frame" ? 'rgba(0,0,200,0.95)'
+                : 'rgba(120,120,120,0.7)';
+          const fill = anchor.type === "active" ? 'rgba(0,120,255,0.12)'
+            : anchor.type === "candidate" ? 'rgba(255,165,0,0.12)'
+              : anchor.type === "frame" ? 'rgba(0,0,200,0.12)'
+                : 'rgba(120,120,120,0.08)';
+          ctx.save();
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 0.12;
+          ctx.fillStyle = fill;
+          ctx.beginPath();
+          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+
       // Debug overlay: draw measurement, line to anchor, and anchor ellipse for a selected debug frame (if any)
       if (debugFrame) {
         try {
@@ -363,9 +422,23 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
           const my = height / 2 - (meas[1] - anchorY) * localZoom;
 
           // approximate anchor ellipse using diagonal variances
-          const anchorCov = df.after?.cov ?? df.before?.cov ?? [100,0,100];
+          const anchorCov = df.after?.cov ?? df.before?.cov ?? [100, 0, 100];
           const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, Math.max(anchorCov[0], anchorCov[2])));
           const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
+          debugAnchorsRef.current.push({
+            anchor: {
+              mean: [mean[0], mean[1]],
+              cov: [anchorCov[0], anchorCov[1], anchorCov[2]],
+              type: "frame",
+              startTimestamp: df.after?.startTimestamp ?? df.before?.startTimestamp ?? df.timestamp,
+              endTimestamp: df.after ? null : df.before?.startTimestamp ?? null,
+              confidence: df.after?.confidence ?? df.before?.confidence ?? 0,
+              lastUpdateTimestamp: df.after?.lastUpdateTimestamp ?? df.before?.lastUpdateTimestamp ?? df.timestamp,
+            },
+            x: ax,
+            y: ay,
+            r: anchorR,
+          });
 
           // measurement accuracy circle
           const measAccMeters = df.measurement.accuracy ?? 0;

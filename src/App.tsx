@@ -8,6 +8,7 @@ import MapView from "./ui/MapView";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import TrackerGroupsModal from "./ui/TrackerGroupsModal";
 import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
+import type { MotionProfileName } from "@/engine/engine";
 import type { NormalizedPosition } from "@/api/traccarClient";
 
 export function App() {
@@ -77,6 +78,10 @@ export function App() {
         if (!enginesRef.current[deviceId]) {
           enginesRef.current[deviceId] = new Engine();
         }
+        const profile = groupIdsRef.current.has(deviceId)
+          ? (groupMotionProfiles.get(deviceId) ?? "person")
+          : (deviceMotionProfiles[deviceId] ?? "person");
+        enginesRef.current[deviceId].setMotionProfile(profile);
         // Ensure measurements are sorted by timestamp
         const sortedArr = [...arr].sort((a, b) => a.timestamp - b.timestamp);
         measurementsByDevice[deviceId] = sortedArr;
@@ -122,9 +127,25 @@ export function App() {
   const [deviceNames, setDeviceNames] = useState<Record<number, string>>({});
   const [deviceIcons, setDeviceIcons] = useState<Record<number, string>>({});
   const [deviceLastSeen, setDeviceLastSeen] = useState<Record<number, number | null>>({});
+  const [deviceMotionProfiles, setDeviceMotionProfiles] = useState<Record<number, MotionProfileName>>({});
   const [groupDevices, setGroupDevices] = useState<Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>>([]);
   const deviceToGroupsMapRef = useRef(new Map<number, number[]>());
   const groupIdsRef = useRef<Set<number>>(new Set());
+
+  const groupMotionProfiles = useMemo(() => {
+    const profiles = new Map<number, MotionProfileName>();
+    for (const group of groupDevices) {
+      let profile: MotionProfileName = "person";
+      for (const memberId of group.memberDeviceIds) {
+        if ((deviceMotionProfiles[memberId] ?? "person") === "car") {
+          profile = "car";
+          break;
+        }
+      }
+      profiles.set(group.id, profile);
+    }
+    return profiles;
+  }, [groupDevices, deviceMotionProfiles]);
 
   const seenRef = useRef<Set<string>>(new Set());
   const processedKeysRef = useRef<Set<string>>(new Set());
@@ -165,6 +186,9 @@ export function App() {
     // This ensures positions that arrived before the group was created get added to the group
     // IMPORTANT: Don't filter by processedKeysRef - we need to add positions to NEW groups even if they were already processed for individual devices
     if (positionsAllRef.current.length > 0) {
+      for (const groupDevice of groupDevices) {
+        delete enginesRef.current[groupDevice.id];
+      }
       const allPositions = positionsAllRef.current;
       const posByDevice = allPositions.reduce((acc, p) => {
         (acc[p.device] ||= []).push(p);
@@ -230,7 +254,7 @@ export function App() {
       console.error("Failed to create group:", error);
       throw error;
     }
-  }, [buildApiOpts]);
+  }, [buildApiOpts, deviceMotionProfiles]);
 
   const handleDeleteGroup = useCallback(async (groupId: number) => {
     try {
@@ -252,7 +276,7 @@ export function App() {
       console.error("Failed to delete group:", error);
       throw error;
     }
-  }, [buildApiOpts]);
+  }, [buildApiOpts, deviceMotionProfiles]);
 
   const handleAddDeviceToGroup = useCallback(async (groupId: number, deviceId: number) => {
     try {
@@ -305,6 +329,19 @@ export function App() {
       throw error;
     }
   }, [buildApiOpts]);
+
+  const handleUpdateMotionProfile = useCallback(async (deviceId: number, profile: MotionProfileName) => {
+    const previous = deviceMotionProfiles[deviceId] ?? "person";
+    setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: profile }));
+    try {
+      const { updateDeviceAttributes } = await import("@/api/traccarClient");
+      const payload = { motionProfile: profile, motionProfileUpdatedAt: new Date().toISOString() };
+      await updateDeviceAttributes(buildApiOpts(), deviceId, payload);
+    } catch (error) {
+      console.error("Failed to update motion profile:", error);
+      setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: previous }));
+    }
+  }, [buildApiOpts, deviceMotionProfiles, traccarBaseUrl, traccarSecure, traccarToken]);
 
   const handleUpdateGroup = useCallback(async (groupId: number, updates: { name?: string }) => {
     try {
@@ -369,6 +406,16 @@ export function App() {
     });
     if (newPositions.length === 0) return;
 
+    const groupIdsTouched = new Set<number>();
+    for (const p of newPositions) {
+      const groupIds = deviceToGroupsMapRef.current.get(p.device);
+      if (groupIds) {
+        for (const groupId of groupIds) {
+          groupIdsTouched.add(groupId);
+        }
+      }
+    }
+
     // Group positions by device AND by any groups they belong to
     const posByDevice = newPositions.reduce((acc, p) => {
       // Add position to the original device
@@ -384,6 +431,21 @@ export function App() {
 
       return acc;
     }, {} as Record<number, NormalizedPosition[]>);
+
+    if (groupIdsTouched.size > 0) {
+      const membersByGroup = new Map<number, number[]>();
+      for (const group of groupDevices) {
+        membersByGroup.set(group.id, group.memberDeviceIds);
+      }
+      const allPositions = positionsAllRef.current;
+      for (const groupId of groupIdsTouched) {
+        const memberIds = membersByGroup.get(groupId);
+        if (!memberIds || memberIds.length === 0) continue;
+        delete enginesRef.current[groupId];
+        const memberSet = new Set(memberIds);
+        posByDevice[groupId] = allPositions.filter((p) => memberSet.has(p.device));
+      }
+    }
 
     for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
 
@@ -492,6 +554,7 @@ export function App() {
                   const nameMap: Record<number, string> = {};
                   const iconMap: Record<number, string> = {};
                   const lastSeenMap: Record<number, number | null> = {};
+                  const motionProfileMap: Record<number, MotionProfileName> = {};
                   const groupDevicesMap = new Map<number, { id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>();
 
                   for (const d of devices) {
@@ -499,6 +562,8 @@ export function App() {
                       nameMap[d.id] = d.name;
                       iconMap[d.id] = d.emoji;
                       lastSeenMap[d.id] = d.lastSeen;
+                      const rawProfile = typeof d.attributes?.["motionProfile"] === "string" ? d.attributes["motionProfile"] : null;
+                      motionProfileMap[d.id] = rawProfile === "car" ? "car" : "person";
 
                       // Check if this is a group device
                       const memberDeviceIdsStr = typeof d.attributes?.["memberDeviceIds"] === "string" ? d.attributes["memberDeviceIds"] : null;
@@ -524,6 +589,7 @@ export function App() {
                   setDeviceNames(nameMap);
                   setDeviceIcons(iconMap);
                   setDeviceLastSeen(lastSeenMap);
+                  setDeviceMotionProfiles(motionProfileMap);
 
                   // Generate colors for groups from their IDs
                   const { colorForDevice } = await import("@/ui/color");
@@ -543,22 +609,33 @@ export function App() {
                   }
                 }
 
-                for (const deviceId of knownDevices) {
-                  if (deviceId == null || Number.isNaN(deviceId) || derivedBase == null) continue;
+                if (derivedBase) {
                   const from = new Date(Math.max(0, Date.now() - RECENT_DEVICE_CUTOFF_MS));
                   const to = new Date();
+                  const fetches = Array.from(knownDevices).map((deviceId) => {
+                    if (deviceId == null || Number.isNaN(deviceId)) return Promise.resolve([] as NormalizedPosition[]);
+                    return fetchPositions(
+                      { ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } },
+                      deviceId,
+                      from,
+                      to,
+                      {}
+                    );
+                  });
 
-                  try {
-                    const fetched = await fetchPositions({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } }, deviceId, from, to, {});
-                    for (const p of fetched) {
+                  const results = await Promise.allSettled(fetches);
+                  for (const res of results) {
+                    if (res.status !== "fulfilled") continue;
+                    for (const p of res.value) {
                       const key = dedupeKey(p);
                       if (seenRef.current.has(key)) continue;
                       seenRef.current.add(key);
                       positionsAllRef.current.push(p);
                     }
+                  }
+
+                  if (positionsAllRef.current.length > 0) {
                     processPositions(positionsAllRef.current);
-                  } catch {
-                    // ignore processing errors
                   }
                 }
               } catch {
@@ -608,17 +685,6 @@ export function App() {
     const d = Math.round(h / 24);
     return `${d}d`;
   }
-
-  // When group devices change, reprocess positions
-  useEffect(() => {
-    processedKeysRef.current.clear();
-    // Reset engines so they get rebuilt with the new grouping
-    enginesRef.current = {};
-    setEngineSnapshotsByDevice({});
-    if (positionsAllRef.current.length > 0) {
-      processPositions(positionsAllRef.current);
-    }
-  }, [groupDevices]);
 
   const visibleComponents = useMemo(() => {
     const engineComps = Object.values(engineSnapshotsByDevice).flat();
@@ -685,6 +751,18 @@ export function App() {
     const idx = Math.max(0, Math.min(fr.length - 1, debugFrameIndex));
     return fr[idx] ?? null;
   })() : null;
+
+  const currentDebugAnchors = (selectedDeviceId != null && debugMode && enginesRef.current[selectedDeviceId]) ? (() => {
+    const eng = enginesRef.current[selectedDeviceId];
+    if (!eng) return [] as Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
+    const anchors: Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }> = [];
+    if (eng.activeAnchor) anchors.push({ mean: [eng.activeAnchor.mean[0], eng.activeAnchor.mean[1]], cov: [eng.activeAnchor.cov[0], eng.activeAnchor.cov[1], eng.activeAnchor.cov[2]], type: "active", startTimestamp: eng.activeAnchor.startTimestamp, endTimestamp: eng.activeAnchor.endTimestamp, confidence: eng.activeAnchor.confidence, lastUpdateTimestamp: eng.activeAnchor.lastUpdateTimestamp });
+    if (eng.candidateAnchor) anchors.push({ mean: [eng.candidateAnchor.mean[0], eng.candidateAnchor.mean[1]], cov: [eng.candidateAnchor.cov[0], eng.candidateAnchor.cov[1], eng.candidateAnchor.cov[2]], type: "candidate", startTimestamp: eng.candidateAnchor.startTimestamp, endTimestamp: eng.candidateAnchor.endTimestamp, confidence: eng.candidateAnchor.confidence, lastUpdateTimestamp: eng.candidateAnchor.lastUpdateTimestamp });
+    for (const anchor of eng.closedAnchors) {
+      anchors.push({ mean: [anchor.mean[0], anchor.mean[1]], cov: [anchor.cov[0], anchor.cov[1], anchor.cov[2]], type: "closed", startTimestamp: anchor.startTimestamp, endTimestamp: anchor.endTimestamp, confidence: anchor.confidence, lastUpdateTimestamp: anchor.lastUpdateTimestamp });
+    }
+    return anchors;
+  })() : [];
 
   const deviceList = (() => {
     // Build set of member device IDs so we can skip them
@@ -791,6 +869,7 @@ export function App() {
       />
       <MapView
         debugFrame={currentDebugFrame}
+        debugAnchors={currentDebugAnchors}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
@@ -898,6 +977,19 @@ export function App() {
                             {(chosen as DevicePoint).sourceDeviceId !== undefined && <div className="text-foreground/50 text-xs mt-0.5">Current source: {deviceNames[(chosen as DevicePoint).sourceDeviceId!] ?? `Device ${(chosen as DevicePoint).sourceDeviceId}`}</div>}
                           </div>
                         )}
+                        {!group && typeof chosen.device === "number" && (
+                          <div className="mt-2 text-xs text-foreground/70">
+                            <label className="block text-[11px] uppercase tracking-wide text-foreground/50 mb-1">Motion profile</label>
+                            <select
+                              className="border rounded px-2 py-1 text-xs bg-white"
+                              value={deviceMotionProfiles[chosen.device] ?? "person"}
+                              onChange={(e) => handleUpdateMotionProfile(chosen.device, e.target.value === "car" ? "car" : "person")}
+                            >
+                              <option value="person">Person</option>
+                              <option value="car">Car</option>
+                            </select>
+                          </div>
+                        )}
                         <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
                         <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
                       </div>
@@ -919,6 +1011,18 @@ export function App() {
                           <div className="mt-2 text-xs bg-muted/20 p-2 rounded">
                             <div>Accuracy: {Math.round(chosenFrame.measurement.accuracy)} m</div>
                             <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
+                            <div>Motion active (before): {chosenFrame.motionActiveBefore ? 'yes' : 'no'}</div>
+                            <div>Motion active: {chosenFrame.motionActive ? 'yes' : 'no'}</div>
+                            {chosenFrame.motionStartTimestamp != null ? <div>Motion start: {new Date(chosenFrame.motionStartTimestamp).toLocaleString()}</div> : null}
+                            {chosenFrame.lastAnchorConfirmTimestamp != null ? <div>Last anchor confirm: {new Date(chosenFrame.lastAnchorConfirmTimestamp).toLocaleString()}</div> : null}
+                            {chosenFrame.motionDistance != null ? <div>Motion distance: {Math.round(chosenFrame.motionDistance)} m</div> : null}
+                            {chosenFrame.motionTimeFactor != null ? <div>Time factor: {chosenFrame.motionTimeFactor.toFixed(2)}</div> : null}
+                            {chosenFrame.motionScore != null ? <div>Motion score: {chosenFrame.motionScore.toFixed(2)}</div> : null}
+                            {chosenFrame.motionScoreSum != null ? <div>Score sum: {chosenFrame.motionScoreSum.toFixed(2)}</div> : null}
+                            {chosenFrame.motionCoherent != null ? <div>Coherent: {chosenFrame.motionCoherent ? 'yes' : 'no'}</div> : null}
+                            {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
+                            <div>Outliers: {chosenFrame.outlierCount}</div>
+                            {chosenFrame.anchorCovarianceScale != null ? <div>Anchor cov inflate: ×{chosenFrame.anchorCovarianceScale.toFixed(2)}</div> : null}
                             <div>Confidence: {chosenFrame.before ? chosenFrame.before.confidence.toFixed(2) : '—'} → {chosenFrame.after ? chosenFrame.after.confidence.toFixed(2) : '—'}</div>
                             <div>Decision: <strong>{chosenFrame.decision}</strong></div>
                             {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
