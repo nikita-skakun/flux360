@@ -11,6 +11,7 @@ const MIN_USABLE_CONFIDENCE = 0.1;
 export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'candidate-updated' | 'candidate-created' | 'promoted' | 'active-ended' | 'none';
 export type DebugFrame = {
   timestamp: number;
+  sourceDeviceId: number | undefined;
   measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; cov: [number, number, number]; };
   before: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   after: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
@@ -26,18 +27,26 @@ export class Engine {
   candidateAnchor: Anchor | null = null;
   lastTimestamp: number | null = null;
 
-  // debug buffer (per-engine / per-device)
+  // debug buffer (per-engine)
   private debugFrames: DebugFrame[] = [];
-  private seenDebugTimestamps = new Set<number>();
+  private seenDebugKeys = new Set<string>();
 
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
-  clearDebugFrames(): void { this.debugFrames = []; this.seenDebugTimestamps.clear(); }
+
+  clearDebugFrames(): void {
+    this.debugFrames = [];
+    this.seenDebugKeys.clear();
+  }
 
   private pushDebugFrame(frame: DebugFrame) {
-    if (this.seenDebugTimestamps.has(frame.timestamp)) return;
-    this.seenDebugTimestamps.add(frame.timestamp);
+    const key = `${frame.timestamp}:${frame.measurement.lat}:${frame.measurement.lon}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''}`;
+    if (this.seenDebugKeys.has(key)) return;
+    this.seenDebugKeys.add(key);
     this.debugFrames.push(frame);
-    if (this.debugFrames.length > DEBUG_BUFFER_SIZE) this.debugFrames.shift();
+    if (this.debugFrames.length > DEBUG_BUFFER_SIZE) {
+      this.debugFrames.sort((a, b) => a.timestamp - b.timestamp);
+      this.debugFrames.splice(0, this.debugFrames.length - DEBUG_BUFFER_SIZE);
+    }
   }
 
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
@@ -109,6 +118,7 @@ export class Engine {
       // push debug frame (non-intrusive)
       this.pushDebugFrame({
         timestamp: m.timestamp,
+        sourceDeviceId: m.sourceDeviceId,
         measurement: { lat: m.lat, lon: m.lon, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], cov: [m.cov[0], m.cov[1], m.cov[2]] },
         before: beforeAnchor ? { mean: [beforeAnchor.mean[0], beforeAnchor.mean[1]], cov: [beforeAnchor.cov[0], beforeAnchor.cov[1], beforeAnchor.cov[2]], confidence: beforeAnchor.confidence, startTimestamp: beforeAnchor.startTimestamp, lastUpdateTimestamp: beforeAnchor.lastUpdateTimestamp } : null,
         after: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], cov: [afterAnchor.cov[0], afterAnchor.cov[1], afterAnchor.cov[2]], confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,

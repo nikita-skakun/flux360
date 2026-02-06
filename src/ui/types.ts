@@ -3,6 +3,7 @@ export type Cov2 = [number, number, number];
 
 export type DevicePoint = {
   device: number;
+  sourceDeviceId?: number;
   lat: number;
   lon: number;
   mean: Vec2;

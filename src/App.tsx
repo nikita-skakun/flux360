@@ -124,6 +124,7 @@ export function App() {
   const [deviceLastSeen, setDeviceLastSeen] = useState<Record<number, number | null>>({});
   const [groupDevices, setGroupDevices] = useState<Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>>([]);
   const deviceToGroupsMapRef = useRef(new Map<number, number[]>());
+  const groupIdsRef = useRef<Set<number>>(new Set());
 
   const seenRef = useRef<Set<string>>(new Set());
   const processedKeysRef = useRef<Set<string>>(new Set());
@@ -147,7 +148,9 @@ export function App() {
   // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
   useEffect(() => {
     deviceToGroupsMapRef.current.clear();
+    groupIdsRef.current.clear();
     for (const groupDevice of groupDevices) {
+      groupIdsRef.current.add(groupDevice.id);
       for (const memberId of groupDevice.memberDeviceIds) {
         if (!deviceToGroupsMapRef.current.has(memberId)) {
           deviceToGroupsMapRef.current.set(memberId, []);
@@ -179,6 +182,7 @@ export function App() {
       const rawByDevice: Record<number, DevicePoint[]> = {};
       for (const [deviceKey, arr] of Object.entries(posByDevice)) {
         const deviceId = Number(deviceKey);
+        const isGroup = groupIdsRef.current.has(deviceId);
         const rawArr: DevicePoint[] = arr.map((p) => {
           const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
           const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
@@ -192,6 +196,7 @@ export function App() {
             timestamp: p.timestamp,
             anchorAgeMs: 0,
             confidence: 0,
+            ...(isGroup ? { sourceDeviceId: p.device } : {}),
           };
           return comp;
         });
@@ -385,6 +390,7 @@ export function App() {
     const rawByDevice: Record<number, DevicePoint[]> = {};
     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
       const deviceId = Number(deviceKey);
+      const isGroup = groupIdsRef.current.has(deviceId);
       const rawArr: DevicePoint[] = arr.map((p) => {
         const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
         const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
@@ -398,6 +404,7 @@ export function App() {
           timestamp: p.timestamp,
           anchorAgeMs: 0,
           confidence: 0,
+          ...(isGroup ? { sourceDeviceId: p.device } : {}),
         };
         return comp;
       });
@@ -888,6 +895,7 @@ export function App() {
                           <div className="text-xs text-foreground/60 mt-1">
                             <span className="font-medium">Sources:</span> {contributors.join(", ")}
                             {mostRecentSourceName && <div className="text-foreground/50 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
+                            {(chosen as DevicePoint).sourceDeviceId !== undefined && <div className="text-foreground/50 text-xs mt-0.5">Current source: {deviceNames[(chosen as DevicePoint).sourceDeviceId!] ?? `Device ${(chosen as DevicePoint).sourceDeviceId}`}</div>}
                           </div>
                         )}
                         <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
@@ -913,6 +921,7 @@ export function App() {
                             <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
                             <div>Confidence: {chosenFrame.before ? chosenFrame.before.confidence.toFixed(2) : '—'} → {chosenFrame.after ? chosenFrame.after.confidence.toFixed(2) : '—'}</div>
                             <div>Decision: <strong>{chosenFrame.decision}</strong></div>
+                            {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
                             <div>Anchor start: {(chosenFrame.after?.startTimestamp ?? chosenFrame.before?.startTimestamp) != null ? humanDurationSince((chosenFrame.after?.startTimestamp ?? chosenFrame.before?.startTimestamp) as number) : '—'}</div>
                             <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
                             <div>Anchor lat/lon: {(() => { if (chosenFrame.after?.mean == null) return '—'; const d = metersToDegrees(chosenFrame.after.mean[0], chosenFrame.after.mean[1], refLat ?? 0, refLon ?? 0); return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`; })()}</div>
