@@ -22,3 +22,8 @@
 ## Git
 
 - NEVER commit changes without explicit user permission
+
+## TypeScript
+
+- Never use `as any` - fix the types properly
+- Use proper type annotations and extend types when needed
