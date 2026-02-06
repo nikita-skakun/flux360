@@ -47,31 +47,31 @@ export function App() {
     return [v, 0, v];
   }
 
-   function createDevicePoint(mean: Vec2, cov: Cov2, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
-     const diagMax = Math.max(cov[0], cov[2]);
-     const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
-     const { lat: compLat, lon: compLon } = (refLat != null && refLon != null) ? metersToDegrees(mean[0], mean[1], refLat, refLon) : { lat: 0, lon: 0 };
-     return { mean, cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs, confidence };
-   }
+  function createDevicePoint(mean: Vec2, cov: Cov2, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
+    const diagMax = Math.max(cov[0], cov[2]);
+    const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
+    const { lat: compLat, lon: compLon } = (refLat != null && refLon != null) ? metersToDegrees(mean[0], mean[1], refLat, refLon) : { lat: 0, lon: 0 };
+    return { mean, cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs, confidence };
+  }
 
-   // Get the most recent position across all devices in a group
-   function getMostRecentGroupDevice(groupDeviceIds: number[]): number | null {
-     let mostRecentDevice: number | null = null;
-     let mostRecentTime = 0;
-     for (const deviceId of groupDeviceIds) {
-       const lastSeen = deviceLastSeen[deviceId] ?? 0;
-       if (lastSeen > mostRecentTime) {
-         mostRecentTime = lastSeen;
-         mostRecentDevice = deviceId;
-       }
-     }
-     return mostRecentDevice;
-   }
+  // Get the most recent position across all devices in a group
+  function getMostRecentGroupDevice(groupDeviceIds: number[]): number | null {
+    let mostRecentDevice: number | null = null;
+    let mostRecentTime = 0;
+    for (const deviceId of groupDeviceIds) {
+      const lastSeen = deviceLastSeen[deviceId] ?? 0;
+      if (lastSeen > mostRecentTime) {
+        mostRecentTime = lastSeen;
+        mostRecentDevice = deviceId;
+      }
+    }
+    return mostRecentDevice;
+  }
 
   function buildEngineSnapshotsFromByDevice(byDevice: Record<string, DevicePoint[]>): DevicePoint[] {
     try {
       const measurementsByDevice: Record<number, DevicePoint[]> = {};
-      
+
       for (const [deviceKey, arr] of Object.entries(byDevice)) {
         const deviceId = Number(deviceKey);
         if (!enginesRef.current[deviceId]) {
@@ -82,7 +82,7 @@ export function App() {
         measurementsByDevice[deviceId] = sortedArr;
         enginesRef.current[deviceId].processMeasurements(sortedArr);
       }
-      
+
       const currentSnapshots: Record<number, DevicePoint[]> = {};
       for (const [deviceId, engine] of Object.entries(enginesRef.current)) {
         const snapshot = engine.getCurrentSnapshot();
@@ -90,27 +90,27 @@ export function App() {
           // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
           const dId = Number(deviceId);
           const measurements = measurementsByDevice[dId];
-          const latestMeasurementTime = measurements && measurements.length > 0 
-            ? measurements[measurements.length - 1]!.timestamp 
+          const latestMeasurementTime = measurements && measurements.length > 0
+            ? measurements[measurements.length - 1]!.timestamp
             : engine.lastTimestamp ?? Date.now();
-          
+
           const timestamp = latestMeasurementTime;
           const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
           const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
-           
-           const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
-           currentSnapshots[dId] = [point];
-         } else {
-           currentSnapshots[Number(deviceId)] = [];
-         }
-       }
-       setEngineSnapshotsByDevice(currentSnapshots);
-       return Object.values(currentSnapshots).flat();
-     } catch (e) {
-       console.error("Error building engine snapshots:", e);
-       return [];
-     }
-   }
+
+          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
+          currentSnapshots[dId] = [point];
+        } else {
+          currentSnapshots[Number(deviceId)] = [];
+        }
+      }
+      setEngineSnapshotsByDevice(currentSnapshots);
+      return Object.values(currentSnapshots).flat();
+    } catch (e) {
+      console.error("Error building engine snapshots:", e);
+      return [];
+    }
+  }
 
   const [baseUrlInput, setBaseUrlInput] = useState<string>(() => safeGetItem("traccar:baseUrl") ?? "");
   const [secureInput, setSecureInput] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
@@ -125,9 +125,9 @@ export function App() {
   const [groupDevices, setGroupDevices] = useState<Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>>([]);
   const deviceToGroupsMapRef = useRef(new Map<number, number[]>());
 
-   const seenRef = useRef<Set<string>>(new Set());
-   const processedKeysRef = useRef<Set<string>>(new Set());
-   const positionsAllRef = useRef<NormalizedPosition[]>([]);
+  const seenRef = useRef<Set<string>>(new Set());
+  const processedKeysRef = useRef<Set<string>>(new Set());
+  const positionsAllRef = useRef<NormalizedPosition[]>([]);
 
   function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
     return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -157,6 +157,48 @@ export function App() {
           groups.push(groupDevice.id);
         }
       }
+    }
+    // Re-process all existing positions to add them to any new groups
+    // This ensures positions that arrived before the group was created get added to the group
+    // IMPORTANT: Don't filter by processedKeysRef - we need to add positions to NEW groups even if they were already processed for individual devices
+    if (positionsAllRef.current.length > 0) {
+      const allPositions = positionsAllRef.current;
+      const posByDevice = allPositions.reduce((acc, p) => {
+        (acc[p.device] ||= []).push(p);
+        const groupIds = deviceToGroupsMapRef.current.get(p.device);
+        if (groupIds) {
+          for (const groupId of groupIds) {
+            (acc[groupId] ||= []).push(p);
+          }
+        }
+        return acc;
+      }, {} as Record<number, NormalizedPosition[]>);
+
+      for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
+
+      const rawByDevice: Record<number, DevicePoint[]> = {};
+      for (const [deviceKey, arr] of Object.entries(posByDevice)) {
+        const deviceId = Number(deviceKey);
+        const rawArr: DevicePoint[] = arr.map((p) => {
+          const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
+          const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
+          const comp: DevicePoint = {
+            mean: [x, y],
+            cov: measurementCovFromAccuracy(p.accuracy),
+            accuracy: p.accuracy,
+            lat: p.lat,
+            lon: p.lon,
+            device: deviceId,
+            timestamp: p.timestamp,
+            anchorAgeMs: 0,
+            confidence: 0,
+          };
+          return comp;
+        });
+        rawByDevice[deviceId] = rawArr;
+      }
+
+      buildEngineSnapshotsFromByDevice(rawByDevice);
     }
   }, [groupDevices]);
 
@@ -272,8 +314,8 @@ export function App() {
       throw error;
     }
   }, [buildApiOpts]);
-   const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
-   const [wsError, setWsError] = useState<string | null>(null);
+  const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
+  const [wsError, setWsError] = useState<string | null>(null);
   const [wsApplyCounter, setWsApplyCounter] = useState(0);
 
   function applySettings() {
@@ -311,81 +353,81 @@ export function App() {
     setWsApplyCounter((c) => c + 1);
   }
 
-   function processPositions(positions: NormalizedPosition[]) {
-     if (!positions || positions.length === 0) return;
+  function processPositions(positions: NormalizedPosition[]) {
+    if (!positions || positions.length === 0) return;
 
-     const newPositions = positions.filter(p => {
-       const key = dedupeKey(p);
-       if (processedKeysRef.current.has(key)) return false;
-       processedKeysRef.current.add(key);
-       return true;
-     });
-     if (newPositions.length === 0) return;
+    const newPositions = positions.filter(p => {
+      const key = dedupeKey(p);
+      if (processedKeysRef.current.has(key)) return false;
+      processedKeysRef.current.add(key);
+      return true;
+    });
+    if (newPositions.length === 0) return;
 
-      // Group positions by device AND by any groups they belong to
-      const posByDevice = newPositions.reduce((acc, p) => {
-        // Add position to the original device
-        (acc[p.device] ||= []).push(p);
+    // Group positions by device AND by any groups they belong to
+    const posByDevice = newPositions.reduce((acc, p) => {
+      // Add position to the original device
+      (acc[p.device] ||= []).push(p);
 
-        // Also add position to any groups this device belongs to
-        const groupIds = deviceToGroupsMapRef.current.get(p.device);
-        if (groupIds) {
-          for (const groupId of groupIds) {
-            (acc[groupId] ||= []).push(p);
-          }
-        }
-
-        return acc;
-      }, {} as Record<number, NormalizedPosition[]>);
-
-      for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
-
-     const rawByDevice: Record<number, DevicePoint[]> = {};
-     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
-       const deviceId = Number(deviceKey);
-       const rawArr: DevicePoint[] = arr.map((p) => {
-         const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
-         const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
-         const comp: DevicePoint = {
-           mean: [x, y],
-           cov: measurementCovFromAccuracy(p.accuracy),
-           accuracy: p.accuracy,
-           lat: p.lat,
-           lon: p.lon,
-           device: deviceId,
-           timestamp: p.timestamp,
-           anchorAgeMs: 0,
-           confidence: 0,
-         };
-         return comp;
-       });
-       rawByDevice[deviceId] = rawArr;
-     }
-
-     if (!firstPositionRef.current && newPositions.length > 0) {
-       const first = newPositions[0]!;
-       firstPositionRef.current = { lat: first.lat, lon: first.lon };
-       if (refLat == null) setRefLat(first.lat);
-       if (refLon == null) setRefLon(first.lon);
-     }
-
-      buildEngineSnapshotsFromByDevice(rawByDevice);
-
-      // Update last seen timestamps - for original devices AND their groups
-      const latestPerDevice: Record<number, number> = {};
-      for (const p of newPositions) {
-        latestPerDevice[p.device] = Math.max(latestPerDevice[p.device] ?? 0, p.timestamp);
-        
-        // Also update lastSeen for groups this device belongs to
-        const groupIds = deviceToGroupsMapRef.current.get(p.device);
-        if (groupIds) {
-          for (const groupId of groupIds) {
-            latestPerDevice[groupId] = Math.max(latestPerDevice[groupId] ?? 0, p.timestamp);
-          }
+      // Also add position to any groups this device belongs to
+      const groupIds = deviceToGroupsMapRef.current.get(p.device);
+      if (groupIds) {
+        for (const groupId of groupIds) {
+          (acc[groupId] ||= []).push(p);
         }
       }
-      setDeviceLastSeen(prev => ({ ...prev, ...latestPerDevice }));
-   }
+
+      return acc;
+    }, {} as Record<number, NormalizedPosition[]>);
+
+    for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
+
+    const rawByDevice: Record<number, DevicePoint[]> = {};
+    for (const [deviceKey, arr] of Object.entries(posByDevice)) {
+      const deviceId = Number(deviceKey);
+      const rawArr: DevicePoint[] = arr.map((p) => {
+        const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
+        const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
+        const comp: DevicePoint = {
+          mean: [x, y],
+          cov: measurementCovFromAccuracy(p.accuracy),
+          accuracy: p.accuracy,
+          lat: p.lat,
+          lon: p.lon,
+          device: deviceId,
+          timestamp: p.timestamp,
+          anchorAgeMs: 0,
+          confidence: 0,
+        };
+        return comp;
+      });
+      rawByDevice[deviceId] = rawArr;
+    }
+
+    if (!firstPositionRef.current && newPositions.length > 0) {
+      const first = newPositions[0]!;
+      firstPositionRef.current = { lat: first.lat, lon: first.lon };
+      if (refLat == null) setRefLat(first.lat);
+      if (refLon == null) setRefLon(first.lon);
+    }
+
+    buildEngineSnapshotsFromByDevice(rawByDevice);
+
+    // Update last seen timestamps - for original devices AND their groups
+    const latestPerDevice: Record<number, number> = {};
+    for (const p of newPositions) {
+      latestPerDevice[p.device] = Math.max(latestPerDevice[p.device] ?? 0, p.timestamp);
+
+      // Also update lastSeen for groups this device belongs to
+      const groupIds = deviceToGroupsMapRef.current.get(p.device);
+      if (groupIds) {
+        for (const groupId of groupIds) {
+          latestPerDevice[groupId] = Math.max(latestPerDevice[groupId] ?? 0, p.timestamp);
+        }
+      }
+    }
+    setDeviceLastSeen(prev => ({ ...prev, ...latestPerDevice }));
+  }
 
   useEffect(() => {
     if (!traccarBaseUrl) {
@@ -438,53 +480,60 @@ export function App() {
               try {
                 const derivedBase = traccarBaseUrl ? { baseUrl: traccarBaseUrl, secure: traccarSecure } : null;
 
-                  if (derivedBase) {
-                    const devices = await fetchDevices({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } });
-                    const nameMap: Record<number, string> = {};
-                   const iconMap: Record<number, string> = {};
-                   const lastSeenMap: Record<number, number | null> = {};
-                    const groupDevicesMap = new Map<number, { id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>();
+                if (derivedBase) {
+                  const devices = await fetchDevices({ ...derivedBase, auth: traccarToken ? { type: "token", token: traccarToken } : { type: "none" } });
+                  const nameMap: Record<number, string> = {};
+                  const iconMap: Record<number, string> = {};
+                  const lastSeenMap: Record<number, number | null> = {};
+                  const groupDevicesMap = new Map<number, { id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>();
 
-                     for (const d of devices) {
-                       if (d?.id != null) {
-                         nameMap[d.id] = d.name;
-                         iconMap[d.id] = d.emoji;
-                         lastSeenMap[d.id] = d.lastSeen;
+                  for (const d of devices) {
+                    if (d?.id != null) {
+                      nameMap[d.id] = d.name;
+                      iconMap[d.id] = d.emoji;
+                      lastSeenMap[d.id] = d.lastSeen;
 
-                         // Check if this is a group device
-                          const memberDeviceIdsStr = typeof d.attributes?.["memberDeviceIds"] === "string" ? d.attributes["memberDeviceIds"] : null;
-                          if (memberDeviceIdsStr) {
-                            try {
-                              const memberDeviceIds = JSON.parse(memberDeviceIdsStr) as number[];
-                              // Color is not stored in Traccar, generate from group ID
-                              // (Will be set properly after import)
-                              groupDevicesMap.set(d.id, {
-                                id: d.id,
-                                name: d.name,
-                                emoji: d.emoji,
-                                color: "#000000", // Placeholder, will be updated
-                                memberDeviceIds: Array.isArray(memberDeviceIds) ? memberDeviceIds : [],
-                              });
-                            } catch {
-                              // Ignore parsing errors
-                            }
-                          }
-                       }
-                     }
-                     const groupDevicesArray = Array.from(groupDevicesMap.values());
-                     setDeviceNames(nameMap);
-                     setDeviceIcons(iconMap);
-                     setDeviceLastSeen(lastSeenMap);
-                     
-                      // Generate colors for groups from their IDs
-                      const { colorForDevice } = await import("@/ui/color");
-                      const groupsWithColors = groupDevicesArray.map(g => {
-                        const colorRgb = colorForDevice(g.id);
-                        const color = rgbToHex(colorRgb[0], colorRgb[1], colorRgb[2]);
-                        return { ...g, color };
-                      });
-                     setGroupDevices(groupsWithColors);
-                   for (const id of Object.keys(nameMap)) knownDevices.add(Number(id));
+                      // Check if this is a group device
+                      const memberDeviceIdsStr = typeof d.attributes?.["memberDeviceIds"] === "string" ? d.attributes["memberDeviceIds"] : null;
+                      if (memberDeviceIdsStr) {
+                        try {
+                          const memberDeviceIds = JSON.parse(memberDeviceIdsStr) as number[];
+                          // Color is not stored in Traccar, generate from group ID
+                          // (Will be set properly after import)
+                          groupDevicesMap.set(d.id, {
+                            id: d.id,
+                            name: d.name,
+                            emoji: d.emoji,
+                            color: "#000000", // Placeholder, will be updated
+                            memberDeviceIds: Array.isArray(memberDeviceIds) ? memberDeviceIds : [],
+                          });
+                        } catch {
+                          // Ignore parsing errors
+                        }
+                      }
+                    }
+                  }
+                  const groupDevicesArray = Array.from(groupDevicesMap.values());
+                  setDeviceNames(nameMap);
+                  setDeviceIcons(iconMap);
+                  setDeviceLastSeen(lastSeenMap);
+
+                  // Generate colors for groups from their IDs
+                  const { colorForDevice } = await import("@/ui/color");
+                  const groupsWithColors = groupDevicesArray.map(g => {
+                    const colorRgb = colorForDevice(g.id);
+                    const color = rgbToHex(colorRgb[0], colorRgb[1], colorRgb[2]);
+                    return { ...g, color };
+                  });
+                  setGroupDevices(groupsWithColors);
+                  // Only add individual devices (not groups) to knownDevices for fetching positions
+                  const groupIds = new Set(groupDevicesMap.keys());
+                  for (const id of Object.keys(nameMap)) {
+                    const numId = Number(id);
+                    if (!groupIds.has(numId)) {
+                      knownDevices.add(numId);
+                    }
+                  }
                 }
 
                 for (const deviceId of knownDevices) {
@@ -577,17 +626,9 @@ export function App() {
       }
     }
 
-    // Hide all member devices - they're aggregated into group devices
-    const hiddenDevices = new Set<number>();
-    for (const groupDevice of groupDevices) {
-      for (const memberId of groupDevice.memberDeviceIds) {
-        hiddenDevices.add(memberId);
-      }
-    }
-
     return allComps.filter(
       (comp) =>
-        activeDevices.has(comp.device) && !hiddenDevices.has(comp.device)
+        activeDevices.has(comp.device) // && !hiddenDevices.has(comp.device)
     );
   }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
 
@@ -638,111 +679,112 @@ export function App() {
     return fr[idx] ?? null;
   })() : null;
 
-   const deviceList = (() => {
-      // Build set of member device IDs so we can skip them
-      const memberDeviceIds = new Set<number>();
-      for (const groupDevice of groupDevices) {
-        for (const memberId of groupDevice.memberDeviceIds) {
-          memberDeviceIds.add(memberId);
+  const deviceList = (() => {
+    // Build set of member device IDs so we can skip them
+    const memberDeviceIds = new Set<number>();
+    for (const groupDevice of groupDevices) {
+      for (const memberId of groupDevice.memberDeviceIds) {
+        memberDeviceIds.add(memberId);
+      }
+    }
+
+    const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
+    const devices: Array<{
+      id: number | string;
+      isGroup: boolean;
+      name: string;
+      icon: string;
+      lastSeen: number | null;
+      hasPosition: boolean;
+      memberDeviceIds?: number[];
+    }> = [];
+
+    // Track seen IDs to prevent duplicates
+    const seenIds = new Set<number | string>();
+
+    // Create a set of group IDs to skip when processing individual devices
+    const groupIds = new Set(groupDevices.map(g => g.id));
+
+    // Add individual devices (skip if they're members of a group or if they're group devices themselves)
+    for (const [id, name] of Object.entries(deviceNames)) {
+      const numId = Number(id);
+      // TEMP: Unhide member devices for debugging
+      // if (memberDeviceIds.has(numId)) continue; // Skip members
+      if (groupIds.has(numId)) {
+        continue; // Skip if it's a group device
+      }
+      if (seenIds.has(numId)) {
+        continue; // Skip if already added
+      }
+
+      const lastSeen = deviceLastSeen[numId] ?? null;
+      if (!lastSeen || lastSeen <= cutoff) continue; // Skip old devices
+
+      devices.push({
+        id: numId,
+        isGroup: false,
+        name,
+        icon: deviceIcons[numId] || "device_unknown",
+        lastSeen,
+        hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
+      });
+      seenIds.add(numId);
+    }
+
+    // Add group devices
+    for (const groupDevice of groupDevices) {
+      // Skip if already added (defensive against duplicate group IDs)
+      if (seenIds.has(groupDevice.id)) {
+        continue;
+      }
+
+      // Calculate lastSeen as max of all member devices
+      let lastSeen: number | null = null;
+      for (const memberId of groupDevice.memberDeviceIds) {
+        const memberLastSeen = deviceLastSeen[memberId];
+        if (memberLastSeen && (!lastSeen || memberLastSeen > lastSeen)) {
+          lastSeen = memberLastSeen;
         }
       }
 
-      const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-      const devices: Array<{
-        id: number | string;
-        isGroup: boolean;
-        name: string;
-        icon: string;
-        lastSeen: number | null;
-        hasPosition: boolean;
-        memberDeviceIds?: number[];
-       }> = [];
-       
-       // Track seen IDs to prevent duplicates
-       const seenIds = new Set<number | string>();
-       
-       // Create a set of group IDs to skip when processing individual devices
-       const groupIds = new Set(groupDevices.map(g => g.id));
+      // Always show groups, even if member devices don't have recent lastSeen
+      // Use the max from member devices, or null if none have data
+      const groupLastSeen = lastSeen ?? null;
 
-       // Add individual devices (skip if they're members of a group or if they're group devices themselves)
-       for (const [id, name] of Object.entries(deviceNames)) {
-         const numId = Number(id);
-         if (memberDeviceIds.has(numId)) continue; // Skip members
-         if (groupIds.has(numId)) {
-           continue; // Skip if it's a group device
-         }
-         if (seenIds.has(numId)) {
-           continue; // Skip if already added
-         }
+      devices.push({
+        id: groupDevice.id,
+        isGroup: true,
+        name: groupDevice.name,
+        icon: groupDevice.emoji,
+        lastSeen: groupLastSeen,
+        hasPosition: (engineSnapshotsByDevice[groupDevice.id]?.length ?? 0) > 0,
+        memberDeviceIds: groupDevice.memberDeviceIds,
+      });
+      seenIds.add(groupDevice.id);
+    }
 
-        const lastSeen = deviceLastSeen[numId] ?? null;
-        if (!lastSeen || lastSeen <= cutoff) continue; // Skip old devices
-
-        devices.push({
-          id: numId,
-          isGroup: false,
-          name,
-          icon: deviceIcons[numId] || "device_unknown",
-          lastSeen,
-          hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
-        });
-        seenIds.add(numId);
-      }
-
-        // Add group devices
-        for (const groupDevice of groupDevices) {
-          // Skip if already added (defensive against duplicate group IDs)
-          if (seenIds.has(groupDevice.id)) {
-            continue;
-          }
-          
-          // Calculate lastSeen as max of all member devices
-          let lastSeen: number | null = null;
-          for (const memberId of groupDevice.memberDeviceIds) {
-            const memberLastSeen = deviceLastSeen[memberId];
-            if (memberLastSeen && (!lastSeen || memberLastSeen > lastSeen)) {
-              lastSeen = memberLastSeen;
-            }
-          }
-
-           // Always show groups, even if member devices don't have recent lastSeen
-           // Use the max from member devices, or null if none have data
-           const groupLastSeen = lastSeen ?? null;
-
-          devices.push({
-            id: groupDevice.id,
-            isGroup: true,
-            name: groupDevice.name,
-            icon: groupDevice.emoji,
-            lastSeen: groupLastSeen,
-            hasPosition: (engineSnapshotsByDevice[groupDevice.id]?.length ?? 0) > 0,
-            memberDeviceIds: groupDevice.memberDeviceIds,
-          });
-          seenIds.add(groupDevice.id);
-        }
-
-        // Sort alphabetically
-        devices.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-        return devices;
-    })();
+    // Sort alphabetically
+    devices.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+    return devices;
+  })();
 
   return (
     <div className="h-screen w-screen">
-       <DeviceListSidePanel
-         devices={deviceList}
-         selectedDeviceId={selectedDeviceId}
-          onSelectDevice={(id) => {
-            if (typeof id === "number") {
-              setSelectedDeviceId(id);
-            }
-            setIsSidePanelOpen(false);
-          }}
+      <DeviceListSidePanel
+        devices={deviceList}
+        selectedDeviceId={selectedDeviceId}
+        onSelectDevice={(id) => {
+          if (typeof id === "number") {
+            setSelectedDeviceId(id);
+          }
+          setIsSidePanelOpen(false);
+        }}
         isOpen={isSidePanelOpen}
         onToggle={() => setIsSidePanelOpen(!isSidePanelOpen)}
       />
-       <MapView
-         debugFrame={currentDebugFrame}
-         components={frame.components}
+      <MapView
+        debugFrame={currentDebugFrame}
+        components={frame.components}
         refLat={refLat}
         refLon={refLon}
         worldBounds={worldBounds}
@@ -796,13 +838,13 @@ export function App() {
                   }}>
                     Reconnect
                   </button>
-                   <button className="px-3 py-1 rounded border" onClick={() => { clientCloseRef.current?.(); setWsStatus("disconnected"); }}>
-                     Disconnect
-                   </button>
-                   <button className="px-3 py-1 rounded border" onClick={() => setShowGroupsModal(true)}>
-                     Tracker Groups
-                   </button>
-                   <label className="flex items-center gap-1 px-2">
+                  <button className="px-3 py-1 rounded border" onClick={() => { clientCloseRef.current?.(); setWsStatus("disconnected"); }}>
+                    Disconnect
+                  </button>
+                  <button className="px-3 py-1 rounded border" onClick={() => setShowGroupsModal(true)}>
+                    Tracker Groups
+                  </button>
+                  <label className="flex items-center gap-1 px-2">
                     <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
                     <span className="text-xs">Debug</span>
                   </label>
@@ -822,38 +864,38 @@ export function App() {
 
                 // debug frames for this device (if debug enabled)
                 const engineForDevice = enginesRef.current[selectedDeviceId];
-                const frames = debugMode && engineForDevice 
+                const frames = debugMode && engineForDevice
                   ? [...engineForDevice.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp)
                   : [];
                 const frameIndex = Math.max(0, Math.min(frames.length - 1, debugFrameIndex));
                 const chosenFrame = frames.length > 0 ? frames[frameIndex] : null;
 
-                // Check if this device is part of a group
-                const group = groupDevices.find((g) => g.memberDeviceIds.includes(chosen.device));
+                // Check if this device IS a group (not if it belongs to a group)
+                const group = groupDevices.find((g) => g.id === chosen.device);
                 const contributors = group ? group.memberDeviceIds.map((id) => deviceNames[id] ?? `Device ${id}`) : [];
                 const mostRecentSourceId = group ? getMostRecentGroupDevice(group.memberDeviceIds) : null;
                 const mostRecentSourceName = mostRecentSourceId ? (deviceNames[mostRecentSourceId] ?? `Device ${mostRecentSourceId}`) : null;
 
                 return (
-                   <div className="p-2 rounded border bg-white/90 text-foreground">
-                      <div className="flex items-start">
-                        <div className="flex-1">
-                          {(() => {
-                            const displayName = group ? group.name : (deviceNames[chosen.device] ?? chosen.device);
-                            return <div className="text-sm font-medium">{displayName}</div>;
-                          })()}
-                          {contributors.length > 0 && (
-                            <div className="text-xs text-foreground/60 mt-1">
-                              <span className="font-medium">Sources:</span> {contributors.join(", ")}
-                              {mostRecentSourceName && <div className="text-foreground/50 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
-                            </div>
-                          )}
-                          <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
-                          <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
-                        </div>
-                        <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
+                  <div className="p-2 rounded border bg-white/90 text-foreground">
+                    <div className="flex items-start">
+                      <div className="flex-1">
+                        {(() => {
+                          const displayName = group ? group.name : (deviceNames[chosen.device] ?? chosen.device);
+                          return <div className="text-sm font-medium">{displayName}</div>;
+                        })()}
+                        {group && contributors.length > 0 && (
+                          <div className="text-xs text-foreground/60 mt-1">
+                            <span className="font-medium">Sources:</span> {contributors.join(", ")}
+                            {mostRecentSourceName && <div className="text-foreground/50 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
+                          </div>
+                        )}
+                        <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
+                        <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
                       </div>
-                      <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
+                      <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
+                    </div>
+                    <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
 
                     {debugMode ? (
                       <div className="mt-2 text-xs">
@@ -888,22 +930,22 @@ export function App() {
           </div>
         }
       />
-        <TrackerGroupsModal
-         isOpen={showGroupsModal}
-         onClose={() => setShowGroupsModal(false)}
-          groupDevices={groupDevices}
-           allDevices={Object.entries(deviceNames)
-             .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
-             .map(([id, name]) => ({
-               id: Number(id),
-               name,
-             }))}
-          onCreateGroup={handleCreateGroup}
-         onDeleteGroup={handleDeleteGroup}
-         onAddDeviceToGroup={handleAddDeviceToGroup}
-         onRemoveDeviceFromGroup={handleRemoveDeviceFromGroup}
-         onUpdateGroup={handleUpdateGroup}
-       />
+      <TrackerGroupsModal
+        isOpen={showGroupsModal}
+        onClose={() => setShowGroupsModal(false)}
+        groupDevices={groupDevices}
+        allDevices={Object.entries(deviceNames)
+          .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
+          .map(([id, name]) => ({
+            id: Number(id),
+            name,
+          }))}
+        onCreateGroup={handleCreateGroup}
+        onDeleteGroup={handleDeleteGroup}
+        onAddDeviceToGroup={handleAddDeviceToGroup}
+        onRemoveDeviceFromGroup={handleRemoveDeviceFromGroup}
+        onUpdateGroup={handleUpdateGroup}
+      />
     </div>
   );
 }
