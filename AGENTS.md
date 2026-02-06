@@ -18,3 +18,7 @@
 - Never read `.env` files directly
 - The user will provide API keys and secrets
 - If you need to use an API key, let the user set it themselves or provide instructions
+
+## Git
+
+- NEVER commit changes without explicit user permission
