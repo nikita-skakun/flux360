@@ -3,7 +3,7 @@ import { degreesToMeters } from "@/util/geo";
 import type { Anchor } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import type { EngineSnapshot } from "@/engine/engine";
-import { buildEngineSnapshotsFromByDevice as buildEngineSnapshotsFromByDeviceUtil, dedupeKey, measurementCovFromAccuracy } from "@/util/appUtils";
+import { buildEngineSnapshotsFromByDevice as buildEngineSnapshotsFromByDeviceUtil, dedupeKey, measurementVarianceFromAccuracy } from "@/util/appUtils";
 import type { NormalizedPosition } from "@/api/positions";
 import type { DevicePoint } from "@/ui/types";
 import type { MotionProfileName } from "@/engine/motionDetector";
@@ -111,7 +111,7 @@ export function usePositionProcessing({
         const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
         const comp: DevicePoint = {
           mean: [x, y],
-          cov: measurementCovFromAccuracy(p.accuracy),
+          variance: measurementVarianceFromAccuracy(p.accuracy),
           accuracy: p.accuracy,
           lat: p.lat,
           lon: p.lon,

@@ -7,7 +7,7 @@ const makePoint = (device: number, timestamp: number, lat: number, lon: number) 
   lat,
   lon,
   mean: [lat, lon],
-  cov: [1, 0, 1],
+  variance: 1,
   accuracy: 10,
   anchorAgeMs: 0,
 }) as DevicePoint;

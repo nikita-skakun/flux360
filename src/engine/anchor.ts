@@ -1,26 +1,25 @@
-import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
-import { addCov, invertCov, mulCovVec, mulMatMat, symmetric } from "./cov_utils";
+import type { DevicePoint, Vec2 } from "@/ui/types";
 
 export const CONFIDENCE_HIGH_THRESHOLD = 0.8;
 export const CONFIDENCE_MEDIUM_THRESHOLD = 0.4;
 
 export class Anchor {
   mean: Vec2;
-  cov: Cov2;
+  variance: number;
   startTimestamp: number;
   endTimestamp: number | null;
   confidence: number;
   lastUpdateTimestamp: number;
-  constructor(mean: Vec2, cov: Cov2, startTimestamp: number, confidence: number = 0.5, lastUpdateTimestamp?: number) {
+  constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.5, lastUpdateTimestamp?: number) {
     this.mean = mean;
-    this.cov = symmetric(cov);
+    this.variance = variance;
     this.startTimestamp = startTimestamp;
     this.endTimestamp = null;
     this.confidence = confidence;
     this.lastUpdateTimestamp = lastUpdateTimestamp ?? startTimestamp;
   }
   clone(): Anchor {
-    const cloned = new Anchor([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
+    const cloned = new Anchor([this.mean[0], this.mean[1]], this.variance, this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
     cloned.endTimestamp = this.endTimestamp;
     return cloned;
   }
@@ -35,11 +34,11 @@ export class Anchor {
     return "low";
   }
   mahalanobis2(m: DevicePoint): number {
-    const r: Vec2 = [m.mean[0] - this.mean[0], m.mean[1] - this.mean[1]];
-    const S = addCov(this.cov, m.cov);
-    const Si = invertCov(S);
-    const Si_r = mulCovVec(Si, r);
-    return r[0] * Si_r[0] + r[1] * Si_r[1];
+    const dx = m.mean[0] - this.mean[0];
+    const dy = m.mean[1] - this.mean[1];
+    const distanceSq = dx * dx + dy * dy;
+    const totalVariance = Math.max(this.variance + m.variance, 1e-6); // prevent division by zero
+    return distanceSq / totalVariance;
   }
   kalmanUpdate(m: DevicePoint, gainRate: number): void {
     // Compute gain based on accuracy
@@ -50,26 +49,17 @@ export class Anchor {
     this.confidence = 1 - (1 - this.confidence) * Math.exp(-gain);
     this.confidence = Math.max(0, Math.min(1, this.confidence));
 
-    // Kalman filter update
-    const P = this.cov;
-    const R = m.cov;
-    const S = addCov(P, R);
-    const Si = invertCov(S);
+    // Scalar Kalman filter update
+    const measurementVariance = m.variance;
+    const totalVariance = this.variance + measurementVariance;
+    const kalmanGain = this.variance / totalVariance;
 
-    const K = mulMatMat(P, Si);
+    const residualX = m.mean[0] - this.mean[0];
+    const residualY = m.mean[1] - this.mean[1];
+    this.mean = [this.mean[0] + kalmanGain * residualX, this.mean[1] + kalmanGain * residualY];
 
-    const r: Vec2 = [m.mean[0] - this.mean[0], m.mean[1] - this.mean[1]];
-    const delta = mulCovVec(K, r);
-    this.mean = [this.mean[0] + delta[0], this.mean[1] + delta[1]];
-
-    const IminusK = [1 - K[0], -K[1], 1 - K[2]] as Cov2;
-
-    const APA = mulMatMat(mulMatMat(IminusK, P), IminusK);
-    const K_R = mulMatMat(K, R);
-    const KRKT = mulMatMat(K_R, K);
-
-    const newP = addCov(APA, KRKT);
-    this.cov = symmetric(newP);
+    const processNoise = 0.1; // small constant for model uncertainty
+    this.variance = (1 - kalmanGain) * this.variance + processNoise;
     this.lastUpdateTimestamp = m.timestamp;
   }
 }

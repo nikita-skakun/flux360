@@ -7,7 +7,7 @@ import type { MotionProfileName } from '@/engine/motionDetector';
 import { Engine } from '@/engine/engine';
 import type { Anchor } from '@/engine/anchor';
 import { degreesToMeters } from '@/util/geo';
-import { measurementCovFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
+import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
 
 export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
@@ -559,7 +559,7 @@ export const useStore = create<Store>()(
             const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
             const comp: DevicePoint = {
               mean: [x, y],
-              cov: measurementCovFromAccuracy(p.accuracy),
+              variance: measurementVarianceFromAccuracy(p.accuracy),
               accuracy: p.accuracy,
               lat: p.lat,
               lon: p.lon,

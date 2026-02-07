@@ -1,5 +1,4 @@
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { Cov2 } from "@/ui/types";
 import type { DevicePoint } from "@/ui/types";
 
 import { colorForDevice, rgbaString, type Color } from "./color";
@@ -29,7 +28,7 @@ export type CanvasViewProps = {
 
 type DebugAnchor = {
   mean: [number, number];
-  cov: [number, number, number];
+  variance: number;
   type: "active" | "candidate" | "closed" | "frame";
   startTimestamp: number;
   endTimestamp: number | null;
@@ -38,9 +37,9 @@ type DebugAnchor = {
 };
 
 type DebugFrame = {
-  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; cov: [number, number, number]; };
-  before: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
-  after: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; variance: number; };
+  before: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  after: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   timestamp: number;
 };
 
@@ -98,12 +97,12 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         if (!best || hitDist < best.dist) best = { cluster: cl, dist: hitDist, radius: usedRadius };
       }
       if (!best) return null;
-      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint));
+      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint));
       if (items.length === 0) return null;
       return { items, x: best.cluster.x, y: best.cluster.y };
     },
     getClusters: () => {
-      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], cov: [0, 0, 0], lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
+      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
     },
     hitTestAnchor: (px: number, py: number) => {
       if (!debugAnchorsRef.current.length) return null;
@@ -143,8 +142,8 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     let localZoom = zoom ?? 1;
     const processed = components.map(c => {
       const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
-      const cov: Cov2 = Array.isArray(c.cov) && c.cov.length === 3 ? (c.cov) : [100, 0, 100];
-      return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, cov, radiusMeters: Math.sqrt(Math.max(1e-6, Math.max((cov?.[0] ?? 0), (cov?.[2] ?? 0)))), color: colorForDevice(c.device) };
+      const variance = typeof c.variance === 'number' ? c.variance : 100;
+      return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: colorForDevice(c.device) };
     });
 
     let anchorX = refMeters.x;
@@ -337,7 +336,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         for (const anchor of debugAnchors) {
           const ax = width / 2 + (anchor.mean[0] - anchorX) * localZoom;
           const ay = height / 2 - (anchor.mean[1] - anchorY) * localZoom;
-          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, Math.max(anchor.cov[0], anchor.cov[2])));
+          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, anchor.variance));
           const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
           debugAnchorsRef.current.push({ anchor, x: ax, y: ay, r: anchorR });
           const stroke = anchor.type === "active" ? 'rgba(0,120,255,0.9)'
@@ -352,12 +351,12 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           ctx.strokeStyle = stroke;
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.arc(ax, ay, anchorR, 0, Math.PI * 2);
           ctx.stroke();
           ctx.globalAlpha = 0.12;
           ctx.fillStyle = fill;
           ctx.beginPath();
-          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.arc(ax, ay, anchorR, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         }
@@ -377,13 +376,13 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           const my = height / 2 - (meas[1] - anchorY) * localZoom;
 
           // approximate anchor ellipse using diagonal variances
-          const anchorCov = df.after?.cov ?? df.before?.cov ?? [100, 0, 100];
-          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, Math.max(anchorCov[0], anchorCov[2])));
+          const anchorVariance = df.after?.variance ?? df.before?.variance ?? 100;
+          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, anchorVariance));
           const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
           debugAnchorsRef.current.push({
             anchor: {
               mean: [mean[0], mean[1]],
-              cov: [anchorCov[0], anchorCov[1], anchorCov[2]],
+              variance: anchorVariance,
               type: "frame",
               startTimestamp: df.after?.startTimestamp ?? df.before?.startTimestamp ?? df.timestamp,
               endTimestamp: df.after ? null : df.before?.startTimestamp ?? null,
@@ -421,17 +420,17 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           ctx.fill();
           ctx.restore();
 
-          // anchor ellipse (simple circle-ish representation)
+          // anchor circle
           ctx.save();
           ctx.strokeStyle = 'rgba(0,0,200,0.95)';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.arc(ax, ay, anchorR, 0, Math.PI * 2);
           ctx.stroke();
           ctx.globalAlpha = 0.12;
           ctx.fillStyle = 'rgba(0,0,200,0.12)';
           ctx.beginPath();
-          ctx.ellipse(ax, ay, anchorR, anchorR * 0.75, 0, 0, Math.PI * 2);
+          ctx.arc(ax, ay, anchorR, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         } catch {

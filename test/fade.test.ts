@@ -10,7 +10,7 @@ test("fade", async () => {
     return {
       device: 0,
       mean: [x, y],
-      cov: [accuracy * accuracy, 0, accuracy * accuracy],
+      variance: accuracy * accuracy,
       timestamp: t,
       accuracy,
       lat: 0,
@@ -45,7 +45,7 @@ test("fade", async () => {
       if (!s) continue;
       const comp = s.activeAnchor;
       if (!comp) continue;
-      console.log(`Snapshot index=${idx}, timestamp=${s.timestamp}, mean=${comp.mean.map(v => v.toFixed(2)).join(",")}, cov=${comp.cov.map(v => v.toFixed(2)).join(",")}`);
+      console.log(`Snapshot index=${idx}, timestamp=${s.timestamp}, mean=${comp.mean.map(v => v.toFixed(2)).join(",")}, variance=${comp.variance.toFixed(2)}`);
     }
   }
 

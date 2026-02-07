@@ -17,7 +17,7 @@ type Props = {
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
-  debugAnchors?: Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
+  debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
 };
 
 const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, debugFrame, debugAnchors }) => {

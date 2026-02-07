@@ -9,16 +9,15 @@ export function dedupeKey(p: { device: number; timestamp: number; lat: number; l
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
 }
 
-export function measurementCovFromAccuracy(accuracyMeters: number) {
+export function measurementVarianceFromAccuracy(accuracyMeters: number) {
   const v = accuracyMeters * accuracyMeters;
-  return [v, 0, v] as [number, number, number];
+  return v;
 }
 
-export function createDevicePoint(mean: [number, number], cov: [number, number, number], timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
-  const diagMax = Math.max(cov[0], cov[2]);
-  const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, diagMax))));
+export function createDevicePoint(mean: [number, number], variance: number, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
+  const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, variance))));
   const { lat: compLat, lon: compLon } = metersToDegrees(mean[0], mean[1], refLat ?? 0, refLon ?? 0);
-  return { mean, cov, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs, confidence };
+  return { mean, variance, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs, confidence };
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -72,7 +71,7 @@ export function buildEngineSnapshotsFromByDevice(
         const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
         const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
 
-        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.cov, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
+        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
         currentSnapshots[dId] = [point];
       } else {
         currentSnapshots[Number(deviceId)] = [];

@@ -143,7 +143,7 @@ function DeviceOverlayComponent({
               {chosenFrame.motionCoherent != null ? <div>Coherent: {chosenFrame.motionCoherent ? 'yes' : 'no'}</div> : null}
               {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
               <div>Outliers: {chosenFrame.outlierCount}</div>
-              {chosenFrame.anchorCovarianceScale != null ? <div>Anchor cov inflate: ×{chosenFrame.anchorCovarianceScale.toFixed(2)}</div> : null}
+              {chosenFrame.anchorVarianceScale != null ? <div>Anchor var inflate: ×{chosenFrame.anchorVarianceScale.toFixed(2)}</div> : null}
               <div>Confidence: {chosenFrame.before ? chosenFrame.before.confidence.toFixed(2) : '—'} → {chosenFrame.after ? chosenFrame.after.confidence.toFixed(2) : '—'}</div>
               <div>Decision: <strong>{chosenFrame.decision}</strong></div>
               {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}

@@ -3,10 +3,10 @@ import { Engine } from "../src/engine/engine";
 import { test, expect } from "bun:test";
 import type { DevicePoint } from "../src/ui/types";
 
-const makePoint = (mean: [number, number], cov: [number, number, number], timestamp: number, accuracy: number = 10): DevicePoint => ({
+const makePoint = (mean: [number, number], variance: number, timestamp: number, accuracy: number = 10): DevicePoint => ({
   device: 0,
   mean,
-  cov,
+  variance,
   timestamp,
   accuracy,
   lat: 0,
@@ -18,14 +18,14 @@ const makePoint = (mean: [number, number], cov: [number, number, number], timest
 test("confidence increases with consistent measurements and saturates", () => {
   const decayRate = 0.001;
   const gainRate = 2.0;
-  const anchor = new Anchor([0, 0], [1, 0, 1], 0);
+  const anchor = new Anchor([0, 0], 1, 0);
   const initialConf = anchor.getConfidence(0, decayRate);
   expect(initialConf).toBeCloseTo(0.5, 2);
 
   let prevConf = initialConf;
   // Add many consistent measurements
   for (let i = 1; i <= 10; i++) {
-    const m = makePoint([0, 0], [1, 0, 1], i * 1000, 1);
+    const m = makePoint([0, 0], 1, i * 1000, 1);
     anchor.kalmanUpdate(m, gainRate);
     const conf = anchor.getConfidence(i * 1000, decayRate);
     expect(conf).toBeGreaterThanOrEqual(prevConf);
@@ -41,9 +41,9 @@ test("confidence increases with consistent measurements and saturates", () => {
 test("confidence decays under silence", () => {
   const decayRate = 0.01; // faster decay for test
   const gainRate = 2.0;
-  const anchor = new Anchor([0, 0], [1, 0, 1], 0);
+  const anchor = new Anchor([0, 0], 1, 0);
   // Update once
-  const m = makePoint([0, 0], [1, 0, 1], 1000, 1);
+  const m = makePoint([0, 0], 1, 1000, 1);
   anchor.kalmanUpdate(m, gainRate);
   const confAfterUpdate = anchor.getConfidence(1000, decayRate);
   expect(confAfterUpdate).toBeGreaterThan(0.5);
@@ -56,18 +56,18 @@ test("confidence decays under silence", () => {
 test("low-accuracy measurements increase confidence slowly", () => {
   const decayRate = 0.001;
   const gainRate = 2.0;
-  const anchor = new Anchor([0, 0], [1, 0, 1], 0);
+  const anchor = new Anchor([0, 0], 1, 0);
 
   // High accuracy measurement
-  const highAccM = makePoint([0, 0], [1, 0, 1], 1000, 1); // accuracy=1
+  const highAccM = makePoint([0, 0], 1, 1000, 1); // accuracy=1
   anchor.kalmanUpdate(highAccM, gainRate);
   const confHigh = anchor.getConfidence(1000, decayRate);
 
   // Reset anchor
-  const anchor2 = new Anchor([0, 0], [1, 0, 1], 0);
+  const anchor2 = new Anchor([0, 0], 1, 0);
 
   // Low accuracy measurement
-  const lowAccM = makePoint([0, 0], [100, 0, 100], 1000, 100); // accuracy=100
+  const lowAccM = makePoint([0, 0], 10000, 1000, 100); // accuracy=100
   anchor2.kalmanUpdate(lowAccM, gainRate);
   const confLow = anchor2.getConfidence(1000, decayRate);
 
@@ -77,11 +77,11 @@ test("low-accuracy measurements increase confidence slowly", () => {
 test("single outliers do not spike confidence", () => {
   const decayRate = 0.001;
   const gainRate = 0.5;
-  const anchor = new Anchor([0, 0], [1, 0, 1], 0);
+  const anchor = new Anchor([0, 0], 1, 0);
   const initialConf = anchor.getConfidence(0, decayRate);
 
   // Outlier measurement far away
-  const outlierM = makePoint([100, 100], [1, 0, 1], 1000, 1);
+  const outlierM = makePoint([100, 100], 1, 1000, 1);
   // Even though outlier, kalmanUpdate is called, confidence should increase modestly
   anchor.kalmanUpdate(outlierM, gainRate);
   const confAfter = anchor.getConfidence(1000, decayRate);
@@ -91,7 +91,7 @@ test("single outliers do not spike confidence", () => {
 
 test("anchor timestamps: active anchor has endTimestamp null", async () => {
   const engine = new Engine();
-  const m = makePoint([0, 0], [1, 0, 1], 1000);
+  const m = makePoint([0, 0], 1, 1000);
   engine.processMeasurements([m]);
   expect(engine.activeAnchor!.endTimestamp).toBeNull();
 });
@@ -99,11 +99,11 @@ test("anchor timestamps: active anchor has endTimestamp null", async () => {
 test("anchor timestamps: closed anchors have endTimestamp set", async () => {
   const engine = new Engine();
   const ms = [
-    makePoint([0, 0], [1, 0, 1], 1000),
-    makePoint([0, 0], [1, 0, 1], 2000),
-    makePoint([10, 10], [1, 0, 1], 3000), // outlier to create candidate
-    makePoint([10, 10], [1, 0, 1], 4000), // update candidate
-    makePoint([10, 10], [1, 0, 1], 5000), // promote
+    makePoint([0, 0], 1, 1000),
+    makePoint([0, 0], 1, 2000),
+    makePoint([10, 10], 1, 3000), // outlier to create candidate
+    makePoint([10, 10], 1, 4000), // update candidate
+    makePoint([10, 10], 1, 5000), // promote
   ];
   engine.processMeasurements(ms);
   expect(engine.closedAnchors.length).toBe(1);

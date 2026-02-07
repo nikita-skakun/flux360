@@ -187,12 +187,12 @@ export function App() {
 
   const currentDebugAnchors = (selectedDeviceId != null && debugMode && enginesRef.get(selectedDeviceId)) ? (() => {
     const eng = enginesRef.get(selectedDeviceId);
-    if (!eng) return [] as Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
-    const anchors: Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }> = [];
-    if (eng.activeAnchor) anchors.push({ mean: [eng.activeAnchor.mean[0], eng.activeAnchor.mean[1]], cov: [eng.activeAnchor.cov[0], eng.activeAnchor.cov[1], eng.activeAnchor.cov[2]], type: "active", startTimestamp: eng.activeAnchor.startTimestamp, endTimestamp: eng.activeAnchor.endTimestamp, confidence: eng.activeAnchor.confidence, lastUpdateTimestamp: eng.activeAnchor.lastUpdateTimestamp });
-    if (eng.candidateAnchor) anchors.push({ mean: [eng.candidateAnchor.mean[0], eng.candidateAnchor.mean[1]], cov: [eng.candidateAnchor.cov[0], eng.candidateAnchor.cov[1], eng.candidateAnchor.cov[2]], type: "candidate", startTimestamp: eng.candidateAnchor.startTimestamp, endTimestamp: eng.candidateAnchor.endTimestamp, confidence: eng.candidateAnchor.confidence, lastUpdateTimestamp: eng.candidateAnchor.lastUpdateTimestamp });
+    if (!eng) return [] as Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
+    const anchors: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }> = [];
+    if (eng.activeAnchor) anchors.push({ mean: [eng.activeAnchor.mean[0], eng.activeAnchor.mean[1]], variance: eng.activeAnchor.variance, type: "active", startTimestamp: eng.activeAnchor.startTimestamp, endTimestamp: eng.activeAnchor.endTimestamp, confidence: eng.activeAnchor.confidence, lastUpdateTimestamp: eng.activeAnchor.lastUpdateTimestamp });
+    if (eng.candidateAnchor) anchors.push({ mean: [eng.candidateAnchor.mean[0], eng.candidateAnchor.mean[1]], variance: eng.candidateAnchor.variance, type: "candidate", startTimestamp: eng.candidateAnchor.startTimestamp, endTimestamp: eng.candidateAnchor.endTimestamp, confidence: eng.candidateAnchor.confidence, lastUpdateTimestamp: eng.candidateAnchor.lastUpdateTimestamp });
     for (const anchor of eng.closedAnchors) {
-      anchors.push({ mean: [anchor.mean[0], anchor.mean[1]], cov: [anchor.cov[0], anchor.cov[1], anchor.cov[2]], type: "closed", startTimestamp: anchor.startTimestamp, endTimestamp: anchor.endTimestamp, confidence: anchor.confidence, lastUpdateTimestamp: anchor.lastUpdateTimestamp });
+      anchors.push({ mean: [anchor.mean[0], anchor.mean[1]], variance: anchor.variance, type: "closed", startTimestamp: anchor.startTimestamp, endTimestamp: anchor.endTimestamp, confidence: anchor.confidence, lastUpdateTimestamp: anchor.lastUpdateTimestamp });
     }
     return anchors;
   })() : [];

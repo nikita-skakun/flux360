@@ -10,7 +10,7 @@ test("false_pos", async () => {
     return {
       device: 0,
       mean: [x, y],
-      cov: [accuracy * accuracy, 0, accuracy * accuracy],
+      variance: accuracy * accuracy,
       timestamp: t,
       accuracy,
       lat: 0,
@@ -41,14 +41,14 @@ test("false_pos", async () => {
 
   const snaps = engine.processMeasurements(measurements);
 
-  if (VERBOSE) console.log("index,timestamp,meanX,meanY,covXX,covXY,covYY,distToOutlier");
+  if (VERBOSE) console.log("index,timestamp,meanX,meanY,variance,distToOutlier");
   for (let i = 0; i < snaps.length; i++) {
     const s = snaps[i];
     if (!s) continue;
     const comp = s.activeAnchor;
     if (!comp) continue;
     const distToOutlier = Math.hypot(comp.mean[0] - 18, comp.mean[1] - (-3));
-    if (VERBOSE) console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.cov[0].toFixed(2)},${comp.cov[1].toFixed(2)},${comp.cov[2].toFixed(12)},${distToOutlier.toFixed(2)}`);
+    if (VERBOSE) console.log(`${i},${s.timestamp},${comp.mean[0].toFixed(2)},${comp.mean[1].toFixed(2)},${comp.variance.toFixed(2)},${distToOutlier.toFixed(2)}`);
   }
 
   const firstMoved = snaps.findIndex((s) => {

@@ -1,5 +1,4 @@
 export type Vec2 = [number, number];
-export type Cov2 = [number, number, number];
 
 export type DevicePoint = {
   device: number;
@@ -7,7 +6,7 @@ export type DevicePoint = {
   lat: number;
   lon: number;
   mean: Vec2;
-  cov: Cov2;
+  variance: number;
   timestamp: number;
   accuracy: number;
   anchorAgeMs: number;

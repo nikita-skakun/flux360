@@ -10,7 +10,7 @@ test("stationary_transition", async () => {
     return {
       device: 0,
       mean: [x, y],
-      cov: [accuracy * accuracy, 0, accuracy * accuracy],
+      variance: accuracy * accuracy,
       timestamp: t,
       accuracy,
       lat: 0,

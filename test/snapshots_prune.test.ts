@@ -6,9 +6,9 @@ test("pruneSnapshots keeps only the last-day entries", () => {
   const cutoff = now - oneDay;
 
   const points = [
-    { timestamp: cutoff - 1000, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
-    { timestamp: cutoff + 1000, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
-    { timestamp: now, lat: 0, lon: 0, device: 1, mean: [0,0], cov: [1,0,1], accuracy: 10 },
+    { timestamp: cutoff - 1000, lat: 0, lon: 0, device: 1, mean: [0,0], variance: 1, accuracy: 10 },
+    { timestamp: cutoff + 1000, lat: 0, lon: 0, device: 1, mean: [0,0], variance: 1, accuracy: 10 },
+    { timestamp: now, lat: 0, lon: 0, device: 1, mean: [0,0], variance: 1, accuracy: 10 },
   ];
 
   const pruned = points.filter((p) => p.timestamp >= cutoff).sort((a, b) => a.timestamp - b.timestamp);

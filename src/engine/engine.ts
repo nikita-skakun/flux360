@@ -1,6 +1,6 @@
 import type { DevicePoint } from "@/ui/types";
 import { Anchor } from "./anchor";
-import { MOTION_PROFILES, scaleCov, distanceMeters, directionFromAnchor, computeCoherence } from "./motionDetector";
+import { MOTION_PROFILES, distanceMeters, directionFromAnchor, computeCoherence } from "./motionDetector";
 import type { MotionProfileName, MotionProfileConfig, OutlierSample } from "./motionDetector";
 
 export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number | null; activeConfidence: number };
@@ -16,7 +16,6 @@ export type DebugFrame = {
   motionActiveBefore: boolean;
   motionActive: boolean;
   motionStartTimestamp: number | null;
-
   outlierCount: number;
   motionScore: number | null;
   motionScoreSum: number | null;
@@ -24,10 +23,10 @@ export type DebugFrame = {
   motionDistance: number | null;
   motionTimeFactor: number | null;
   motionSinglePointOverride: boolean | null;
-  anchorCovarianceScale: number | null;
-  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; cov: [number, number, number]; };
-  before: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
-  after: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  anchorVarianceScale: number | null;
+  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; variance: number; };
+  before: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  after: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
 };
@@ -128,7 +127,7 @@ export class Engine {
       let motionDistance: number | null = null;
       let motionTimeFactor: number | null = null;
       let motionSinglePointOverride: boolean | null = null;
-      let anchorCovarianceScale: number | null = null;
+      let anchorVarianceScale: number | null = null;
       // capture state before
       const beforeAnchor = this.activeAnchor ? this.activeAnchor.clone() : null;
       let mahalanobis2: number | null = null;
@@ -136,7 +135,7 @@ export class Engine {
 
       if (this.activeAnchor === null) {
         // Initialize with the first measurement
-        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
+        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp);
 
         this.motionActive = false;
         this.motionStartTimestamp = null;
@@ -161,11 +160,11 @@ export class Engine {
             const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
             const distance = distanceMeters(this.activeAnchor.mean, m.mean);
             if (distance < m.accuracy * profile.minDistanceAccuracyRatio) {
-              const weakCov = scaleCov(m.cov, profile.weakCovInflation);
-              const weakPoint: DevicePoint = { ...m, cov: weakCov };
-              this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE * profile.weakUpdateGain);
-              this.activeAnchor.cov = scaleCov(this.activeAnchor.cov, profile.anchorCovInflationOnNoise);
-              anchorCovarianceScale = profile.anchorCovInflationOnNoise;
+              const weakVariance = m.variance * profile.weakVarianceInflation;
+              const weakPoint: DevicePoint = { ...m, variance: weakVariance };
+              this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
+              this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
+              anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
               decision = 'noise-weak-update';
             } else {
               const timeFactor = Math.log1p(dtMinutes + 1);
@@ -192,16 +191,16 @@ export class Engine {
               if (singlePointTriggers || bufferTriggers) {
                 this.motionActive = true;
                 this.motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
-                this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, this.motionStartTimestamp);
+                this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, this.motionStartTimestamp);
                 this.settlePoints = [];
                 this.outliers = [];
                 decision = 'motion-start';
               } else {
-                const weakCov = scaleCov(m.cov, profile.weakCovInflation);
-                const weakPoint: DevicePoint = { ...m, cov: weakCov };
-                this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE * profile.weakUpdateGain);
-                this.activeAnchor.cov = scaleCov(this.activeAnchor.cov, profile.anchorCovInflationOnNoise);
-                anchorCovarianceScale = profile.anchorCovInflationOnNoise;
+                const weakVariance = m.variance * profile.weakVarianceInflation;
+                const weakPoint: DevicePoint = { ...m, variance: weakVariance };
+                this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
+                this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
+                anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
                 decision = 'noise-weak-update';
               }
             }
@@ -217,7 +216,7 @@ export class Engine {
 
             decision = 'motion-end';
           } else {
-            this.candidateAnchor ??= new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
+            this.candidateAnchor ??= new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp);
             const dist2Candidate = this.candidateAnchor.mahalanobis2(m);
             const dist2ActiveNow = this.activeAnchor.mahalanobis2(m);
             if (dist2Candidate < STATIONARY_MAHALANOBIS2_THRESHOLD) {
@@ -282,10 +281,10 @@ export class Engine {
         motionDistance,
         motionTimeFactor,
         motionSinglePointOverride,
-        anchorCovarianceScale,
-        measurement: { lat: m.lat, lon: m.lon, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], cov: [m.cov[0], m.cov[1], m.cov[2]] },
-        before: beforeAnchor ? { mean: [beforeAnchor.mean[0], beforeAnchor.mean[1]], cov: [beforeAnchor.cov[0], beforeAnchor.cov[1], beforeAnchor.cov[2]], confidence: beforeAnchor.confidence, startTimestamp: beforeAnchor.startTimestamp, lastUpdateTimestamp: beforeAnchor.lastUpdateTimestamp } : null,
-        after: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], cov: [afterAnchor.cov[0], afterAnchor.cov[1], afterAnchor.cov[2]], confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
+        anchorVarianceScale,
+        measurement: { lat: m.lat, lon: m.lon, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], variance: m.variance },
+        before: beforeAnchor ? { mean: [beforeAnchor.mean[0], beforeAnchor.mean[1]], variance: beforeAnchor.variance, confidence: beforeAnchor.confidence, startTimestamp: beforeAnchor.startTimestamp, lastUpdateTimestamp: beforeAnchor.lastUpdateTimestamp } : null,
+        after: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], variance: afterAnchor.variance, confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
         mahalanobis2,
         decision,
       });

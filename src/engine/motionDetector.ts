@@ -5,7 +5,7 @@
  * with coherence analysis to handle noisy GPS data.
  */
 
-import type { Cov2, DevicePoint, Vec2 } from "@/ui/types";
+import type { DevicePoint, Vec2 } from "@/ui/types";
 
 export type MotionProfileName = "person" | "car";
 
@@ -25,8 +25,8 @@ export type MotionProfileConfig = {
   settleWindowSize: number; // Window size for motion settling
   settleMaxSpreadMeters: number; // Max spread in meters for settling
   weakUpdateGain: number; // Gain for weak updates
-  weakCovInflation: number; // Covariance inflation for weak updates
-  anchorCovInflationOnNoise: number; // Covariance inflation on noise detection
+  weakVarianceInflation: number; // Variance inflation for weak updates
+  anchorVarianceInflationOnNoise: number; // Variance inflation on noise detection
 };
 
 /**
@@ -47,8 +47,8 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     settleWindowSize: 1,
     settleMaxSpreadMeters: 10,
     weakUpdateGain: 0.25,
-    weakCovInflation: 4,
-    anchorCovInflationOnNoise: 1.15,
+    weakVarianceInflation: 4,
+    anchorVarianceInflationOnNoise: 1.15,
   },
   car: {
     motionScoreThreshold: 4.0,
@@ -62,8 +62,8 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     settleWindowSize: 5,
     settleMaxSpreadMeters: 20,
     weakUpdateGain: 0.2,
-    weakCovInflation: 6,
-    anchorCovInflationOnNoise: 1.35,
+    weakVarianceInflation: 6,
+    anchorVarianceInflationOnNoise: 1.35,
   },
 };
 
@@ -75,13 +75,6 @@ export type OutlierSample = {
   score: number;
   direction: Vec2 | null;
 };
-
-/**
- * Scale covariance matrix by a factor.
- */
-export function scaleCov(cov: Cov2, factor: number): Cov2 {
-  return [cov[0] * factor, cov[1] * factor, cov[2] * factor];
-}
 
 /**
  * Calculate Euclidean distance in meters between two points.
