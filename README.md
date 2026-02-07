@@ -7,6 +7,7 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 - **Real-time Data Ingestion**: WebSocket connection to Traccar for streaming position updates, with automatic fallback to historical API fetches.
 - **Anchoring Engine**: Processes GPS measurements through Kalman filtering to create stable position anchors, handling outliers and providing confidence scores.
 - **Motion Detection**: Supports configurable motion profiles (e.g., pedestrian or vehicle) to adapt tracking behavior based on device type.
+- **Settling Logic**: Automatically detects when motion has ceased by analyzing a sliding window of recent position points. If points are spatially consistent (clustered) and movement directions appear random (indicating noise rather than directed travel), the engine establishes a new stable anchor at the centroid of the windowed points, smoothing transitions in noisy GPS environments.
 - **Device Grouping**: Aggregate multiple devices into virtual groups for combined tracking (e.g., family or fleet views).
 - **Interactive Mapping**: Leaflet-based map with visual overlays for accuracy circles, device icons, and clustering.
 - **Debug Mode**: Inspect processing frames, anchor history, and motion decisions for troubleshooting.

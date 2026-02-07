@@ -22,11 +22,13 @@ export type MotionProfileConfig = {
   coherenceCosineThreshold: number; // Cosine threshold for directional coherence
   coherenceBonus: number; // Bonus for coherent outliers
   accuracyK: number; // Accuracy scaling factor
-  settleWindowSize: number; // Window size for motion settling
-  settleMaxSpreadMeters: number; // Max spread in meters for settling
   weakUpdateGain: number; // Gain for weak updates
   weakVarianceInflation: number; // Variance inflation for weak updates
   anchorVarianceInflationOnNoise: number; // Variance inflation on noise detection
+  motionSettleWindowSize: number; // Sliding window size for settling
+  motionSettleMahalanobisThreshold: number; // Mahalanobis threshold for point consistency
+  motionSettleDirectionThreshold: number; // Max dot product for direction randomness
+  maxCentroidRadiusMeters: number; // Max radius for centroid centering in settling
 };
 
 /**
@@ -44,11 +46,13 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     coherenceCosineThreshold: 0.7,
     coherenceBonus: 0.2,
     accuracyK: 5,
-    settleWindowSize: 1,
-    settleMaxSpreadMeters: 10,
     weakUpdateGain: 0.25,
     weakVarianceInflation: 4,
     anchorVarianceInflationOnNoise: 1.15,
+    motionSettleWindowSize: 3,
+    motionSettleMahalanobisThreshold: 100,
+    motionSettleDirectionThreshold: 0.5,
+    maxCentroidRadiusMeters: 5,
   },
   car: {
     motionScoreThreshold: 4.0,
@@ -59,11 +63,13 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     coherenceCosineThreshold: 0.8,
     coherenceBonus: 0.3,
     accuracyK: 8,
-    settleWindowSize: 5,
-    settleMaxSpreadMeters: 20,
     weakUpdateGain: 0.2,
     weakVarianceInflation: 6,
     anchorVarianceInflationOnNoise: 1.35,
+    motionSettleWindowSize: 3,
+    motionSettleMahalanobisThreshold: 100,
+    motionSettleDirectionThreshold: 0.2,
+    maxCentroidRadiusMeters: 10,
   },
 };
 

@@ -29,6 +29,7 @@ test("moderate_uncertainty", async () => {
 
   measurements.push(makeMeasurement(200, 0, t0 + stationaryCount * stepMs, 10));
   measurements.push(makeMeasurement(201, -1, t0 + (stationaryCount + 1) * stepMs, 10));
+  measurements.push(makeMeasurement(199, 1, t0 + (stationaryCount + 2) * stepMs, 10));
 
   const snaps = engine.processMeasurements(measurements);
 

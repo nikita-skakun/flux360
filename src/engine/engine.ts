@@ -43,7 +43,7 @@ export class Engine {
   motionActive: boolean = false;
   motionStartTimestamp: number | null = null;
   private outliers: OutlierSample[] = [];
-  private settlePoints: DevicePoint[] = [];
+  private recentMotionPoints: DevicePoint[] = [];
   // debug buffer (per-engine)
   private debugFrames: DebugFrame[] = [];
   private seenDebugKeys = new Set<string>();
@@ -72,39 +72,76 @@ export class Engine {
     }
     this.outliers.splice(lo, 0, sample);
   }
-  private insertSettlePoint(p: DevicePoint) {
-    let lo = 0;
-    let hi = this.settlePoints.length;
-    const ts = p.timestamp;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if ((this.settlePoints[mid]?.timestamp ?? 0) <= ts) lo = mid + 1;
-      else hi = mid;
+  private computeCentroid(points: DevicePoint[]): [number, number] {
+    // Computes the centroid (geometric center) of points, effectively clustering them into a single representative position.
+    let sumX = 0, sumY = 0;
+    for (const p of points) {
+      sumX += p.mean[0];
+      sumY += p.mean[1];
     }
-    this.settlePoints.splice(lo, 0, p);
+    return [sumX / points.length, sumY / points.length];
   }
-  private hasRecentOutliers(thresholdTimestamp: number): boolean {
-    for (let i = this.outliers.length - 1; i >= 0; i--) {
-      const ts = this.outliers[i]?.point.timestamp ?? 0;
-      if (ts >= thresholdTimestamp) return true;
-      if (ts < thresholdTimestamp) break;
-    }
-    return false;
+  private computeAverageVariance(points: DevicePoint[]): number {
+    let sum = 0;
+    for (const p of points) sum += p.variance;
+    return sum / points.length;
   }
-  private settleClusterStable(profile: MotionProfileConfig): boolean {
-    if (this.settlePoints.length < profile.settleWindowSize) return false;
-    const recent = this.settlePoints.slice(-profile.settleWindowSize);
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const p of recent) {
-      const x = p.mean[0];
-      const y = p.mean[1];
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
+  private arePointsConsistent(points: DevicePoint[], threshold: number): boolean {
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const p1 = points[i];
+        const p2 = points[j];
+        if (!p1 || !p2) return false;
+        const dx = p1.mean[0] - p2.mean[0];
+        const dy = p1.mean[1] - p2.mean[1];
+        const mahal = (dx * dx + dy * dy) / (p1.variance + p2.variance);
+        if (mahal >= threshold) return false;
+      }
     }
-    const spread = Math.hypot(maxX - minX, maxY - minY);
-    return spread <= profile.settleMaxSpreadMeters;
+    return true;
+  }
+  private areDirectionsRandom(points: DevicePoint[], threshold: number): boolean {
+    // Evaluates if directions between consecutive points are random (low correlation via dot product).
+    // Random directions suggest stationary/noisy movement rather than coherent travel, qualifying for settling.
+    // Threshold ensures pairs aren't too aligned (e.g., dot < threshold means uncorrelated).
+    if (points.length < 2) return false;
+    const directions: [number, number][] = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      if (!p1 || !p2) return false;
+      const dx = p2.mean[0] - p1.mean[0];
+      const dy = p2.mean[1] - p1.mean[1];
+      const mag = Math.hypot(dx, dy);
+      if (mag === 0) continue;
+      directions.push([dx / mag, dy / mag]);
+    }
+    if (directions.length < 1) return true; // no movement, consider random (stationary)
+    for (let i = 0; i < directions.length; i++) {
+      for (let j = i + 1; j < directions.length; j++) {
+        const d1 = directions[i];
+        const d2 = directions[j];
+        if (!d1 || !d2) return false;
+        const dot = d1[0] * d2[0] + d1[1] * d2[1];
+        if (dot >= threshold) return false; // aligned, not random
+      }
+    }
+    return true; // all pairs have low dot, directions are random
+  }
+  private isCentroidCentered(points: DevicePoint[], maxRadius: number): boolean {
+    const centroid = this.computeCentroid(points);
+    for (const p of points) {
+      if (distanceMeters(centroid, p.mean) > maxRadius) return false;
+    }
+    return true;
+  }
+  private shouldSettle(profile: MotionProfileConfig): boolean {
+    if (this.recentMotionPoints.length < profile.motionSettleWindowSize) return false;
+    const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
+    const consistent = this.arePointsConsistent(points, profile.motionSettleMahalanobisThreshold);
+    const randomDir = this.areDirectionsRandom(points, profile.motionSettleDirectionThreshold);
+    const centered = this.isCentroidCentered(points, profile.maxCentroidRadiusMeters);
+    return consistent && randomDir && centered;
   }
   private pushDebugFrame(frame: DebugFrame) {
     const key = `${frame.timestamp}:${frame.measurement.lat}:${frame.measurement.lon}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''}`;
@@ -140,7 +177,7 @@ export class Engine {
         this.motionActive = false;
         this.motionStartTimestamp = null;
         this.outliers = [];
-        this.settlePoints = [];
+        this.recentMotionPoints = [];
         decision = 'initialized';
       } else {
         const dist2Active = this.activeAnchor.mahalanobis2(m);
@@ -152,7 +189,6 @@ export class Engine {
             decision = 'updated';
 
             this.outliers = [];
-            this.settlePoints = [];
             this.candidateAnchor = null;
           } else {
             decision = 'resisted';
@@ -192,16 +228,10 @@ export class Engine {
                 this.motionActive = true;
                 this.motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
                 this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, this.motionStartTimestamp);
-                this.settlePoints = [];
+                this.recentMotionPoints = [];
+                this.recentMotionPoints.push(m);
                 this.outliers = [];
                 decision = 'motion-start';
-              } else {
-                const weakVariance = m.variance * profile.weakVarianceInflation;
-                const weakPoint: DevicePoint = { ...m, variance: weakVariance };
-                this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
-                this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
-                anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
-                decision = 'noise-weak-update';
               }
             }
           }
@@ -210,7 +240,6 @@ export class Engine {
             this.motionActive = false;
             this.motionStartTimestamp = null;
             this.outliers = [];
-            this.settlePoints = [];
             this.candidateAnchor = null;
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
 
@@ -221,23 +250,8 @@ export class Engine {
             const dist2ActiveNow = this.activeAnchor.mahalanobis2(m);
             if (dist2Candidate < STATIONARY_MAHALANOBIS2_THRESHOLD) {
               this.candidateAnchor.kalmanUpdate(m, GAIN_RATE);
-              this.insertSettlePoint(m);
-              if (this.settleClusterStable(profile) && !this.hasRecentOutliers((this.settlePoints[0]?.timestamp ?? m.timestamp) - 1)) {
-                this.activeAnchor.endTimestamp = m.timestamp;
-                this.closedAnchors.push(this.activeAnchor);
-                this.activeAnchor = this.candidateAnchor;
-                this.candidateAnchor = null;
-                this.motionActive = false;
-                this.motionStartTimestamp = null;
-                this.outliers = [];
-                this.settlePoints = [];
-
-                decision = 'motion-end';
-              } else {
-                decision = 'candidate-updated';
-              }
+              decision = 'candidate-updated';
             } else {
-              this.settlePoints = [];
               this.insertOutlier({ point: m, score: 0, direction: null });
               this.candidateAnchor.kalmanUpdate(m, GAIN_RATE);
               decision = 'candidate-updated';
@@ -246,11 +260,28 @@ export class Engine {
                 this.motionStartTimestamp = null;
                 this.candidateAnchor = null;
                 this.outliers = [];
-                this.settlePoints = [];
                 this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
 
                 decision = 'motion-end';
               }
+            }
+            // New settling logic: Detects end of motion by evaluating a sliding window of recent points during active motion.
+            // If points are consistent (spatially clustered) and directions are random (undirected noise), settle on a new anchor
+            // at the centroid of the window, closing the previous anchor and resetting motion state.
+            this.recentMotionPoints.push(m);
+            if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
+            if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
+              const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
+              const newMean = this.computeCentroid(points);
+              const newVariance = this.computeAverageVariance(points);
+              this.activeAnchor.endTimestamp = m.timestamp;
+              this.closedAnchors.push(this.activeAnchor);
+              this.activeAnchor = new Anchor(newMean, newVariance, this.motionStartTimestamp!);
+              this.motionActive = false;
+              this.motionStartTimestamp = null;
+              this.outliers = [];
+              this.recentMotionPoints = [];
+              decision = 'motion-end';
             }
           }
         }
