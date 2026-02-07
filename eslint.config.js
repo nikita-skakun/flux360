@@ -39,16 +39,8 @@ export default [
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
       'no-multiple-empty-lines': ['error', { max: 1, maxBOF: 0, maxEOF: 0 }],
-      'padding-lines-between-statements': [
-        'error',
-        { blankLine: 'never', prev: '*', next: '*' },
-        { blankLine: 'always', prev: '*', next: 'function' },
-        { blankLine: 'always', prev: '*', next: 'class' },
-        { blankLine: 'always', prev: '*', next: 'return' }
-      ],
       'lines-between-class-members': ['error', 'never', { exceptAfterSingleLine: true }],
-      'padded-blocks': ['error', 'never'],
-      'max-len': ['error', { code: 140, ignoreComments: true }]
+      'padded-blocks': ['error', 'never']
     }
   }
 ]

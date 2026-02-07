@@ -43,35 +43,26 @@ export class Engine {
   motionProfile: MotionProfileName = "person";
   motionActive: boolean = false;
   motionStartTimestamp: number | null = null;
-
   private outliers: OutlierSample[] = [];
   private settlePoints: DevicePoint[] = [];
-
   // debug buffer (per-engine)
   private debugFrames: DebugFrame[] = [];
   private seenDebugKeys = new Set<string>();
-
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
-
   clearDebugFrames(): void {
     this.debugFrames = [];
     this.seenDebugKeys.clear();
   }
-
   setMotionProfile(profile: MotionProfileName) {
     this.motionProfile = profile;
   }
-
   private normalizeProfileName(profile?: MotionProfileName | null): MotionProfileName {
     return profile === "car" ? "car" : "person";
   }
-
   private getProfile(profile?: MotionProfileName | null): MotionProfileConfig {
     return MOTION_PROFILES[this.normalizeProfileName(profile)];
   }
-
   private insertOutlier(sample: OutlierSample) {
-
     let lo = 0;
     let hi = this.outliers.length;
     const ts = sample.point.timestamp;
@@ -82,7 +73,6 @@ export class Engine {
     }
     this.outliers.splice(lo, 0, sample);
   }
-
   private insertSettlePoint(p: DevicePoint) {
     let lo = 0;
     let hi = this.settlePoints.length;
@@ -94,7 +84,6 @@ export class Engine {
     }
     this.settlePoints.splice(lo, 0, p);
   }
-
   private hasRecentOutliers(thresholdTimestamp: number): boolean {
     for (let i = this.outliers.length - 1; i >= 0; i--) {
       const ts = this.outliers[i]?.point.timestamp ?? 0;
@@ -103,7 +92,6 @@ export class Engine {
     }
     return false;
   }
-
   private settleClusterStable(profile: MotionProfileConfig): boolean {
     if (this.settlePoints.length < profile.settleWindowSize) return false;
     const recent = this.settlePoints.slice(-profile.settleWindowSize);
@@ -119,7 +107,6 @@ export class Engine {
     const spread = Math.hypot(maxX - minX, maxY - minY);
     return spread <= profile.settleMaxSpreadMeters;
   }
-
   private pushDebugFrame(frame: DebugFrame) {
     const key = `${frame.timestamp}:${frame.measurement.lat}:${frame.measurement.lon}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''}`;
     if (this.seenDebugKeys.has(key)) return;
@@ -130,7 +117,6 @@ export class Engine {
       this.debugFrames.splice(0, this.debugFrames.length - DEBUG_BUFFER_SIZE);
     }
   }
-
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     const snapshots: EngineSnapshot[] = [];
     for (const m of ms) {
@@ -309,11 +295,9 @@ export class Engine {
     }
     return snapshots;
   }
-
   getCurrentSnapshot(): EngineSnapshot {
     return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
   }
-
   getDominantAnchorAt(timestamp: number): Anchor | null {
     const candidates: Anchor[] = [];
     if (this.activeAnchor && this.activeAnchor.startTimestamp <= timestamp) {

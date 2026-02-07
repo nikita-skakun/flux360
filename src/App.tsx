@@ -10,9 +10,9 @@ import MapView from "./ui/MapView";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import TrackerGroupsModal from "./ui/TrackerGroupsModal";
 import type { DevicePoint } from "@/ui/types";
-import type { TraccarDevice } from "@/api/traccarClient";
+import type { TraccarDevice } from "@/api/devices";
 import type { MotionProfileName } from "@/engine/motionDetector";
-import type { NormalizedPosition } from "@/api/traccarClient";
+import type { NormalizedPosition } from "@/api/positions";
 
 export function App() {
   type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
@@ -38,8 +38,6 @@ export function App() {
     }
     return profiles;
   }, [groupDevices, deviceMotionProfiles]);
-
-
 
   const onDevices = async (devices: TraccarDevice[]) => {
     const { colorForDevice } = await import("@/ui/color");
@@ -107,9 +105,6 @@ export function App() {
     setDeviceLastSeen(updatedLastSeenMap);
   };
 
-
-
-
   const [refLat, setRefLat] = useState<number | null>(null);
   const [refLon, setRefLon] = useState<number | null>(null);
   const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
@@ -126,7 +121,7 @@ export function App() {
     try {
       if (typeof window === "undefined") return null;
       return window.localStorage.getItem(key);
-    } catch (e) {
+    } catch {
       return null;
     }
   }
@@ -140,15 +135,6 @@ export function App() {
       // ignore localStorage errors
     }
   }
-
-
-
-
-
-  // Get the most recent position across all devices in a group
-
-
-
 
   const [baseUrlInput, setBaseUrlInput] = useState<string>(() => safeGetItem("traccar:baseUrl") ?? "");
   const [secureInput, setSecureInput] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
@@ -185,9 +171,6 @@ export function App() {
       if (refLon == null) setRefLon(firstPos.lon);
     }
   }, [updateCounter, processPositions]);
-
-
-
 
   // Helper: Build TraccarClientOptions
   const buildApiOpts = useCallback(() => ({
@@ -269,7 +252,7 @@ export function App() {
   // Group CRUD handlers
   const handleCreateGroup = useCallback(async (name: string, memberDeviceIds: number[], emoji: string) => {
     try {
-      const { createGroupDevice } = await import("@/api/traccarClient");
+      const { createGroupDevice } = await import("@/api/devices");
       const { colorForDevice } = await import("@/ui/color");
 
       const newGroup = await createGroupDevice(buildApiOpts(), name, emoji, memberDeviceIds);
@@ -293,7 +276,7 @@ export function App() {
 
   const handleDeleteGroup = useCallback(async (groupId: number) => {
     try {
-      const { deleteGroupDevice } = await import("@/api/traccarClient");
+      const { deleteGroupDevice } = await import("@/api/devices");
       await deleteGroupDevice(buildApiOpts(), groupId);
 
       setGroupDevices(prevGroups => prevGroups.filter((g) => g.id !== groupId));
@@ -315,7 +298,7 @@ export function App() {
 
   const handleAddDeviceToGroup = useCallback(async (groupId: number, deviceId: number) => {
     try {
-      const { updateGroupDevice } = await import("@/api/traccarClient");
+      const { updateGroupDevice } = await import("@/api/devices");
       let originalMemberIds: number[] = [];
 
       setGroupDevices(prevGroups => {
@@ -341,7 +324,7 @@ export function App() {
 
   const handleRemoveDeviceFromGroup = useCallback(async (groupId: number, deviceId: number) => {
     try {
-      const { updateGroupDevice } = await import("@/api/traccarClient");
+      const { updateGroupDevice } = await import("@/api/devices");
       let originalMemberIds: number[] = [];
 
       setGroupDevices(prevGroups => {
@@ -365,22 +348,24 @@ export function App() {
     }
   }, [buildApiOpts]);
 
-  const handleUpdateMotionProfile = useCallback(async (deviceId: number, profile: MotionProfileName) => {
+  const handleUpdateMotionProfile = useCallback((deviceId: number, profile: MotionProfileName) => {
     const previous = deviceMotionProfiles[deviceId] ?? "person";
     setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: profile }));
-    try {
-      const { updateDeviceAttributes } = await import("@/api/traccarClient");
-      const payload = { motionProfile: profile, motionProfileUpdatedAt: new Date().toISOString() };
-      await updateDeviceAttributes(buildApiOpts(), deviceId, payload);
-    } catch (error) {
-      console.error("Failed to update motion profile:", error);
-      setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: previous }));
-    }
-  }, [buildApiOpts, deviceMotionProfiles, traccarBaseUrl, traccarSecure, traccarToken]);
+    void (async () => {
+      try {
+        const { updateDeviceAttributes } = await import("@/api/devices");
+        const payload = { motionProfile: profile, motionProfileUpdatedAt: new Date().toISOString() };
+        await updateDeviceAttributes(buildApiOpts(), deviceId, payload);
+      } catch (error) {
+        console.error("Failed to update motion profile:", error);
+        setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: previous }));
+      }
+    })();
+  }, [buildApiOpts, deviceMotionProfiles]);
 
   const handleUpdateGroup = useCallback(async (groupId: number, updates: { name?: string }) => {
     try {
-      const { updateGroupDevice } = await import("@/api/traccarClient");
+      const { updateGroupDevice } = await import("@/api/devices");
       await updateGroupDevice(buildApiOpts(), groupId, updates);
 
       setGroupDevices(prevGroups => prevGroups.map((g) =>
@@ -391,9 +376,6 @@ export function App() {
       throw error;
     }
   }, [buildApiOpts]);
-
-
-
 
   function applySettings() {
     safeSetItem("traccar:baseUrl", baseUrlInput || null);
@@ -419,12 +401,6 @@ export function App() {
     setTraccarToken(null);
     disconnect();
   }
-
-
-
-
-
-
 
   const visibleComponents = useMemo(() => {
     const engineComps = Object.values(engineSnapshotsByDevice).flat();
@@ -549,7 +525,7 @@ export function App() {
         id: numId,
         isGroup: false,
         name,
-        icon: deviceIcons[numId] || "device_unknown",
+        icon: deviceIcons[numId] ?? "device_unknown",
         lastSeen,
         hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
       });

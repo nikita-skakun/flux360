@@ -34,8 +34,6 @@ export function usePositionProcessing({
   groupDevices,
 }: UsePositionProcessingProps) {
   const [engineSnapshotsByDevice, setEngineSnapshotsByDevice] = useState<Record<number, DevicePoint[]>>({});
-
-
   const buildEngineSnapshotsFromByDevice = useCallback((byDevice: Record<string, DevicePoint[]>): DevicePoint[] => {
     const currentSnapshots = buildEngineSnapshotsFromByDeviceUtil(byDevice, enginesRef, groupIdsRef, groupMotionProfiles, deviceMotionProfiles, refLat, refLon);
     setEngineSnapshotsByDevice(currentSnapshots);

@@ -261,8 +261,8 @@ const TrackerGroupsModal: React.FC<Props> = ({
                     key={icon}
                     onClick={() => setSelectedEmoji(icon)}
                     className={`p-2 rounded border-2 transition-all ${selectedEmoji === icon
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300"
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-gray-300"
                       }`}
                     disabled={isLoading}
                   >
@@ -301,13 +301,13 @@ const TrackerGroupsModal: React.FC<Props> = ({
               </div>
             </div>
             <div className="flex gap-2">
-               <button
-                 onClick={() => void handleCreateGroup()}
-                 disabled={!newGroupName.trim() || selectedDevices.length === 0 || isLoading}
-                 className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-               >
-                 {isLoading ? "Creating..." : "Create Group"}
-               </button>
+              <button
+                onClick={() => void handleCreateGroup()}
+                disabled={!newGroupName.trim() || selectedDevices.length === 0 || isLoading}
+                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {isLoading ? "Creating..." : "Create Group"}
+              </button>
               <button
                 onClick={onClose}
                 className="px-4 py-2 border rounded hover:bg-gray-50 disabled:opacity-50"

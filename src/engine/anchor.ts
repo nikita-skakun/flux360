@@ -11,7 +11,6 @@ export class Anchor {
   endTimestamp: number | null;
   confidence: number;
   lastUpdateTimestamp: number;
-
   constructor(mean: Vec2, cov: Cov2, startTimestamp: number, confidence: number = 0.5, lastUpdateTimestamp?: number) {
     this.mean = mean;
     this.cov = symmetric(cov);
@@ -20,25 +19,21 @@ export class Anchor {
     this.confidence = confidence;
     this.lastUpdateTimestamp = lastUpdateTimestamp ?? startTimestamp;
   }
-
   clone(): Anchor {
     const cloned = new Anchor([this.mean[0], this.mean[1]], [this.cov[0], this.cov[1], this.cov[2]], this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
     cloned.endTimestamp = this.endTimestamp;
     return cloned;
   }
-
   getConfidence(timestamp: number, decayRate: number): number {
     const timeDiffMinutes = (timestamp - this.lastUpdateTimestamp) / 60000;
     return Math.max(0, Math.min(1, this.confidence * Math.exp(-decayRate * timeDiffMinutes)));
   }
-
   getConfidenceLevel(timestamp: number, decayRate: number): "high" | "medium" | "low" {
     const conf = this.getConfidence(timestamp, decayRate);
     if (conf >= CONFIDENCE_HIGH_THRESHOLD) return "high";
     if (conf >= CONFIDENCE_MEDIUM_THRESHOLD) return "medium";
     return "low";
   }
-
   mahalanobis2(m: DevicePoint): number {
     const r: Vec2 = [m.mean[0] - this.mean[0], m.mean[1] - this.mean[1]];
     const S = addCov(this.cov, m.cov);
@@ -46,7 +41,6 @@ export class Anchor {
     const Si_r = mulCovVec(Si, r);
     return r[0] * Si_r[0] + r[1] * Si_r[1];
   }
-
   kalmanUpdate(m: DevicePoint, gainRate: number): void {
     // Compute gain based on accuracy
     const accuracy = 1 / (1 + m.accuracy);

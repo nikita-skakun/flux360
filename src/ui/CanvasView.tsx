@@ -45,7 +45,6 @@ type DebugFrame = {
 };
 
 const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons }, ref) => {
-
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);

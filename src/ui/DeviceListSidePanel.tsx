@@ -105,8 +105,8 @@ const DeviceListSidePanel: React.FC<Props> = ({
                     <button
                       onClick={() => onSelectDevice(device.id)}
                       className={`w-full p-3 text-left transition-colors relative ${isSelected
-                          ? "bg-blue-50 border-l-4 border-blue-500"
-                          : "hover:bg-gray-50 border-l-4 border-transparent"
+                        ? "bg-blue-50 border-l-4 border-blue-500"
+                        : "hover:bg-gray-50 border-l-4 border-transparent"
                         }`}
                     >
                       <div className="flex items-start gap-3">
