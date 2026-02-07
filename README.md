@@ -19,20 +19,6 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 - **Enhanced Visualization**: Expand map options for better performance with large datasets, such as vector tiles.
 - **Advanced Analytics**: Add route optimization, geofencing, and alert systems for fleet management.
 
-## Setup
-
-To install dependencies:
-
-```bash
-bun install
-```
-
-To start a development server (default port 3000):
-
-```bash
-bun dev
-```
-
 ## Usage
 
 Configure the connection in the in-app **Settings** panel: enter the Traccar WebSocket URL and optional token. These settings are saved locally and used automatically.

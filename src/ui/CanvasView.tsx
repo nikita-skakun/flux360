@@ -1,8 +1,10 @@
-import { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
+import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
 import type { Cov2 } from "@/ui/types";
 import type { DevicePoint } from "@/ui/types";
 
 import { colorForDevice, rgbaString, type Color } from "./color";
+import type { DrawItem, Cluster } from "@/util/clustering";
+import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters } from "@/util/clustering";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
@@ -10,21 +12,19 @@ export type CanvasViewHandle = {
   hitTestAnchor: (x: number, y: number) => { anchor: DebugAnchor; x: number; y: number } | null;
 };
 
-import type { DebugFrame } from "@/engine/engine";
-
-type Props = {
+export type CanvasViewProps = {
+  components: DevicePoint[];
   width: number;
   height: number;
-  components: DevicePoint[];
-  deviceIcons: Record<number, string>;
   refMeters: { x: number; y: number };
-  zoom: number | undefined;
+  zoom: number | null;
   fitToBounds: boolean;
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   selectedDeviceId: number | null;
   openClusterPoint: { x: number; y: number } | null;
-  debugFrame?: DebugFrame | null;
-  debugAnchors?: DebugAnchor[];
+  debugFrame: DebugFrame | null;
+  debugAnchors: DebugAnchor[];
+  deviceIcons: Record<number, string>;
 };
 
 type DebugAnchor = {
@@ -37,9 +37,14 @@ type DebugAnchor = {
   lastUpdateTimestamp: number;
 };
 
-export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasView({ width = 800, height = 600, components, deviceIcons, refMeters, zoom, fitToBounds = true, worldBounds = null, selectedDeviceId = null, openClusterPoint = null, debugFrame = null, debugAnchors = [] }, ref) {
-  type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color: [number, number, number]; };
-  type Cluster = { items: DrawItem[]; x: number; y: number; size: number; radius: number };
+type DebugFrame = {
+  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; cov: [number, number, number]; };
+  before: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  after: { mean: [number, number]; cov: [number, number, number]; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  timestamp: number;
+};
+
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons }, ref) => {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
@@ -48,12 +53,7 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
 
   const [pinOpacity, setPinOpacity] = useState(1);
 
-  const CLUSTER_DISTANCE_PX = 36;
   const PIN_R = 24;
-
-  function clusterRadius(size: number) {
-    return Math.max(8, Math.ceil(6 + Math.sqrt(size) * 6));
-  }
 
   useEffect(() => {
     const target = openClusterPoint ? 0.3 : 1;
@@ -69,50 +69,6 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
     animationId = window.requestAnimationFrame(animate);
     return () => window.cancelAnimationFrame(animationId);
   }, [openClusterPoint]);
-
-  function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_PX): Cluster[] {
-    const n = items.length;
-    if (n === 0) return [];
-    const parent: number[] = Array.from({ length: n }, (_, i) => i);
-    const find = (i: number): number => parent[i] === i ? i : parent[i] = find(parent[i]!);
-    const union = (i: number, j: number) => { const pi = find(i), pj = find(j); if (pi !== pj) parent[pi] = pj; };
-    const cellSize = threshold;
-    const grid = new Map<string, number[]>();
-    for (let i = 0; i < n; i++) {
-      const item = items[i];
-      if (!item) continue;
-      const key = `${Math.floor(item.x / cellSize)},${Math.floor(item.y / cellSize)}`;
-      if (!grid.has(key)) grid.set(key, []);
-      grid.get(key)!.push(i);
-    }
-    for (let i = 0; i < n; i++) {
-      const item = items[i]!;
-      const cellX = Math.floor(item.x / cellSize);
-      const cellY = Math.floor(item.y / cellSize);
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          const cell = grid.get(`${cellX + dx},${cellY + dy}`);
-          if (!cell) continue;
-          for (const j of cell) {
-            if (j <= i) continue;
-            const other = items[j]!;
-            if (Math.hypot(item.x - other.x, item.y - other.y) <= threshold) union(i, j);
-          }
-        }
-      }
-    }
-    const groups = Array.from({ length: n }, () => [] as DrawItem[]);
-    for (let i = 0; i < n; i++) groups[find(i)]!.push(items[i]!);
-    const clusters: Cluster[] = [];
-    for (let i = 0; i < n; i++) {
-      const clusterItems = groups[i]!;
-      if (clusterItems.length === 0) continue;
-      const avgX = clusterItems.reduce((s, it) => s + it.x, 0) / clusterItems.length;
-      const avgY = clusterItems.reduce((s, it) => s + it.y, 0) / clusterItems.length;
-      clusters.push({ items: clusterItems, x: avgX, y: avgY, size: clusterItems.length, radius: clusterRadius(clusterItems.length) });
-    }
-    return clusters;
-  }
 
   useImperativeHandle(ref, () => ({
     hitTestPoint: (px: number, py: number) => {
@@ -493,4 +449,4 @@ export const CanvasView = forwardRef<CanvasViewHandle, Props>(function CanvasVie
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 });
 
-export default CanvasView;
+export default React.memo(CanvasView);

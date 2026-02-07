@@ -27,7 +27,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [pixelsPerMeter, setPixelsPerMeter] = useState<number | undefined>(undefined);
+  const [pixelsPerMeter, setPixelsPerMeter] = useState<number | null>(null);
 
   const canvasApiRef = useRef<CanvasViewHandle | null>(null);
   const deviceNamesRef = useRef<Record<number, string>>(deviceNames);
@@ -199,19 +199,19 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       }
     };
 
-  const onMapMove = (ev: L.LeafletMouseEvent) => {
-    const pt = map.latLngToContainerPoint(ev.latlng);
-    const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-    const anchorHit = canvasApiRef.current?.hitTestAnchor(pt.x, pt.y) ?? null;
-    if (anchorHit) {
-      setAnchorHover({ x: anchorHit.x, y: anchorHit.y, anchor: anchorHit.anchor });
-    } else {
-      setAnchorHover(null);
-    }
-    const container = map.getContainer();
-    if (hit?.items?.length) {
-      container.style.cursor = "pointer";
-      if (hit.items.length === 1) {
+    const onMapMove = (ev: L.LeafletMouseEvent) => {
+      const pt = map.latLngToContainerPoint(ev.latlng);
+      const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
+      const anchorHit = canvasApiRef.current?.hitTestAnchor(pt.x, pt.y) ?? null;
+      if (anchorHit) {
+        setAnchorHover({ x: anchorHit.x, y: anchorHit.y, anchor: anchorHit.anchor });
+      } else {
+        setAnchorHover(null);
+      }
+      const container = map.getContainer();
+      if (hit?.items?.length) {
+        container.style.cursor = "pointer";
+        if (hit.items.length === 1) {
           const first = hit.items[0];
           if (first) container.title = deviceNamesRef.current[first.device] ?? String(first.device);
           else container.title = "";
@@ -224,12 +224,12 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       }
     };
 
-  const container = map.getContainer();
-  const onMouseLeave = () => {
-    container.style.cursor = "";
-    container.title = "";
-    setAnchorHover(null);
-  };
+    const container = map.getContainer();
+    const onMouseLeave = () => {
+      container.style.cursor = "";
+      container.title = "";
+      setAnchorHover(null);
+    };
 
     map.on("click", onMapClick);
     map.on("mousemove", onMapMove);
@@ -390,8 +390,8 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
               const left = Math.round(radius * Math.cos(angle));
               const top = Math.round(radius * Math.sin(angle));
 
-                const col: [number, number, number] = getColorForDevice(it.device);
-                const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+              const col: [number, number, number] = getColorForDevice(it.device);
+              const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
 
               const enterDelay = i * 20;
               const exitDelay = (n - i - 1) * 15;
@@ -433,17 +433,17 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
       <div className="absolute inset-0 pointer-events-none z-[1000]">
         <CanvasView
-            ref={canvasApiRef}
-            components={components}
-            deviceIcons={deviceIcons}
-            width={size.width}
-            height={size.height}
-            zoom={pixelsPerMeter}
-            refMeters={centerMeters}
-            fitToBounds={false}
-            worldBounds={null}
-            selectedDeviceId={selectedDeviceId}
-            openClusterPoint={clusterPoint}
+          ref={canvasApiRef}
+          components={components}
+          deviceIcons={deviceIcons}
+          width={size.width}
+          height={size.height}
+          zoom={pixelsPerMeter}
+          refMeters={centerMeters}
+          fitToBounds={false}
+          worldBounds={null}
+          selectedDeviceId={selectedDeviceId}
+          openClusterPoint={clusterPoint}
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
         />
@@ -472,4 +472,4 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
   );
 };
 
-export default MapView;
+export default React.memo(MapView);

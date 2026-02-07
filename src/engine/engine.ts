@@ -1,59 +1,9 @@
 import type { DevicePoint } from "@/ui/types";
 import { Anchor } from "./anchor";
-import type { Cov2, Vec2 } from "@/ui/types";
+import { MOTION_PROFILES, scaleCov, distanceMeters, directionFromAnchor, computeCoherence } from "./motionDetector";
+import type { MotionProfileName, MotionProfileConfig, OutlierSample } from "./motionDetector";
 
-export type MotionProfileName = "person" | "car";
-
-type MotionProfileConfig = {
-  motionScoreThreshold: number;
-  singlePointScoreThreshold: number;
-  singlePointOverrideMultiplier: number;
-  singlePointAccuracyRatio: number;
-  minDistanceAccuracyRatio: number;
-  coherenceCosineThreshold: number;
-  coherenceBonus: number;
-  accuracyK: number;
-  settleWindowSize: number;
-  settleMaxSpreadMeters: number;
-  weakUpdateGain: number;
-  weakCovInflation: number;
-  anchorCovInflationOnNoise: number;
-};
-
-const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
-  person: {
-    motionScoreThreshold: 2.5,
-    singlePointScoreThreshold: 4.0,
-    singlePointOverrideMultiplier: 1.8,
-    singlePointAccuracyRatio: 3,
-    minDistanceAccuracyRatio: 1.0,
-    coherenceCosineThreshold: 0.7,
-    coherenceBonus: 0.2,
-    accuracyK: 5,
-    settleWindowSize: 3,
-    settleMaxSpreadMeters: 10,
-    weakUpdateGain: 0.25,
-    weakCovInflation: 4,
-    anchorCovInflationOnNoise: 1.15,
-  },
-  car: {
-    motionScoreThreshold: 6.0,
-    singlePointScoreThreshold: 12.0,
-    singlePointOverrideMultiplier: 1.8,
-    singlePointAccuracyRatio: 3,
-    minDistanceAccuracyRatio: 1.5,
-    coherenceCosineThreshold: 0.8,
-    coherenceBonus: 0.3,
-    accuracyK: 8,
-    settleWindowSize: 5,
-    settleMaxSpreadMeters: 20,
-    weakUpdateGain: 0.2,
-    weakCovInflation: 6,
-    anchorCovInflationOnNoise: 1.35,
-  },
-};
-
-export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number; activeConfidence: number };
+export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number | null; activeConfidence: number };
 
 const DECAY_RATE_ACTIVE = 0.001;
 const GAIN_RATE = 2.0;
@@ -66,7 +16,7 @@ export type DebugFrame = {
   motionActiveBefore: boolean;
   motionActive: boolean;
   motionStartTimestamp: number | null;
-  lastAnchorConfirmTimestamp: number | null;
+
   outlierCount: number;
   motionScore: number | null;
   motionScoreSum: number | null;
@@ -85,12 +35,6 @@ export type DebugFrame = {
 const DEBUG_BUFFER_SIZE = 200;
 const STATIONARY_MAHALANOBIS2_THRESHOLD = 25;
 
-type OutlierSample = {
-  point: DevicePoint;
-  score: number;
-  direction: Vec2 | null;
-};
-
 export class Engine {
   activeAnchor: Anchor | null = null;
   closedAnchors: Anchor[] = [];
@@ -99,7 +43,7 @@ export class Engine {
   motionProfile: MotionProfileName = "person";
   motionActive: boolean = false;
   motionStartTimestamp: number | null = null;
-  lastAnchorConfirmTimestamp: number | null = null;
+
   private outliers: OutlierSample[] = [];
   private settlePoints: DevicePoint[] = [];
 
@@ -126,50 +70,8 @@ export class Engine {
     return MOTION_PROFILES[this.normalizeProfileName(profile)];
   }
 
-  private scaleCov(cov: Cov2, factor: number): Cov2 {
-    return [cov[0] * factor, cov[1] * factor, cov[2] * factor];
-  }
-
-  private distanceMeters(a: Vec2, b: Vec2): number {
-    const dx = a[0] - b[0];
-    const dy = a[1] - b[1];
-    return Math.hypot(dx, dy);
-  }
-
-  private directionFromAnchor(anchor: Vec2, point: Vec2): Vec2 | null {
-    const dx = point[0] - anchor[0];
-    const dy = point[1] - anchor[1];
-    const mag = Math.hypot(dx, dy);
-    if (mag === 0) return null;
-    return [dx / mag, dy / mag];
-  }
-
-  private dot(a: Vec2, b: Vec2): number {
-    return a[0] * b[0] + a[1] * b[1];
-  }
-
-  private computeCoherence(outliers: OutlierSample[], threshold: number): boolean {
-    if (outliers.length === 0) return false;
-    if (outliers.length === 1) return true;
-    let sx = 0;
-    let sy = 0;
-    for (const o of outliers) {
-      if (!o.direction) continue;
-      sx += o.direction[0];
-      sy += o.direction[1];
-    }
-    const mag = Math.hypot(sx, sy);
-    if (mag === 0) return false;
-    const avg: Vec2 = [sx / mag, sy / mag];
-    for (const o of outliers) {
-      if (!o.direction) return false;
-      if (this.dot(o.direction, avg) < threshold) return false;
-    }
-    return true;
-  }
-
   private insertOutlier(sample: OutlierSample) {
-    if (this.lastAnchorConfirmTimestamp != null && sample.point.timestamp <= this.lastAnchorConfirmTimestamp) return;
+
     let lo = 0;
     let hi = this.outliers.length;
     const ts = sample.point.timestamp;
@@ -249,7 +151,7 @@ export class Engine {
       if (this.activeAnchor === null) {
         // Initialize with the first measurement
         this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
-        this.lastAnchorConfirmTimestamp = m.timestamp;
+
         this.motionActive = false;
         this.motionStartTimestamp = null;
         this.outliers = [];
@@ -263,29 +165,29 @@ export class Engine {
           if (dist2Active < STATIONARY_MAHALANOBIS2_THRESHOLD) {
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
             decision = 'updated';
-            this.lastAnchorConfirmTimestamp = m.timestamp;
+
             this.outliers = [];
             this.settlePoints = [];
             this.candidateAnchor = null;
           } else {
             decision = 'resisted';
-            const lastConfirm = this.lastAnchorConfirmTimestamp ?? this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
+            const lastConfirm = this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
             const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
-            const distance = this.distanceMeters(this.activeAnchor.mean, m.mean);
+            const distance = distanceMeters(this.activeAnchor.mean, m.mean);
             if (distance < m.accuracy * profile.minDistanceAccuracyRatio) {
-              const weakCov = this.scaleCov(m.cov, profile.weakCovInflation);
+              const weakCov = scaleCov(m.cov, profile.weakCovInflation);
               const weakPoint: DevicePoint = { ...m, cov: weakCov };
               this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE * profile.weakUpdateGain);
-              this.activeAnchor.cov = this.scaleCov(this.activeAnchor.cov, profile.anchorCovInflationOnNoise);
+              this.activeAnchor.cov = scaleCov(this.activeAnchor.cov, profile.anchorCovInflationOnNoise);
               anchorCovarianceScale = profile.anchorCovInflationOnNoise;
               decision = 'noise-weak-update';
             } else {
               const timeFactor = Math.log1p(dtMinutes + 1);
               const score = (distance / (m.accuracy + profile.accuracyK)) * timeFactor;
-              const direction = this.directionFromAnchor(this.activeAnchor.mean, m.mean);
+              const direction = directionFromAnchor(this.activeAnchor.mean, m.mean);
               this.insertOutlier({ point: m, score, direction });
 
-              const coherence = this.computeCoherence(this.outliers, profile.coherenceCosineThreshold);
+              const coherence = computeCoherence(this.outliers, profile.coherenceCosineThreshold);
               const sumScore = this.outliers.reduce((acc, o) => acc + o.score, 0);
               const adjustedScore = coherence ? sumScore * (1 + profile.coherenceBonus) : sumScore;
 
@@ -309,10 +211,10 @@ export class Engine {
                 this.outliers = [];
                 decision = 'motion-start';
               } else {
-                const weakCov = this.scaleCov(m.cov, profile.weakCovInflation);
+                const weakCov = scaleCov(m.cov, profile.weakCovInflation);
                 const weakPoint: DevicePoint = { ...m, cov: weakCov };
                 this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE * profile.weakUpdateGain);
-                this.activeAnchor.cov = this.scaleCov(this.activeAnchor.cov, profile.anchorCovInflationOnNoise);
+                this.activeAnchor.cov = scaleCov(this.activeAnchor.cov, profile.anchorCovInflationOnNoise);
                 anchorCovarianceScale = profile.anchorCovInflationOnNoise;
                 decision = 'noise-weak-update';
               }
@@ -326,12 +228,10 @@ export class Engine {
             this.settlePoints = [];
             this.candidateAnchor = null;
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
-            this.lastAnchorConfirmTimestamp = m.timestamp;
+
             decision = 'motion-end';
           } else {
-            if (!this.candidateAnchor) {
-              this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
-            }
+            this.candidateAnchor ??= new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
             const dist2Candidate = this.candidateAnchor.mahalanobis2(m);
             const dist2ActiveNow = this.activeAnchor.mahalanobis2(m);
             if (dist2Candidate < STATIONARY_MAHALANOBIS2_THRESHOLD) {
@@ -346,7 +246,7 @@ export class Engine {
                 this.motionStartTimestamp = null;
                 this.outliers = [];
                 this.settlePoints = [];
-                this.lastAnchorConfirmTimestamp = m.timestamp;
+
                 decision = 'motion-end';
               } else {
                 decision = 'candidate-updated';
@@ -363,7 +263,7 @@ export class Engine {
                 this.outliers = [];
                 this.settlePoints = [];
                 this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
-                this.lastAnchorConfirmTimestamp = m.timestamp;
+
                 decision = 'motion-end';
               }
             }
@@ -388,7 +288,7 @@ export class Engine {
         motionActiveBefore,
         motionActive: this.motionActive,
         motionStartTimestamp: this.motionStartTimestamp,
-        lastAnchorConfirmTimestamp: this.lastAnchorConfirmTimestamp,
+
         outlierCount: this.outliers.length,
         motionScore,
         motionScoreSum,
@@ -411,7 +311,7 @@ export class Engine {
   }
 
   getCurrentSnapshot(): EngineSnapshot {
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp!, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp!, DECAY_RATE_ACTIVE) : 0 };
+    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
   }
 
   getDominantAnchorAt(timestamp: number): Anchor | null {
