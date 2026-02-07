@@ -1,5 +1,7 @@
 import { metersToDegrees } from "./geo";
 import type { DevicePoint } from "@/ui/types";
+import type { EngineSnapshot } from "@/engine/engine";
+import type { Anchor } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import type { MotionProfileName } from "@/engine/motionDetector";
 
@@ -20,24 +22,24 @@ export function createDevicePoint(mean: [number, number], cov: [number, number, 
 }
 
 export function buildEngineSnapshotsFromByDevice(
-  byDevice: Record<string, DevicePoint[]>,
-  enginesRef: React.RefObject<Map<number, Engine>>,
-  groupIdsRef: React.RefObject<Set<number>>,
+  byDevice: Record<number, DevicePoint[]>,
+  enginesRef: Map<number, Engine>,
+  groupIdsRef: Set<number>,
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
   refLat: number | null,
   refLon: number | null
-): Record<number, DevicePoint[]> {
+): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null> } {
   try {
     const measurementsByDevice: Record<number, DevicePoint[]> = {};
 
     for (const [deviceKey, arr] of Object.entries(byDevice)) {
       const deviceId = Number(deviceKey);
-      if (!enginesRef.current.has(deviceId)) {
-        enginesRef.current.set(deviceId, new Engine());
+      if (!enginesRef.has(deviceId)) {
+        enginesRef.set(deviceId, new Engine());
       }
-      const engine = enginesRef.current.get(deviceId)!;
-      const profile = groupIdsRef.current.has(deviceId)
+      const engine = enginesRef.get(deviceId)!;
+      const profile = groupIdsRef.has(deviceId)
         ? (groupMotionProfiles.get(deviceId) ?? "person")
         : (deviceMotionProfiles[deviceId] ?? "person");
       engine.setMotionProfile(profile);
@@ -48,10 +50,14 @@ export function buildEngineSnapshotsFromByDevice(
     }
 
     const currentSnapshots: Record<number, DevicePoint[]> = {};
-    for (const deviceId of enginesRef.current.keys()) {
-      const engine = enginesRef.current.get(deviceId);
+    const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
+    const dominantAnchors = new Map<number, Anchor | null>();
+    for (const deviceId of enginesRef.keys()) {
+      const engine = enginesRef.get(deviceId);
       if (!engine) continue;
       const snapshot = engine.getCurrentSnapshot();
+      snapshotsByDevice.set(Number(deviceId), [snapshot]);
+      dominantAnchors.set(Number(deviceId), engine.getDominantAnchorAt(Date.now()));
       if (snapshot.activeAnchor) {
         // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
         const dId = Number(deviceId);
@@ -72,9 +78,9 @@ export function buildEngineSnapshotsFromByDevice(
         currentSnapshots[Number(deviceId)] = [];
       }
     }
-    return currentSnapshots;
+    return { positionsByDevice: currentSnapshots, snapshotsByDevice, dominantAnchors };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
-    return {};
+    return { positionsByDevice: {}, snapshotsByDevice: new Map(), dominantAnchors: new Map() };
   }
 }

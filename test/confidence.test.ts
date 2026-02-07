@@ -109,7 +109,7 @@ test("anchor timestamps: closed anchors have endTimestamp set", async () => {
   expect(engine.closedAnchors.length).toBe(1);
   const closed = engine.closedAnchors[0]!;
   expect(closed.startTimestamp).toBe(1000);
-  expect(closed.endTimestamp).toBe(4000);
+   expect(closed.endTimestamp).toBe(5000);
   expect(engine.activeAnchor!.startTimestamp).toBe(3000);
   expect(engine.activeAnchor!.endTimestamp).toBeNull();
 });

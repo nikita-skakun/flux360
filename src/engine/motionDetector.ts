@@ -36,7 +36,7 @@ export type MotionProfileConfig = {
  */
 export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
   person: {
-    motionScoreThreshold: 2.5,
+    motionScoreThreshold: 0.1,
     singlePointScoreThreshold: 4.0,
     singlePointOverrideMultiplier: 1.8,
     singlePointAccuracyRatio: 3,
@@ -44,15 +44,15 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     coherenceCosineThreshold: 0.7,
     coherenceBonus: 0.2,
     accuracyK: 5,
-    settleWindowSize: 3,
+    settleWindowSize: 1,
     settleMaxSpreadMeters: 10,
     weakUpdateGain: 0.25,
     weakCovInflation: 4,
     anchorCovInflationOnNoise: 1.15,
   },
   car: {
-    motionScoreThreshold: 6.0,
-    singlePointScoreThreshold: 12.0,
+    motionScoreThreshold: 4.0,
+    singlePointScoreThreshold: 10.0,
     singlePointOverrideMultiplier: 1.8,
     singlePointAccuracyRatio: 3,
     minDistanceAccuracyRatio: 1.5,

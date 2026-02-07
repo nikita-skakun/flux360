@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { fetchDevices } from "../src/api/traccarClient";
+import { fetchDevices } from "../src/api/devices";
 
 test("fetchDevices parses array response", async () => {
   const sample = [

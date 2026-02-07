@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 
 test("normalizePosition extracts device", async () => {
-  const { normalizePosition } = await import("../src/api/traccarClient");
+  const { normalizePosition } = await import("../src/api/positions");
 
   const raw = {
     latitude: 49.0,

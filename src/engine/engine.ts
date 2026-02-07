@@ -192,7 +192,7 @@ export class Engine {
               if (singlePointTriggers || bufferTriggers) {
                 this.motionActive = true;
                 this.motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
-                this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, m.timestamp);
+                this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.cov, this.motionStartTimestamp);
                 this.settlePoints = [];
                 this.outliers = [];
                 decision = 'motion-start';

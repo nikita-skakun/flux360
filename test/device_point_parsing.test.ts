@@ -1,4 +1,4 @@
-import type { NormalizedPosition } from "@/api/traccarClient";
+import type { NormalizedPosition } from "@/api/positions";
 import { test, expect } from "bun:test";
 
 test("parsing DevicePoint arrays yields positions with normalized timestamps", () => {
@@ -17,7 +17,7 @@ test("parsing DevicePoint arrays yields positions with normalized timestamps", (
   for (const [, arr] of Object.entries(storedByDevice)) {
     const snaps = arr.sort((a, b) => a.timestamp - b.timestamp);
     for (const snap of snaps) {
-      const p: NormalizedPosition = { deviceId: snap.device, timestamp: snap.timestamp, lat: snap.lat, lon: snap.lon, accuracy: snap.accuracy };
+      const p: NormalizedPosition = { device: snap.device, timestamp: snap.timestamp, lat: snap.lat, lon: snap.lon, accuracy: snap.accuracy };
       positionsAll.push(p);
     }
   }

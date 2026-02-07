@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { extractPositionsFromMessage } from "../src/api/traccarClient";
+import { extractPositionsFromMessage } from "../src/api/realtime";
 
 test("extract single position object", () => {
   const raw = { latitude: 49.1, longitude: -122.2, fixTime: "2025-12-01T00:00:00Z", accuracy: 12, deviceId: 1 };

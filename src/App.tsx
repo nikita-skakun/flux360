@@ -1,200 +1,97 @@
+import { useEffect, useMemo } from "react";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import { useTraccarConnection } from "./hooks/useTraccarConnection";
-import { usePositionProcessing } from "./hooks/usePositionProcessing";
-import { degreesToMeters } from "./util/geo";
-import { measurementCovFromAccuracy } from "./util/appUtils";
-import { Engine } from "./engine/engine";
-import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import MapView from "./ui/MapView";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import TrackerGroupsModal from "./ui/TrackerGroupsModal";
-import type { DevicePoint } from "@/ui/types";
-import type { TraccarDevice } from "@/api/devices";
-import type { MotionProfileName } from "@/engine/motionDetector";
-import type { NormalizedPosition } from "@/api/positions";
+import { useStore } from "./store";
 
 export function App() {
-  type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
+  const setRefLat = useStore(state => state.setRefLat);
+  const setRefLon = useStore(state => state.setRefLon);
+  const setFirstPosition = useStore(state => state.setFirstPosition);
+  const createGroup = useStore(state => state.createGroup);
+  const deleteGroup = useStore(state => state.deleteGroup);
+  const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
+  const removeDeviceFromGroup = useStore(state => state.removeDeviceFromGroup);
+  const updateGroup = useStore(state => state.updateGroup);
+  const processPositions = useStore(state => state.processPositions);
+  const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
+  const updateMotionProfile = useStore(state => state.updateMotionProfile);
 
-  const [showGroupsModal, setShowGroupsModal] = useState(false);
+  const deviceMotionProfiles = useStore(state => state.motionProfiles);
+  const groupDevices = useStore(state => state.groups);
+  const deviceToGroupsMapRef = useStore(state => state.refs.deviceToGroupsMap);
+  const groupIdsRef = useStore(state => state.refs.groupIds);
 
-  const [deviceMotionProfiles, setDeviceMotionProfiles] = useState<Record<number, MotionProfileName>>({});
-  const [groupDevices, setGroupDevices] = useState<Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>>([]);
-  const deviceToGroupsMapRef = useRef(new Map<number, number[]>());
-  const groupIdsRef = useRef<Set<number>>(new Set());
-
-  const groupMotionProfiles = useMemo(() => {
-    const profiles = new Map<number, MotionProfileName>();
-    for (const group of groupDevices) {
-      let profile: MotionProfileName = "person";
-      for (const memberId of group.memberDeviceIds) {
-        if ((deviceMotionProfiles[memberId] ?? "person") === "car") {
-          profile = "car";
-          break;
-        }
-      }
-      profiles.set(group.id, profile);
-    }
-    return profiles;
-  }, [groupDevices, deviceMotionProfiles]);
-
-  const onDevices = async (devices: TraccarDevice[]) => {
-    const { colorForDevice } = await import("@/ui/color");
-    const rgbToHex = (r: number, g: number, b: number): string => `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-    const nameMap: Record<number, string> = {};
-    const iconMap: Record<number, string> = {};
-    const lastSeenMap: Record<number, number | null> = {};
-    const motionProfileMap: Record<number, MotionProfileName> = {};
-    const groupDevicesMap = new Map<number, { id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>();
-
-    for (const d of devices) {
-      if (d?.id != null) {
-        nameMap[d.id] = d.name;
-        iconMap[d.id] = d.emoji;
-        lastSeenMap[d.id] = d.lastSeen;
-        const rawProfile = typeof d.attributes?.["motionProfile"] === "string" ? d.attributes["motionProfile"] : null;
-        motionProfileMap[d.id] = rawProfile === "car" ? "car" : "person";
-
-        // Check if this is a group device
-        const memberDeviceIdsStr = typeof d.attributes?.["memberDeviceIds"] === "string" ? d.attributes["memberDeviceIds"] : null;
-        if (memberDeviceIdsStr) {
-          try {
-            const memberDeviceIds = JSON.parse(memberDeviceIdsStr) as number[];
-            groupDevicesMap.set(d.id, {
-              id: d.id,
-              name: d.name,
-              emoji: d.emoji,
-              color: "#000000", // Placeholder
-              memberDeviceIds: Array.isArray(memberDeviceIds) ? memberDeviceIds : [],
-            });
-          } catch {
-            // Ignore parsing errors
-          }
-        }
-      }
-    }
-    const groupDevicesArray = Array.from(groupDevicesMap.values());
-    setDeviceNames(nameMap);
-    setDeviceIcons(iconMap);
-    setDeviceLastSeen(lastSeenMap);
-    setDeviceMotionProfiles(motionProfileMap);
-
-    // Generate colors for groups
-    const groupsWithColors = groupDevicesArray.map(g => {
-      const colorRgb = colorForDevice(g.id);
-      const color = rgbToHex(colorRgb[0], colorRgb[1], colorRgb[2]);
-      return { ...g, color };
-    });
-    setGroupDevices(groupsWithColors);
-
-    // Calculate lastSeen for groups based on members
-    const updatedLastSeenMap = { ...lastSeenMap };
-    for (const group of groupsWithColors) {
-      let maxLastSeen: number | null = null;
-      for (const memberId of group.memberDeviceIds) {
-        const memberLastSeen = lastSeenMap[memberId];
-        if (memberLastSeen && (maxLastSeen === null || memberLastSeen > maxLastSeen)) {
-          maxLastSeen = memberLastSeen;
-        }
-      }
-      if (maxLastSeen !== null) {
-        updatedLastSeenMap[group.id] = maxLastSeen;
-      }
-    }
-    setDeviceLastSeen(updatedLastSeenMap);
-  };
-
-  const [refLat, setRefLat] = useState<number | null>(null);
-  const [refLon, setRefLon] = useState<number | null>(null);
-  const [worldBounds, setWorldBounds] = useState<WorldBounds | null>(null);
-  const enginesRef = useRef(new Map<number, Engine>());
-  const [deviceNames, setDeviceNames] = useState<Record<number, string>>({});
-  const [deviceIcons, setDeviceIcons] = useState<Record<number, string>>({});
-  const [deviceLastSeen, setDeviceLastSeen] = useState<Record<number, number | null>>({});
-  const positionsAllRef = useRef<NormalizedPosition[]>([]);
-  const processedKeysRef = useRef(new Set<string>());
-  const firstPositionRef = useRef<{ lat: number; lon: number } | null>(null);
+  const refLat = useStore(state => state.ui.refLat);
+  const refLon = useStore(state => state.ui.refLon);
+  const worldBounds = useStore(state => state.ui.worldBounds);
+  const setWorldBounds = useStore(state => state.setWorldBounds);
+  const enginesRef = useStore(state => state.refs.engines);
+  const devices = useStore(state => state.devices);
+  const deviceNames = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.name])), [devices]);
+  const deviceIcons = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.icon])), [devices]);
+  const deviceLastSeen = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.lastSeen])), [devices]);
+  const positionsAllRef = useStore(state => state.refs.positionsAll);
+  const setPositionsAll = useStore(state => state.setPositionsAll);
+  const firstPositionRef = useStore(state => state.refs.firstPosition as { lat: number; lon: number } | null);
   const RECENT_DEVICE_CUTOFF_MS = 96 * 60 * 60 * 1000; // 96 hours
 
-  function safeGetItem(key: string): string | null {
-    try {
-      if (typeof window === "undefined") return null;
-      return window.localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  }
+  const baseUrlInput = useStore(state => state.settings.inputBaseUrl);
+  const setBaseUrlInput = useStore(state => state.setInputBaseUrl);
+  const setSecureInput = useStore(state => state.setInputSecure);
+  const setTokenInput = useStore(state => state.setInputToken);
+  const inputSecure = useStore(state => state.settings.inputSecure);
+  const inputToken = useStore(state => state.settings.inputToken);
+  const showGroupsModal = useStore(state => state.ui.showGroupsModal);
+  const setShowGroupsModal = useStore(state => state.setShowGroupsModal);
+  const traccarSecure = useStore(state => state.settings.secure);
+  const traccarToken = useStore(state => state.settings.token);
+  const traccarBaseUrl = useStore(state => state.settings.baseUrl);
 
-  function safeSetItem(key: string, value: string | null): void {
-    try {
-      if (typeof window === "undefined") return;
-      if (value === null) window.localStorage.removeItem(key);
-      else window.localStorage.setItem(key, value);
-    } catch {
-      // ignore localStorage errors
-    }
-  }
-
-  const [baseUrlInput, setBaseUrlInput] = useState<string>(() => safeGetItem("traccar:baseUrl") ?? "");
-  const [secureInput, setSecureInput] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
-  const [tokenInput, setTokenInput] = useState<string>(() => safeGetItem("traccar:token") ?? "");
-  const [traccarBaseUrl, setTraccarBaseUrl] = useState<string | null>(() => safeGetItem("traccar:baseUrl") ?? null);
-  const [traccarSecure, setTraccarSecure] = useState<boolean>(() => (safeGetItem("traccar:secure") ?? "false") === "true");
-  const [traccarToken, setTraccarToken] = useState<string | null>(() => safeGetItem("traccar:token") ?? null);
+  const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
+  const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
+  const isSidePanelOpen = useStore(state => state.ui.isSidePanelOpen);
+  const setIsSidePanelOpen = useStore(state => state.setIsSidePanelOpen);
+  const debugMode = useStore(state => state.ui.debugMode);
+  const setDebugMode = useStore(state => state.setDebugMode);
+  const debugFrameIndex = useStore(state => state.ui.debugFrameIndex);
+  const setDebugFrameIndex = useStore(state => state.setDebugFrameIndex);
 
   const { wsStatus, wsError, updateCounter, reconnect, disconnect, positions } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
     token: traccarToken,
-    onDevices,
+    onDevices: setDevicesFromApi,
   });
 
-  const { engineSnapshotsByDevice, processPositions, buildEngineSnapshotsFromByDevice } = usePositionProcessing({
-    refLat,
-    refLon,
-    enginesRef,
-    groupIdsRef,
-    deviceToGroupsMapRef,
-    groupMotionProfiles,
-    deviceMotionProfiles,
-    positionsAllRef,
-    processedKeysRef,
-    firstPositionRef,
-    groupDevices,
-  });
+  const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
 
   useEffect(() => {
-    const firstPos = processPositions(positions);
-    if (firstPos) {
-      if (refLat == null) setRefLat(firstPos.lat);
-      if (refLon == null) setRefLon(firstPos.lon);
+    if (positions.length > 0) {
+      setPositionsAll(prev => [...prev, ...positions]);
+      processPositions();
+      const firstPos = positions[0];
+      if (firstPos && refLat == null) setRefLat(firstPos.lat);
+      if (firstPos && refLon == null) setRefLon(firstPos.lon);
+      if (firstPos && firstPositionRef == null) setFirstPosition({ lat: firstPos.lat, lon: firstPos.lon });
     }
-  }, [updateCounter, processPositions]);
-
-  // Helper: Build TraccarClientOptions
-  const buildApiOpts = useCallback(() => ({
-    baseUrl: traccarBaseUrl ?? "",
-    secure: traccarSecure,
-    auth: traccarToken ? { type: "token" as const, token: traccarToken } : { type: "none" as const },
-  }), [traccarBaseUrl, traccarSecure, traccarToken]);
-
-  // Helper: Convert RGB to hex color string
-  const rgbToHex = (r: number, g: number, b: number): string =>
-    `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+  }, [updateCounter, positions, setPositionsAll, refLat, refLon, firstPositionRef, setRefLat, setRefLon, setFirstPosition, processPositions]);
 
   // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
   useEffect(() => {
-    deviceToGroupsMapRef.current.clear();
-    groupIdsRef.current.clear();
+    deviceToGroupsMapRef.clear();
+    groupIdsRef.clear();
     for (const groupDevice of groupDevices) {
-      groupIdsRef.current.add(groupDevice.id);
+      groupIdsRef.add(groupDevice.id);
       for (const memberId of groupDevice.memberDeviceIds) {
-        if (!deviceToGroupsMapRef.current.has(memberId)) {
-          deviceToGroupsMapRef.current.set(memberId, []);
+        if (!deviceToGroupsMapRef.has(memberId)) {
+          deviceToGroupsMapRef.set(memberId, []);
         }
-        enginesRef.current.delete(groupDevice.id);
-        const groups = deviceToGroupsMapRef.current.get(memberId)!;
+        enginesRef.delete(groupDevice.id);
+        const groups = deviceToGroupsMapRef.get(memberId)!;
         if (!groups.includes(groupDevice.id)) {
           groups.push(groupDevice.id);
         }
@@ -203,204 +100,31 @@ export function App() {
     // Re-process all existing positions to add them to any new groups
     // This ensures positions that arrived before the group was created get added to the group
     // IMPORTANT: Don't filter by processedKeysRef - we need to add positions to NEW groups even if they were already processed for individual devices
-    if (positionsAllRef.current.length > 0) {
+    if (positionsAllRef.length > 0) {
       for (const groupDevice of groupDevices) {
-        enginesRef.current.delete(groupDevice.id);
+        enginesRef.delete(groupDevice.id);
       }
-      const allPositions = positionsAllRef.current;
-      const posByDevice = allPositions.reduce((acc, p) => {
-        (acc[p.device] ||= []).push(p);
-        const groupIds = deviceToGroupsMapRef.current.get(p.device);
-        if (groupIds) {
-          for (const groupId of groupIds) {
-            (acc[groupId] ||= []).push(p);
-          }
-        }
-        return acc;
-      }, {} as Record<number, NormalizedPosition[]>);
-
-      for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
-
-      const rawByDevice: Record<number, DevicePoint[]> = {};
-      for (const [deviceKey, arr] of Object.entries(posByDevice)) {
-        const deviceId = Number(deviceKey);
-        const isGroup = groupIdsRef.current.has(deviceId);
-        const rawArr: DevicePoint[] = arr.map((p) => {
-          const useRef = firstPositionRef.current ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
-          const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
-          const comp: DevicePoint = {
-            mean: [x, y],
-            cov: measurementCovFromAccuracy(p.accuracy),
-            accuracy: p.accuracy,
-            lat: p.lat,
-            lon: p.lon,
-            device: deviceId,
-            timestamp: p.timestamp,
-            anchorAgeMs: 0,
-            confidence: 0,
-            ...(isGroup ? { sourceDeviceId: p.device } : {}),
-          };
-          return comp;
-        });
-        rawByDevice[deviceId] = rawArr;
-      }
-
-      buildEngineSnapshotsFromByDevice(rawByDevice);
+      processPositions();
     }
-  }, [groupDevices]);
+  }, [groupDevices, processPositions]);
 
   // Group CRUD handlers
-  const handleCreateGroup = useCallback(async (name: string, memberDeviceIds: number[], emoji: string) => {
-    try {
-      const { createGroupDevice } = await import("@/api/devices");
-      const { colorForDevice } = await import("@/ui/color");
+  const handleCreateGroup = createGroup;
+  const handleDeleteGroup = deleteGroup;
+  const handleAddDeviceToGroup = addDeviceToGroup;
+  const handleRemoveDeviceFromGroup = removeDeviceFromGroup;
+  const handleUpdateMotionProfile = updateMotionProfile;
+  const handleUpdateGroup = updateGroup;
 
-      const newGroup = await createGroupDevice(buildApiOpts(), name, emoji, memberDeviceIds);
-      const colorRgb = colorForDevice(newGroup.id);
-      const color = rgbToHex(colorRgb[0], colorRgb[1], colorRgb[2]);
-
-      const newGroupObj = { id: newGroup.id, name: newGroup.name, emoji, color, memberDeviceIds };
-
-      // Update all related state in one batch
-      setDeviceIcons(prev => ({ ...prev, [newGroup.id]: emoji }));
-      setDeviceNames(prev => ({ ...prev, [newGroup.id]: name }));
-      setGroupDevices(prevGroups => {
-        const filtered = prevGroups.filter(g => g.id !== newGroup.id);
-        return [...filtered, newGroupObj];
-      });
-    } catch (error) {
-      console.error("Failed to create group:", error);
-      throw error;
-    }
-  }, [buildApiOpts, deviceMotionProfiles]);
-
-  const handleDeleteGroup = useCallback(async (groupId: number) => {
-    try {
-      const { deleteGroupDevice } = await import("@/api/devices");
-      await deleteGroupDevice(buildApiOpts(), groupId);
-
-      setGroupDevices(prevGroups => prevGroups.filter((g) => g.id !== groupId));
-      setDeviceNames(prev => {
-        const updated = { ...prev };
-        delete updated[groupId];
-        return updated;
-      });
-      setDeviceIcons(prev => {
-        const updated = { ...prev };
-        delete updated[groupId];
-        return updated;
-      });
-    } catch (error) {
-      console.error("Failed to delete group:", error);
-      throw error;
-    }
-  }, [buildApiOpts, deviceMotionProfiles]);
-
-  const handleAddDeviceToGroup = useCallback(async (groupId: number, deviceId: number) => {
-    try {
-      const { updateGroupDevice } = await import("@/api/devices");
-      let originalMemberIds: number[] = [];
-
-      setGroupDevices(prevGroups => {
-        const group = prevGroups.find((g) => g.id === groupId);
-        if (!group || group.memberDeviceIds.includes(deviceId)) return prevGroups;
-
-        originalMemberIds = group.memberDeviceIds;
-        const newMemberIds = [...group.memberDeviceIds, deviceId];
-
-        // Fire API update in background
-        updateGroupDevice(buildApiOpts(), groupId, { memberDeviceIds: newMemberIds }).catch(error => {
-          console.error("Failed to add device to group:", error);
-          setGroupDevices(prevGroups => prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: originalMemberIds } : g));
-        });
-
-        return prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: newMemberIds } : g);
-      });
-    } catch (error) {
-      console.error("Failed to add device to group:", error);
-      throw error;
-    }
-  }, [buildApiOpts]);
-
-  const handleRemoveDeviceFromGroup = useCallback(async (groupId: number, deviceId: number) => {
-    try {
-      const { updateGroupDevice } = await import("@/api/devices");
-      let originalMemberIds: number[] = [];
-
-      setGroupDevices(prevGroups => {
-        const group = prevGroups.find((g) => g.id === groupId);
-        if (!group) return prevGroups;
-
-        originalMemberIds = group.memberDeviceIds;
-        const newMemberIds = group.memberDeviceIds.filter((id) => id !== deviceId);
-
-        // Fire API update in background
-        updateGroupDevice(buildApiOpts(), groupId, { memberDeviceIds: newMemberIds }).catch(error => {
-          console.error("Failed to remove device from group:", error);
-          setGroupDevices(prevGroups => prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: originalMemberIds } : g));
-        });
-
-        return prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: newMemberIds } : g);
-      });
-    } catch (error) {
-      console.error("Failed to remove device from group:", error);
-      throw error;
-    }
-  }, [buildApiOpts]);
-
-  const handleUpdateMotionProfile = useCallback((deviceId: number, profile: MotionProfileName) => {
-    const previous = deviceMotionProfiles[deviceId] ?? "person";
-    setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: profile }));
-    void (async () => {
-      try {
-        const { updateDeviceAttributes } = await import("@/api/devices");
-        const payload = { motionProfile: profile, motionProfileUpdatedAt: new Date().toISOString() };
-        await updateDeviceAttributes(buildApiOpts(), deviceId, payload);
-      } catch (error) {
-        console.error("Failed to update motion profile:", error);
-        setDeviceMotionProfiles(prev => ({ ...prev, [deviceId]: previous }));
-      }
-    })();
-  }, [buildApiOpts, deviceMotionProfiles]);
-
-  const handleUpdateGroup = useCallback(async (groupId: number, updates: { name?: string }) => {
-    try {
-      const { updateGroupDevice } = await import("@/api/devices");
-      await updateGroupDevice(buildApiOpts(), groupId, updates);
-
-      setGroupDevices(prevGroups => prevGroups.map((g) =>
-        g.id === groupId ? { ...g, name: updates.name ?? g.name } : g
-      ));
-    } catch (error) {
-      console.error("Failed to update group:", error);
-      throw error;
-    }
-  }, [buildApiOpts]);
-
-  function applySettings() {
-    safeSetItem("traccar:baseUrl", baseUrlInput || null);
-    safeSetItem("traccar:secure", secureInput.toString());
-    safeSetItem("traccar:token", tokenInput || null);
-
-    setTraccarBaseUrl(baseUrlInput || null);
-    setTraccarSecure(secureInput);
-    setTraccarToken(tokenInput || null);
-
+  const applySettings = () => {
+    useStore.getState().applySettings();
     reconnect();
-  }
+  };
 
-  function clearSettings() {
-    setBaseUrlInput("");
-    setSecureInput(false);
-    setTokenInput("");
-    safeSetItem("traccar:baseUrl", null);
-    safeSetItem("traccar:secure", "false");
-    safeSetItem("traccar:token", null);
-    setTraccarBaseUrl(null);
-    setTraccarSecure(false);
-    setTraccarToken(null);
+  const clearSettings = () => {
+    useStore.getState().clearSettings();
     disconnect();
-  }
+  };
 
   const visibleComponents = useMemo(() => {
     const engineComps = Object.values(engineSnapshotsByDevice).flat();
@@ -410,7 +134,7 @@ export function App() {
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
     const activeDevices = new Set<number>();
     for (const [device, lastSeen] of Object.entries(deviceLastSeen)) {
-      if (lastSeen && lastSeen > cutoff) {
+      if (lastSeen == null || lastSeen > cutoff) {
         activeDevices.add(Number(device));
       }
     }
@@ -445,31 +169,24 @@ export function App() {
     }
   }, [visibleComponents]);
 
-  const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null);
-  const [isSidePanelOpen, setIsSidePanelOpen] = useState(true);
-
-  // Debug mode: show per-device ring buffer and scrub frames
-  const [debugMode, setDebugMode] = useState<boolean>(false);
-  const [debugFrameIndex, setDebugFrameIndex] = useState<number>(0);
-
   // Reset debug index when device or frame count changes
   useEffect(() => {
     if (selectedDeviceId == null || !debugMode) return;
-    const frames = enginesRef.current.get(selectedDeviceId)?.getDebugFrames() ?? [];
+    const frames = enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [];
     if (frames.length === 0) setDebugFrameIndex(0);
     else setDebugFrameIndex(Math.max(0, frames.length - 1));
   }, [selectedDeviceId, debugMode]);
 
   // current debug frame to render on the map (if any)
-  const currentDebugFrame = (selectedDeviceId != null && debugMode && enginesRef.current.get(selectedDeviceId)) ? (() => {
-    const fr = enginesRef.current.get(selectedDeviceId)?.getDebugFrames();
+  const currentDebugFrame = (selectedDeviceId != null && debugMode && enginesRef.get(selectedDeviceId)) ? (() => {
+    const fr = enginesRef.get(selectedDeviceId)?.getDebugFrames();
     if (!fr || fr.length === 0) return null;
     const idx = Math.max(0, Math.min(fr.length - 1, debugFrameIndex));
     return fr[idx] ?? null;
   })() : null;
 
-  const currentDebugAnchors = (selectedDeviceId != null && debugMode && enginesRef.current.get(selectedDeviceId)) ? (() => {
-    const eng = enginesRef.current.get(selectedDeviceId);
+  const currentDebugAnchors = (selectedDeviceId != null && debugMode && enginesRef.get(selectedDeviceId)) ? (() => {
+    const eng = enginesRef.get(selectedDeviceId);
     if (!eng) return [] as Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
     const anchors: Array<{ mean: [number, number]; cov: [number, number, number]; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }> = [];
     if (eng.activeAnchor) anchors.push({ mean: [eng.activeAnchor.mean[0], eng.activeAnchor.mean[1]], cov: [eng.activeAnchor.cov[0], eng.activeAnchor.cov[1], eng.activeAnchor.cov[2]], type: "active", startTimestamp: eng.activeAnchor.startTimestamp, endTimestamp: eng.activeAnchor.endTimestamp, confidence: eng.activeAnchor.confidence, lastUpdateTimestamp: eng.activeAnchor.lastUpdateTimestamp });
@@ -590,9 +307,9 @@ export function App() {
             <SettingsPanel
               baseUrlInput={baseUrlInput}
               setBaseUrlInput={setBaseUrlInput}
-              secureInput={secureInput}
+              secureInput={inputSecure}
               setSecureInput={setSecureInput}
-              tokenInput={tokenInput}
+              tokenInput={inputToken}
               setTokenInput={setTokenInput}
               wsStatus={wsStatus}
               wsError={wsError}

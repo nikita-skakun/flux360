@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { fetchPositions, fetchDevices } from "../src/api/traccarClient";
+import { fetchPositions } from "../src/api/positions";
+import { fetchDevices } from "../src/api/devices";
 
 test("fetchPositions uses Authorization header and omits token query parameter", async () => {
   let recordedUrl: string | null = null;

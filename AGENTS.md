@@ -8,7 +8,7 @@ Read [README.md](README.md) first for an overview of the project, current featur
 - Install: `bun add <package>`
 - Remove: `bun remove <package>`
 - Run scripts: `bun run <script>`
-- Tests: `bun test`
+- Typecheck: `bun run tsc --noEmit`
 
 ## Development
 
@@ -30,3 +30,4 @@ Read [README.md](README.md) first for an overview of the project, current featur
 - Never use `as any` - fix the types properly
 - Use proper type annotations and extend types when needed
 - Avoid using the non-null assertion operator (!) unless absolutely necessary
+- Do not use ESLint disable comments to suppress linting errors. Fix the underlying issues instead

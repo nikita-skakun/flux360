@@ -19,7 +19,7 @@ type Props = {
   setSelectedDeviceId: (id: number | null) => void;
   refLat: number | null;
   refLon: number | null;
-  enginesRef: React.MutableRefObject<Map<number, Engine>>;
+  enginesRef: Map<number, Engine>;
 };
 
 function humanDurationSince(ts: number, now: number = Date.now()): string {
@@ -70,7 +70,7 @@ function DeviceOverlayComponent({
   }
 
   // debug frames for this device (if debug enabled)
-  const engineForDevice = enginesRef.current.get(selectedDeviceId);
+  const engineForDevice = enginesRef.get(selectedDeviceId);
   const frames = debugMode && engineForDevice
     ? [...engineForDevice.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp)
     : [];
