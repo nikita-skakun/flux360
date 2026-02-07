@@ -1,6 +1,6 @@
-import js from '@eslint/js';
-import tseslint from '@typescript-eslint/eslint-plugin';
-import tsparser from '@typescript-eslint/parser';
+import js from '@eslint/js'
+import tseslint from '@typescript-eslint/eslint-plugin'
+import tsparser from '@typescript-eslint/parser'
 
 export default [
   js.configs.recommended,
@@ -37,7 +37,18 @@ export default [
       '@typescript-eslint/prefer-nullish-coalescing': 'error',
       '@typescript-eslint/prefer-optional-chain': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/await-thenable': 'error'
+      '@typescript-eslint/await-thenable': 'error',
+      'no-multiple-empty-lines': ['error', { max: 1, maxBOF: 0, maxEOF: 0 }],
+      'padding-lines-between-statements': [
+        'error',
+        { blankLine: 'never', prev: '*', next: '*' },
+        { blankLine: 'always', prev: '*', next: 'function' },
+        { blankLine: 'always', prev: '*', next: 'class' },
+        { blankLine: 'always', prev: '*', next: 'return' }
+      ],
+      'lines-between-class-members': ['error', 'never', { exceptAfterSingleLine: true }],
+      'padded-blocks': ['error', 'never'],
+      'max-len': ['error', { code: 140, ignoreComments: true }]
     }
   }
-];
+]
