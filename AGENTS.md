@@ -1,5 +1,7 @@
 # Agent Guidelines
 
+Read [README.md](README.md) first for an overview of the project, current features, and future ideas. Keep the README up to date as features evolve to maintain an evergreen reference.
+
 ## Package Manager
 
 - Use **bun** instead of npm for all package management commands
@@ -27,3 +29,4 @@
 
 - Never use `as any` - fix the types properly
 - Use proper type annotations and extend types when needed
+- Avoid using the non-null assertion operator (!) unless absolutely necessary
