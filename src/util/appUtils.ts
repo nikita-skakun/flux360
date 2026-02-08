@@ -11,8 +11,7 @@ export function dedupeKey(p: { device: number; timestamp: number; lat: number; l
 }
 
 export function measurementVarianceFromAccuracy(accuracyMeters: number) {
-  const v = accuracyMeters * accuracyMeters;
-  return v;
+  return accuracyMeters * accuracyMeters;
 }
 
 export function createDevicePoint(mean: [number, number], variance: number, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
