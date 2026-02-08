@@ -592,7 +592,7 @@ export const useStore = create<Store>()(
           groupMotionProfiles.set(group.id, profile);
         }
 
-        const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, state.motionProfiles, refLat, refLon);
+        const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, state.motionProfiles, refLat, refLon, state.refs.positionsAll);
         // deviceMotionProfiles is empty, need to pass proper profiles
         // Wait, in the code, groupMotionProfiles was used, but removed.
         // For now, pass empty or default.

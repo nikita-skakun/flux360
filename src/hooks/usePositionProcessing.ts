@@ -39,12 +39,12 @@ export function usePositionProcessing({
   const [snapshotsByDevice, setSnapshotsByDevice] = useState<Map<number, EngineSnapshot[]>>(new Map());
   const [dominantAnchors, setDominantAnchors] = useState<Map<number, Anchor | null>>(new Map());
   const buildEngineSnapshotsFromByDevice = useCallback((byDevice: Record<string, DevicePoint[]>): DevicePoint[] => {
-    const result = buildEngineSnapshotsFromByDeviceUtil(byDevice, enginesRef, groupIdsRef, groupMotionProfiles, deviceMotionProfiles, refLat, refLon);
+    const result = buildEngineSnapshotsFromByDeviceUtil(byDevice, enginesRef, groupIdsRef, groupMotionProfiles, deviceMotionProfiles, refLat, refLon, positionsAllRef);
     setEngineSnapshotsByDevice(result.positionsByDevice);
     setSnapshotsByDevice(result.snapshotsByDevice);
     setDominantAnchors(result.dominantAnchors);
     return Object.values(result.positionsByDevice).flat();
-  }, [enginesRef, groupIdsRef, groupMotionProfiles, deviceMotionProfiles, refLat, refLon]);
+  }, [enginesRef, groupIdsRef, groupMotionProfiles, deviceMotionProfiles, refLat, refLon, positionsAllRef]);
 
   const processPositions = useCallback((positions: NormalizedPosition[]): { lat: number; lon: number } | null => {
     if (!positions || positions.length === 0) return null;

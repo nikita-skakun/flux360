@@ -4,6 +4,7 @@ import type { EngineSnapshot } from "@/engine/engine";
 import type { Anchor } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import type { MotionProfileName } from "@/engine/motionDetector";
+import type { NormalizedPosition } from "@/api/positions";
 
 export function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -27,7 +28,8 @@ export function buildEngineSnapshotsFromByDevice(
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
   refLat: number | null,
-  refLon: number | null
+  refLon: number | null,
+  positionsAll: NormalizedPosition[]
 ): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null> } {
   try {
     const measurementsByDevice: Record<number, DevicePoint[]> = {};
@@ -70,6 +72,15 @@ export function buildEngineSnapshotsFromByDevice(
         const timestamp = latestMeasurementTime;
         const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
         const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
+
+        if (engine.motionActive) {
+          const latestRaw = positionsAll.filter(p => p.device === dId).pop();
+          if (latestRaw) {
+            const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1 };
+            currentSnapshots[dId] = [point];
+            continue;
+          }
+        }
 
         const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
         currentSnapshots[dId] = [point];
