@@ -3,7 +3,23 @@ import { Anchor } from "./anchor";
 import { MOTION_PROFILES, distanceMeters, directionFromAnchor, computeCoherence } from "./motionDetector";
 import type { MotionProfileName, MotionProfileConfig, OutlierSample } from "./motionDetector";
 
+// Snapshot for UI/Historical view
 export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number | null; activeConfidence: number };
+
+// Full engine state for checkpointing
+export type EngineState = {
+  activeAnchor: Anchor | null;
+  closedAnchors: Anchor[];
+  candidateAnchor: Anchor | null;
+  lastTimestamp: number | null;
+  motionProfile: MotionProfileName;
+  motionActive: boolean;
+  motionStartTimestamp: number | null;
+  outliers: OutlierSample[];
+  recentMotionPoints: DevicePoint[];
+  debugFrames: DebugFrame[];
+  seenDebugKeys: Set<string>;
+};
 
 const DECAY_RATE_ACTIVE = 0.001;
 const GAIN_RATE = 2.0;
@@ -276,7 +292,7 @@ export class Engine {
               const newVariance = this.computeAverageVariance(points);
               this.activeAnchor.endTimestamp = m.timestamp;
               this.closedAnchors.push(this.activeAnchor);
-              this.activeAnchor = new Anchor(newMean, newVariance, this.motionStartTimestamp!);
+              this.activeAnchor = new Anchor(newMean, newVariance, m.timestamp);
               this.motionActive = false;
               this.motionStartTimestamp = null;
               this.outliers = [];
@@ -349,5 +365,33 @@ export class Engine {
       }
     }
     return best;
+  }
+  createSnapshot(): EngineState {
+    return {
+      activeAnchor: this.activeAnchor ? this.activeAnchor.clone() : null,
+      closedAnchors: this.closedAnchors.map(a => a.clone()),
+      candidateAnchor: this.candidateAnchor ? this.candidateAnchor.clone() : null,
+      lastTimestamp: this.lastTimestamp,
+      motionProfile: this.motionProfile,
+      motionActive: this.motionActive,
+      motionStartTimestamp: this.motionStartTimestamp,
+      outliers: JSON.parse(JSON.stringify(this.outliers)) as OutlierSample[], // Deep copy outliers
+      recentMotionPoints: JSON.parse(JSON.stringify(this.recentMotionPoints)) as DevicePoint[], // Deep copy points
+      debugFrames: [...this.debugFrames], // Shallow copy array of frames (frames themselves are immutable-ish once created)
+      seenDebugKeys: new Set(this.seenDebugKeys),
+    };
+  }
+  restoreSnapshot(state: EngineState): void {
+    this.activeAnchor = state.activeAnchor ? state.activeAnchor.clone() : null;
+    this.closedAnchors = state.closedAnchors.map(a => a.clone());
+    this.candidateAnchor = state.candidateAnchor ? state.candidateAnchor.clone() : null;
+    this.lastTimestamp = state.lastTimestamp;
+    this.motionProfile = state.motionProfile;
+    this.motionActive = state.motionActive;
+    this.motionStartTimestamp = state.motionStartTimestamp;
+    this.outliers = JSON.parse(JSON.stringify(state.outliers)) as OutlierSample[];
+    this.recentMotionPoints = JSON.parse(JSON.stringify(state.recentMotionPoints)) as DevicePoint[];
+    this.debugFrames = [...state.debugFrames];
+    this.seenDebugKeys = new Set(state.seenDebugKeys);
   }
 }

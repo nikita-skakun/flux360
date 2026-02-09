@@ -5,6 +5,7 @@ import type { NormalizedPosition } from '@/api/positions';
 import type { DevicePoint } from '@/ui/types';
 import type { MotionProfileName } from '@/engine/motionDetector';
 import { Engine } from '@/engine/engine';
+import type { EngineState } from '@/engine/engine';
 import type { Anchor } from '@/engine/anchor';
 import { degreesToMeters } from '@/util/geo';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
@@ -18,6 +19,7 @@ export type Refs = {
   processedKeys: Set<string>;
   positionsAll: NormalizedPosition[];
   firstPosition: { lat: number; lon: number } | null;
+  engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>;
 };
 
 export type GroupDevice = {
@@ -80,6 +82,7 @@ type StoreState = {
     processedKeys: Set<string>;
     positionsAll: NormalizedPosition[];
     firstPosition: { lat: number; lon: number } | null;
+    engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>;
   };
 
   // Engine snapshots and anchors
@@ -163,6 +166,7 @@ const initialState: StoreState = {
     processedKeys: new Set(),
     positionsAll: [],
     firstPosition: null,
+    engineCheckpoints: new Map(),
   },
   engineSnapshotsByDevice: {},
   dominantAnchors: new Map() as Map<number, Anchor | null>,
@@ -494,7 +498,7 @@ export const useStore = create<Store>()(
       processPositions: () => {
         const state = get();
         const { refs } = state;
-        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition } = refs;
+        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition, engineCheckpoints } = refs;
         const { refLat, refLon } = state.ui;
         const allPositions = positionsAll;
         const groupDevices = state.groups;
@@ -548,6 +552,61 @@ export const useStore = create<Store>()(
           }
         }
 
+        // Check for out-of-order data and replay if necessary
+        for (const [key, newPositionsForDevice] of Object.entries(posByDevice)) {
+          const deviceId = Number(key);
+          const engine = engines.get(deviceId);
+          if (!engine?.lastTimestamp) continue;
+
+          newPositionsForDevice.sort((a, b) => a.timestamp - b.timestamp);
+          if (newPositionsForDevice.length === 0 || !newPositionsForDevice[0]) continue;
+          const minTs = newPositionsForDevice[0].timestamp;
+
+          if (minTs < engine.lastTimestamp) {
+            const checkpoints = engineCheckpoints.get(deviceId) ?? [];
+            let cp = null;
+            let cpIndex = -1;
+            for (let i = checkpoints.length - 1; i >= 0; i--) {
+              const checkpoint = checkpoints[i];
+              if (checkpoint && checkpoint.timestamp < minTs) {
+                cp = checkpoint;
+                cpIndex = i;
+                break;
+              }
+            }
+
+            let replayFrom = 0;
+            if (cp) {
+              engine.restoreSnapshot(cp.snapshot);
+              replayFrom = cp.timestamp;
+              // Prune invalid future checkpoints
+              const validCheckpoints = checkpoints.slice(0, cpIndex + 1);
+              engineCheckpoints.set(deviceId, validCheckpoints);
+            } else {
+              engines.set(deviceId, new Engine());
+              engineCheckpoints.set(deviceId, []);
+              replayFrom = 0;
+            }
+
+            // Gather all historical positions > replayFrom
+            let relevantDeviceIds = new Set<number>();
+            if (groupIds.has(deviceId)) {
+              const group = groupDevices.find(g => g.id === deviceId);
+              if (group) {
+                group.memberDeviceIds.forEach(id => relevantDeviceIds.add(id));
+              }
+            } else {
+              relevantDeviceIds.add(deviceId);
+            }
+
+            // Must sort positionsAll if not already sorted? Assuming implicit sort by arrival.
+            // But to be safe, filtering -> sort is better.
+            const historical = positionsAll.filter(p => relevantDeviceIds.has(p.device) && p.timestamp > replayFrom);
+            historical.sort((a, b) => a.timestamp - b.timestamp);
+            posByDevice[deviceId] = historical;
+          }
+        }
+
         for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
 
         const rawByDevice: Record<number, DevicePoint[]> = {};
@@ -593,9 +652,26 @@ export const useStore = create<Store>()(
         }
 
         const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, state.motionProfiles, refLat, refLon, state.refs.positionsAll);
-        // deviceMotionProfiles is empty, need to pass proper profiles
-        // Wait, in the code, groupMotionProfiles was used, but removed.
-        // For now, pass empty or default.
+
+        // Update checkpoints
+        for (const [key, points] of Object.entries(rawByDevice)) {
+          if (points.length === 0) continue;
+          const deviceId = Number(key);
+          const engine = engines.get(deviceId);
+          if (engine?.lastTimestamp) {
+            let checkpoints = engineCheckpoints.get(deviceId);
+            if (!checkpoints) {
+              checkpoints = [];
+              engineCheckpoints.set(deviceId, checkpoints);
+            }
+            const lastCp = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1] : null;
+            // Checkpoint every 5 minutes
+            if (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > 300000) {
+              checkpoints.push({ timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() });
+              if (checkpoints.length > 50) checkpoints.shift(); // Keep last 50
+            }
+          }
+        }
 
         // Set the results
         set(state => ({
