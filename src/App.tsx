@@ -33,7 +33,25 @@ export function App() {
   const devices = useStore(state => state.devices);
   const deviceNames = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.name])), [devices]);
   const deviceIcons = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.icon])), [devices]);
-  const deviceLastSeen = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.lastSeen])), [devices]);
+  const deviceLastSeen = useMemo(() => {
+    const lastSeen = Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.lastSeen]));
+
+    // Add groups to deviceLastSeen
+    for (const group of groupDevices) {
+      let maxLastSeen: number | null = null;
+      for (const memberId of group.memberDeviceIds) {
+        const memberTimestamp = lastSeen[memberId];
+        if (memberTimestamp) {
+          if (!maxLastSeen || memberTimestamp > maxLastSeen) {
+            maxLastSeen = memberTimestamp;
+          }
+        }
+      }
+      lastSeen[group.id] = maxLastSeen;
+    }
+
+    return lastSeen;
+  }, [devices, groupDevices]);
   const positionsAllRef = useStore(state => state.refs.positionsAll);
   const setPositionsAll = useStore(state => state.setPositionsAll);
   const firstPositionRef = useStore(state => state.refs.firstPosition as { lat: number; lon: number } | null);
