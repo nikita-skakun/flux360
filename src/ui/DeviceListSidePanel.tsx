@@ -5,10 +5,11 @@ type Device = {
   id: number | string;
   isGroup?: boolean;
   name: string;
-  icon: string;
+  emoji: string;
   lastSeen: number | null;
   hasPosition: boolean;
   memberDeviceIds?: number[];
+  color?: string | null;
 };
 
 const formatLastSeen = (ts: number | null): string => {
@@ -78,7 +79,8 @@ const DeviceListSidePanel: React.FC<{
   const renderItem = (device: Device, depth: number = 0, isLast = false, isFirst = false) => {
     const colorId = typeof device.id === "string" ? device.id.split("-").pop()?.charCodeAt(0) ?? 0 : Number(device.id);
     const [r, g, b] = colorForDevice(colorId);
-    const colorStr = `rgb(${r}, ${g}, ${b})`;
+    const defaultColor = `rgb(${r}, ${g}, ${b})`;
+    const colorStr = device.color ?? defaultColor;
     const status = getOnlineStatus(device.lastSeen);
     const displayName = device.name || `Device ${device.id}`;
     const children = (device.isGroup ? device.memberDeviceIds ?? [] : [])
@@ -106,10 +108,10 @@ const DeviceListSidePanel: React.FC<{
 
             <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => device.isGroup && toggle(e, device.id)}>
               <div className={`w-10 h-10 rounded-full bg-white border-2 flex items-center justify-center ${device.isGroup ? "cursor-pointer hover:bg-gray-50" : ""}`} style={{ borderColor: colorStr }}>
-                {device.icon?.length > 1 ? (
-                  <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.icon}</span>
+                {device.emoji?.length > 1 ? (
+                  <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.emoji}</span>
                 ) : (
-                  <span style={{ color: colorStr, fontSize: "16px", fontWeight: "600" }} className="select-none">{device.icon || displayName}</span>
+                  <span style={{ color: colorStr, fontSize: "16px", fontWeight: "600" }} className="select-none">{device.emoji || displayName}</span>
                 )}
               </div>
               {sortedChildren.length > 0 && (

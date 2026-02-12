@@ -28,15 +28,18 @@ export type GroupDevice = {
   emoji: string;
   color: string;
   memberDeviceIds: number[];
+  motionProfile: MotionProfileName | null;
 };
 
 type StoreState = {
   // Devices slice
   devices: Record<number, {
     name: string;
-    icon: string;
+    emoji: string;
     lastSeen: number | null;
-    motionProfile: MotionProfileName;
+    effectiveMotionProfile: MotionProfileName;
+    motionProfile: MotionProfileName | null;
+    color: string | null;
   }>;
 
   // Groups slice
@@ -72,6 +75,7 @@ type StoreState = {
     refLat: number | null;
     refLon: number | null;
     worldBounds: WorldBounds | null;
+    editingTarget: { type: 'device' | 'group', id: number } | null;
   };
 
   // Refs slice (reactive)
@@ -97,10 +101,11 @@ type StoreActions = {
   deleteGroup: (groupId: number) => Promise<void>;
   addDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
   removeDeviceFromGroup: (groupId: number, deviceId: number) => Promise<void>;
-  updateGroup: (groupId: number, updates: { name?: string }) => Promise<void>;
+  updateGroup: (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
+  updateDevice: (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
 
   // Motion Profiles
-  updateMotionProfile: (deviceId: number, profile: MotionProfileName) => void;
+  updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => void;
 
   // Positions
   addPositions: (positions: NormalizedPosition[]) => void;
@@ -128,6 +133,7 @@ type StoreActions = {
   setWorldBounds: (bounds: WorldBounds | null) => void;
   setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
   setDominantAnchors: (anchors: Map<number, Anchor | null>) => void;
+  setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
 
 type Store = StoreState & StoreActions;
@@ -158,6 +164,7 @@ const initialState: StoreState = {
     refLat: null,
     refLon: null,
     worldBounds: null,
+    editingTarget: null,
   },
   refs: {
     deviceToGroupsMap: new Map(),
@@ -185,6 +192,8 @@ export const useStore = create<Store>()(
         const iconMap: Record<number, string> = {};
         const lastSeenMap: Record<number, number | null> = {};
         const motionProfileMap: Record<number, MotionProfileName> = {};
+        const motionProfileAttributeMap: Record<number, MotionProfileName | null> = {};
+        const colorAttributeMap: Record<number, string | null> = {};
         const groupDevicesMap = new Map<number, GroupDevice>();
 
         for (const device of devices) {
@@ -198,6 +207,10 @@ export const useStore = create<Store>()(
             profile = profileAttr;
           }
           motionProfileMap[device.id] = profile;
+          motionProfileAttributeMap[device.id] = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
+
+          const colorAttr = typeof device.attributes["color"] === "string" ? device.attributes["color"] as string : null;
+          colorAttributeMap[device.id] = colorAttr;
 
           // Check if it's a group device
           const memberDeviceIdsAttr = device.attributes["memberDeviceIds"];
@@ -205,13 +218,25 @@ export const useStore = create<Store>()(
             try {
               const memberDeviceIds = JSON.parse(memberDeviceIdsAttr) as unknown;
               if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((id): id is number => typeof id === "number")) {
-                const color = rgbToHex(...colorForDevice(device.id));
+                let color = rgbToHex(...colorForDevice(device.id));
+                const colorAttr = device.attributes["color"];
+                if (typeof colorAttr === "string") {
+                  color = colorAttr;
+                }
+
+                let groupMotionProfile: MotionProfileName | null = null;
+                const mpAttr = device.attributes["motionProfile"];
+                if (typeof mpAttr === "string" && (mpAttr === "person" || mpAttr === "car")) {
+                  groupMotionProfile = mpAttr;
+                }
+
                 groupDevicesMap.set(device.id, {
                   id: device.id,
                   name: device.name,
                   emoji: device.emoji,
                   color,
                   memberDeviceIds,
+                  motionProfile: groupMotionProfile,
                 });
               }
             } catch {
@@ -234,15 +259,20 @@ export const useStore = create<Store>()(
 
         set(state => ({
           devices: Object.fromEntries(
-            Object.entries(nameMap).map(([id, name]) => [
-              Number(id),
-              {
-                name,
-                icon: iconMap[Number(id)] ?? '',
-                lastSeen: lastSeenMap[Number(id)] ?? null,
-                motionProfile: motionProfileMap[Number(id)] ?? 'person',
-              }
-            ])
+            Object.entries(nameMap).map(([id, name]) => {
+              const numId = Number(id);
+              return [
+                numId,
+                {
+                  name,
+                  emoji: iconMap[numId] ?? '',
+                  lastSeen: lastSeenMap[numId] ?? null,
+                  effectiveMotionProfile: motionProfileMap[numId] ?? 'person',
+                  motionProfile: motionProfileAttributeMap[numId] ?? null,
+                  color: colorAttributeMap[numId] ?? null,
+                }
+              ];
+            })
           ),
           groups: Array.from(groupDevicesMap.values()),
           motionProfiles: motionProfileMap,
@@ -263,7 +293,7 @@ export const useStore = create<Store>()(
         // Optimistic update
         const tempId = Date.now(); // Temporary ID until API response
         const color = rgbToHex(...colorForDevice(tempId));
-        const newGroup: GroupDevice = { id: tempId, name, emoji, color, memberDeviceIds };
+        const newGroup: GroupDevice = { id: tempId, name, emoji, color, memberDeviceIds, motionProfile: null };
 
         set(state => ({
           groups: [...state.groups, newGroup],
@@ -336,9 +366,11 @@ export const useStore = create<Store>()(
                 ...state.devices,
                 [groupId]: {
                   name: groupToDelete.name,
-                  icon: groupToDelete.emoji,
+                  emoji: groupToDelete.emoji,
                   lastSeen: null,
-                  motionProfile: 'person',
+                  effectiveMotionProfile: 'person',
+                  motionProfile: null,
+                  color: null,
                 }
               },
               refs: {
@@ -407,16 +439,34 @@ export const useStore = create<Store>()(
         }
       },
 
-      updateGroup: async (groupId: number, updates: { name?: string }) => {
+      updateGroup: async (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
         const { updateGroupDevice } = await import("@/api/devices");
+
+        let defaultColor: string | null = null;
+        if (updates.color === null) {
+          const { colorForDevice } = await import("@/ui/color");
+          const rgbToHex = (r: number, g: number, b: number): string => `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+          defaultColor = rgbToHex(...colorForDevice(groupId));
+        }
+
         const state = get();
         const group = state.groups?.find(g => g.id === groupId);
         if (!group) return;
 
         // Optimistic update
-        const originalName = group.name;
+        const original = { ...group };
         set(state => ({
-          groups: state.groups.map(g => g.id === groupId ? { ...g, name: updates.name ?? g.name } : g),
+          groups: state.groups.map(g => {
+            if (g.id !== groupId) return g;
+
+            return {
+              ...g,
+              name: updates.name ?? g.name,
+              emoji: updates.emoji ?? g.emoji,
+              color: updates.color === null ? defaultColor! : (updates.color ?? g.color),
+              motionProfile: updates.motionProfile !== undefined ? updates.motionProfile : g.motionProfile
+            };
+          }),
         }));
 
         try {
@@ -428,62 +478,60 @@ export const useStore = create<Store>()(
         } catch (error) {
           // Rollback
           set(state => ({
-            groups: state.groups.map(g => g.id === groupId ? { ...g, name: originalName } : g),
+            groups: state.groups.map(g => g.id === groupId ? original : g),
           }));
           throw error;
         }
       },
 
-      updateMotionProfile: (deviceId: number, profile: MotionProfileName) => {
-        set(state => {
-          const existing = state.devices[deviceId];
-          if (!existing) return state; // No-op if device not in state
-          return {
-            devices: {
-              ...state.devices,
-              [deviceId]: {
-                ...existing,
-                motionProfile: profile,
-              }
-            },
-            motionProfiles: {
-              ...state.motionProfiles,
-              [deviceId]: profile,
-            }
-          };
-        });
+      updateDevice: async (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
+        const { updateDevice } = await import("@/api/devices");
+        const state = get();
+        const existing = state.devices[deviceId];
+        if (!existing) return;
 
-        // Async API call
-        void (async () => {
-          const { updateDeviceAttributes } = await import("@/api/devices");
-          const state = get();
-          try {
-            await updateDeviceAttributes({
-              baseUrl: state.settings.baseUrl,
-              secure: state.settings.secure,
-              auth: { type: "token" as const, token: state.settings.token },
-            }, deviceId, { motionProfile: profile });
-          } catch {
-            // Rollback
-            set(state => {
-              const existing = state.devices[deviceId];
-              if (!existing) return state;
-              return {
-                devices: {
-                  ...state.devices,
-                  [deviceId]: {
-                    ...existing,
-                    motionProfile: existing.motionProfile, // Restore original
-                  }
-                },
-                motionProfiles: {
-                  ...state.motionProfiles,
-                  [deviceId]: existing.motionProfile,
-                }
-              };
-            });
+        // Optimistic update
+        const original = { ...existing };
+        const newProfileAttribute = updates.motionProfile !== undefined ? updates.motionProfile : existing.motionProfile;
+        const newEffectiveProfile = newProfileAttribute ?? "person"; // Default for devices
+
+        set(state => ({
+          devices: {
+            ...state.devices,
+            [deviceId]: {
+              ...existing,
+              name: updates.name ?? existing.name,
+              emoji: updates.emoji ?? existing.emoji,
+              effectiveMotionProfile: newEffectiveProfile,
+              motionProfile: newProfileAttribute,
+              color: updates.color !== undefined ? updates.color : existing.color,
+            }
+          },
+          motionProfiles: {
+            ...state.motionProfiles,
+            [deviceId]: newEffectiveProfile
           }
-        })();
+        }));
+
+        try {
+          await updateDevice({
+            baseUrl: state.settings.baseUrl,
+            secure: state.settings.secure,
+            auth: { type: "token" as const, token: state.settings.token },
+          }, deviceId, updates);
+        } catch (error) {
+          // Rollback
+          set(state => ({
+            devices: { ...state.devices, [deviceId]: original },
+            motionProfiles: { ...state.motionProfiles, [deviceId]: original.effectiveMotionProfile }
+          }));
+          throw error;
+        }
+      },
+
+      updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => {
+        // Wrapper for updateDevice just for motion profile
+        get().updateDevice(deviceId, { motionProfile: profile });
       },
 
       addPositions: (positions: NormalizedPosition[]) => {
@@ -641,6 +689,10 @@ export const useStore = create<Store>()(
 
         const groupMotionProfiles = new Map<number, MotionProfileName>();
         for (const group of groupDevices) {
+          if (group.motionProfile) {
+            groupMotionProfiles.set(group.id, group.motionProfile);
+            continue;
+          }
           let profile: MotionProfileName = "person";
           for (const memberId of group.memberDeviceIds) {
             if ((state.motionProfiles[memberId] ?? "person") === "car") {
@@ -855,6 +907,15 @@ export const useStore = create<Store>()(
       setDominantAnchors: (anchors) => {
         set(() => ({
           dominantAnchors: anchors,
+        }));
+      },
+
+      setEditingTarget: (target) => {
+        set(state => ({
+          ui: {
+            ...state.ui,
+            editingTarget: target,
+          }
         }));
       },
     }),

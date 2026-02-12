@@ -5,6 +5,7 @@ import { useTraccarConnection } from "./hooks/useTraccarConnection";
 import MapView from "./ui/MapView";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import TrackerGroupsModal from "./ui/TrackerGroupsModal";
+import UnifiedEditModal from "./ui/UnifiedEditModal";
 import { useStore } from "./store";
 
 export function App() {
@@ -18,9 +19,7 @@ export function App() {
   const updateGroup = useStore(state => state.updateGroup);
   const processPositions = useStore(state => state.processPositions);
   const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
-  const updateMotionProfile = useStore(state => state.updateMotionProfile);
 
-  const deviceMotionProfiles = useStore(state => state.motionProfiles);
   const groupDevices = useStore(state => state.groups);
   const deviceToGroupsMapRef = useStore(state => state.refs.deviceToGroupsMap);
   const groupIdsRef = useStore(state => state.refs.groupIds);
@@ -32,7 +31,7 @@ export function App() {
   const enginesRef = useStore(state => state.refs.engines);
   const devices = useStore(state => state.devices);
   const deviceNames = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.name])), [devices]);
-  const deviceIcons = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.icon])), [devices]);
+  const deviceIcons = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.emoji])), [devices]);
   const deviceLastSeen = useMemo(() => {
     const lastSeen = Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.lastSeen]));
 
@@ -77,6 +76,8 @@ export function App() {
   const setDebugMode = useStore(state => state.setDebugMode);
   const debugFrameIndex = useStore(state => state.ui.debugFrameIndex);
   const setDebugFrameIndex = useStore(state => state.setDebugFrameIndex);
+  const editingTarget = useStore(state => state.ui.editingTarget);
+  const setEditingTarget = useStore(state => state.setEditingTarget);
 
   const { wsStatus, wsError, updateCounter, reconnect, disconnect, positions } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
@@ -131,7 +132,6 @@ export function App() {
   const handleDeleteGroup = deleteGroup;
   const handleAddDeviceToGroup = addDeviceToGroup;
   const handleRemoveDeviceFromGroup = removeDeviceFromGroup;
-  const handleUpdateMotionProfile = updateMotionProfile;
   const handleUpdateGroup = updateGroup;
 
   const applySettings = () => {
@@ -229,10 +229,11 @@ export function App() {
       id: number | string;
       isGroup: boolean;
       name: string;
-      icon: string;
+      emoji: string;
       lastSeen: number | null;
       hasPosition: boolean;
       memberDeviceIds?: number[];
+      color?: string | null;
     }> = [];
 
     // Track seen IDs to prevent duplicates
@@ -260,9 +261,10 @@ export function App() {
         id: numId,
         isGroup: false,
         name,
-        icon: deviceIcons[numId] ?? "device_unknown",
+        emoji: deviceIcons[numId] ?? "device_unknown",
         lastSeen,
         hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
+        color: devices[numId]?.color ?? null,
       });
       seenIds.add(numId);
     }
@@ -281,10 +283,11 @@ export function App() {
         id: groupDevice.id,
         isGroup: true,
         name: groupDevice.name,
-        icon: groupDevice.emoji,
+        emoji: groupDevice.emoji,
         lastSeen: groupLastSeen,
         hasPosition: (engineSnapshotsByDevice[groupDevice.id]?.length ?? 0) > 0,
         memberDeviceIds: groupDevice.memberDeviceIds,
+        color: groupDevice.color,
       });
       seenIds.add(groupDevice.id);
     }
@@ -348,12 +351,11 @@ export function App() {
               deviceNames={deviceNames}
               deviceLastSeen={deviceLastSeen}
               groupDevices={groupDevices}
-              deviceMotionProfiles={deviceMotionProfiles}
-              handleUpdateMotionProfile={handleUpdateMotionProfile}
               setSelectedDeviceId={setSelectedDeviceId}
               refLat={refLat}
               refLon={refLon}
               enginesRef={enginesRef}
+              setEditingTarget={setEditingTarget}
             />
 
           </div>
@@ -374,6 +376,12 @@ export function App() {
         onAddDeviceToGroup={handleAddDeviceToGroup}
         onRemoveDeviceFromGroup={handleRemoveDeviceFromGroup}
         onUpdateGroup={handleUpdateGroup}
+      />
+      <UnifiedEditModal
+        isOpen={!!editingTarget}
+        onClose={() => setEditingTarget(null)}
+        type={editingTarget?.type ?? 'device'}
+        id={editingTarget?.id ?? 0}
       />
     </div>
   );

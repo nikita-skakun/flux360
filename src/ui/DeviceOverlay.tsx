@@ -2,7 +2,6 @@ import type { DevicePoint } from "@/ui/types";
 import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
 import { metersToDegrees } from "@/util/geo";
 import { Engine } from "@/engine/engine";
-import type { MotionProfileName } from "@/engine/motionDetector";
 import React from "react";
 
 type Props = {
@@ -14,12 +13,11 @@ type Props = {
   deviceNames: Record<number, string>;
   deviceLastSeen: Record<number, number | null>;
   groupDevices: Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>;
-  deviceMotionProfiles: Record<number, MotionProfileName>;
-  handleUpdateMotionProfile: (deviceId: number, profile: MotionProfileName) => void;
   setSelectedDeviceId: (id: number | null) => void;
   refLat: number | null;
   refLon: number | null;
   enginesRef: Map<number, Engine>;
+  setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
 
 function humanDurationSince(ts: number, now: number = Date.now()): string {
@@ -43,12 +41,11 @@ function DeviceOverlayComponent({
   deviceNames,
   deviceLastSeen,
   groupDevices,
-  deviceMotionProfiles,
-  handleUpdateMotionProfile,
   setSelectedDeviceId,
   refLat,
   refLon,
   enginesRef,
+  setEditingTarget,
 }: Props) {
   if (selectedDeviceId == null) return null;
 
@@ -98,23 +95,27 @@ function DeviceOverlayComponent({
               {(chosen).sourceDeviceId !== undefined && <div className="text-foreground/50 text-xs mt-0.5">Current source: {deviceNames[(chosen).sourceDeviceId] ?? `Device ${(chosen).sourceDeviceId}`}</div>}
             </div>
           )}
-          {!group && typeof chosen.device === "number" && (
-            <div className="mt-2 text-xs text-foreground/70">
-              <label className="block text-[11px] uppercase tracking-wide text-foreground/50 mb-1">Motion profile</label>
-              <select
-                className="border rounded px-2 py-1 text-xs bg-white"
-                value={deviceMotionProfiles[chosen.device] ?? "person"}
-                onChange={(e) => handleUpdateMotionProfile(chosen.device, e.target.value === "car" ? "car" : "person")}
-              >
-                <option value="person">Person</option>
-                <option value="car">Car</option>
-              </select>
-            </div>
-          )}
           <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
           <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
         </div>
-        <button aria-label="Deselect device" title="Close" className="ml-2 text-sm px-2 py-1 rounded border" onClick={() => setSelectedDeviceId(null)}>×</button>
+        <div className="flex items-center gap-1">
+          <button
+            aria-label="Edit settings"
+            title="Edit Settings"
+            className="w-8 h-8 flex items-center justify-center rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            onClick={() => setEditingTarget({ type: group ? 'group' : 'device', id: chosen.device })}
+          >
+            <span className="material-symbols-outlined text-lg">edit</span>
+          </button>
+          <button
+            aria-label="Deselect device"
+            title="Close"
+            className="w-8 h-8 flex items-center justify-center rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 text-2xl leading-none pb-1"
+            onClick={() => setSelectedDeviceId(null)}
+          >
+            ×
+          </button>
+        </div>
       </div>
       <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
 

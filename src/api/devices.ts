@@ -94,7 +94,8 @@ export async function updateGroupDevice(
   updates: {
     name?: string;
     emoji?: string;
-    color?: string;
+    color?: string | null;
+    motionProfile?: string | null;
     memberDeviceIds?: number[];
   }
 ): Promise<void> {
@@ -114,6 +115,7 @@ export async function updateGroupDevice(
   const attributes: Record<string, unknown> = {};
   if (updates.emoji !== undefined) attributes["emoji"] = updates.emoji;
   if (updates.color !== undefined) attributes["color"] = updates.color;
+  if (updates.motionProfile !== undefined) attributes["motionProfile"] = updates.motionProfile;
   if (updates.memberDeviceIds !== undefined) {
     attributes["memberDeviceIds"] = JSON.stringify(updates.memberDeviceIds);
   }
@@ -151,6 +153,59 @@ export async function updateDeviceAttributes(
 
   const payload: Record<string, unknown> = { ...device, attributes };
   return await performPut(fetcher, url, headers, payload);
+}
+
+export async function updateDevice(
+  opts: TraccarClientOptions,
+  deviceId: number,
+  updates: {
+    name?: string;
+    emoji?: string;
+    color?: string | null;
+    motionProfile?: string | null;
+  }
+): Promise<void> {
+  const fetcher = opts.fetchImpl ?? fetch;
+  const protocol = opts.secure ? 'https' : 'http';
+  const base = `${protocol}://${opts.baseUrl}/api`;
+  const url = `${base}/devices/${deviceId}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+  };
+  const authHeader = buildAuthHeader(opts.auth);
+  if (authHeader) headers["Authorization"] = authHeader;
+
+  // We need to fetch existing because PUT replaces the object usually, 
+  // or at least we need to merge attributes carefully. 
+  // Traccar PUT /devices/id often requires the full object or at least `id` and `uniqueId`.
+  const existing = await performGet(fetcher, url, headers);
+  if (!existing || typeof existing !== "object") throw new Error("Device not found");
+
+  const device = existing as Record<string, unknown>;
+  const uniqueId = device["uniqueId"];
+
+  const existingAttributes = (device["attributes"] && typeof device["attributes"] === "object")
+    ? (device["attributes"] as Record<string, unknown>)
+    : {};
+
+  const attributes: Record<string, unknown> = { ...existingAttributes };
+
+  if (updates.emoji !== undefined) attributes["emoji"] = updates.emoji;
+  if (updates.color !== undefined) attributes["color"] = updates.color;
+  if (updates.motionProfile !== undefined) attributes["motionProfile"] = updates.motionProfile;
+
+  const payload: Record<string, unknown> = {
+    id: deviceId,
+    uniqueId,
+    ...device,
+    attributes
+  };
+
+  if (updates.name !== undefined) payload["name"] = updates.name;
+
+  await performPut(fetcher, url, headers, payload);
 }
 
 export async function deleteGroupDevice(
