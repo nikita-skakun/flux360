@@ -45,10 +45,11 @@ export type DebugFrame = {
   after: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
+  trendSeparation: number | null;
 };
 
 const DEBUG_BUFFER_SIZE = 200;
-const STATIONARY_MAHALANOBIS2_THRESHOLD = 25;
+
 
 export class Engine {
   activeAnchor: Anchor | null = null;
@@ -184,6 +185,7 @@ export class Engine {
       // capture state before
       const beforeAnchor = this.activeAnchor ? this.activeAnchor.clone() : null;
       let mahalanobis2: number | null = null;
+      let trendSeparation: number | null = null;
       let decision: DebugDecision = 'none';
 
       if (this.activeAnchor === null) {
@@ -199,8 +201,25 @@ export class Engine {
         const dist2Active = this.activeAnchor.mahalanobis2(m);
         mahalanobis2 = dist2Active;
 
+
         if (!this.motionActive) {
-          if (dist2Active < STATIONARY_MAHALANOBIS2_THRESHOLD) {
+          if (dist2Active < profile.stationaryMahalanobisThreshold) {
+            // Detect stationary drift: when reports consistently fall outside the anchor's accuracy circle,
+            // we inflate the anchor's variance to allow it to move toward the new position.
+            const dist = distanceMeters(this.activeAnchor.mean, m.mean);
+            const anchorRadius = Math.sqrt(this.activeAnchor.variance);
+            const reportRadius = m.accuracy;
+            const separation = dist - (anchorRadius + reportRadius);
+            trendSeparation = separation;
+
+            if (separation > 0) {
+              // Accuracy circles don't overlap: inflate variance proportionally to separation.
+              // Division by variance (accuracy²) ensures inaccurate reports have minimal impact.
+              const inflation = 1 + (separation / m.variance) * profile.trendVarianceInflation;
+              this.activeAnchor.variance *= inflation;
+              this.activeAnchor.confidence /= inflation;
+            }
+
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
             decision = 'updated';
 
@@ -252,7 +271,7 @@ export class Engine {
             }
           }
         } else {
-          if (dist2Active < STATIONARY_MAHALANOBIS2_THRESHOLD) {
+          if (dist2Active < profile.stationaryMahalanobisThreshold) {
             this.motionActive = false;
             this.motionStartTimestamp = null;
             this.outliers = [];
@@ -264,14 +283,14 @@ export class Engine {
             this.candidateAnchor ??= new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp);
             const dist2Candidate = this.candidateAnchor.mahalanobis2(m);
             const dist2ActiveNow = this.activeAnchor.mahalanobis2(m);
-            if (dist2Candidate < STATIONARY_MAHALANOBIS2_THRESHOLD) {
+            if (dist2Candidate < profile.stationaryMahalanobisThreshold) {
               this.candidateAnchor.kalmanUpdate(m, GAIN_RATE);
               decision = 'candidate-updated';
             } else {
               this.insertOutlier({ point: m, score: 0, direction: null });
               this.candidateAnchor.kalmanUpdate(m, GAIN_RATE);
               decision = 'candidate-updated';
-              if (dist2ActiveNow < STATIONARY_MAHALANOBIS2_THRESHOLD) {
+              if (dist2ActiveNow < profile.stationaryMahalanobisThreshold) {
                 this.motionActive = false;
                 this.motionStartTimestamp = null;
                 this.candidateAnchor = null;
@@ -320,7 +339,6 @@ export class Engine {
         motionActiveBefore,
         motionActive: this.motionActive,
         motionStartTimestamp: this.motionStartTimestamp,
-
         outlierCount: this.outliers.length,
         motionScore,
         motionScoreSum,
@@ -334,6 +352,7 @@ export class Engine {
         after: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], variance: afterAnchor.variance, confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
         mahalanobis2,
         decision,
+        trendSeparation,
       });
 
       this.lastTimestamp = m.timestamp;

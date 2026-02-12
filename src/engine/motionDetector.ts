@@ -29,6 +29,8 @@ export type MotionProfileConfig = {
   motionSettleMahalanobisThreshold: number; // Mahalanobis threshold for point consistency
   motionSettleDirectionThreshold: number; // Max dot product for direction randomness
   maxCentroidRadiusMeters: number; // Max radius for centroid centering in settling
+  trendVarianceInflation: number; // Scale factor for variance inflation when reports fall outside anchor circle
+  stationaryMahalanobisThreshold: number; // Mahalanobis² threshold: below = stationary update, above = resisted/motion
 };
 
 /**
@@ -39,10 +41,10 @@ export type MotionProfileConfig = {
 export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
   person: {
     motionScoreThreshold: 0.1,
-    singlePointScoreThreshold: 4.0,
+    singlePointScoreThreshold: 3.0,
     singlePointOverrideMultiplier: 1.8,
-    singlePointAccuracyRatio: 3,
-    minDistanceAccuracyRatio: 1.0,
+    singlePointAccuracyRatio: 2.5,
+    minDistanceAccuracyRatio: 0.5,
     coherenceCosineThreshold: 0.7,
     coherenceBonus: 0.2,
     accuracyK: 5,
@@ -52,7 +54,9 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     motionSettleWindowSize: 3,
     motionSettleMahalanobisThreshold: 100,
     motionSettleDirectionThreshold: 0.5,
-    maxCentroidRadiusMeters: 5,
+    maxCentroidRadiusMeters: 10,
+    trendVarianceInflation: 20.0,
+    stationaryMahalanobisThreshold: 0.2,
   },
   car: {
     motionScoreThreshold: 4.0,
@@ -70,6 +74,8 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     motionSettleMahalanobisThreshold: 120,
     motionSettleDirectionThreshold: 0.2,
     maxCentroidRadiusMeters: 15,
+    trendVarianceInflation: 20.0,
+    stationaryMahalanobisThreshold: 25.0,
   },
 };
 
