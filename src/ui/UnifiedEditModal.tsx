@@ -12,7 +12,7 @@ type Props = {
     id: number;
 };
 
-const EMOJI_OPTIONS = ["group", "groups", "people", "directions_car", "personal_bag", "luggage", "directions_bike", "devices", "person", "smartphone", "watch", "bolt", "star"];
+const EMOJI_OPTIONS = ["group", "groups", "directions_car", "personal_bag", "luggage", "directions_bike", "devices", "person", "smartphone", "watch", "bolt", "star", "backpack", "home", "location_on", "pets"];
 
 const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     const device = useStore((state) => state.devices[id]);
@@ -146,7 +146,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                         </div>
 
                         {/* Icon Picker */}
-                        <div className="flex flex-wrap gap-1.5">
+                        <div className="flex flex-wrap gap-1.5 justify-center">
                             {EMOJI_OPTIONS.map(opt => (
                                 <button
                                     key={opt}
