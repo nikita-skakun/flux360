@@ -47,7 +47,14 @@ export const SettingsPanel = React.memo(function SettingsPanel({
           </button>
 
           <div className="flex items-center gap-4">
-            <label className="flex items-center gap-1 cursor-pointer">
+            <div className="text-xs flex items-center gap-2">
+              <span>
+                Status: <strong>{wsStatus}</strong>
+              </span>
+              {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
+            </div>
+
+            <label className="flex items-center gap-1 cursor-pointer border-l pl-3 ml-1">
               <input
                 type="checkbox"
                 checked={debugMode}
@@ -55,13 +62,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               />
               <span className="text-xs font-medium">Debug Mode</span>
             </label>
-
-            <div className="text-xs flex items-center gap-2 border-l pl-3 ml-1">
-              <span>
-                Status: <strong>{wsStatus}</strong>
-              </span>
-              {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
-            </div>
           </div>
         </div>
 
