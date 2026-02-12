@@ -10,12 +10,11 @@ type Props = {
   onApplySettings: () => void;
   onClearSettings: () => void;
   onReconnect: () => void;
-  onDisconnect: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
 };
 
-import React from "react";
+import React, { useState } from "react";
 
 export const SettingsPanel = React.memo(function SettingsPanel({
   baseUrlInput,
@@ -29,57 +28,90 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   onApplySettings,
   onClearSettings,
   onReconnect,
-  onDisconnect,
   debugMode,
   setDebugMode,
 }: Props) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
   return (
     <div className="w-full">
       <div className="mb-3 p-2 rounded bg-muted/10 border">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            className="border rounded px-2 py-1 w-[24rem]"
-            placeholder="Traccar Base URL (e.g. localhost:8082)"
-            value={baseUrlInput}
-            onChange={(e) => setBaseUrlInput(e.target.value)}
-          />
-          <label className="flex items-center gap-1">
+        {/* Header: Spoiler Toggle + Debug + Status */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-1 text-sm font-medium hover:opacity-80 transition-opacity"
+          >
+            <span className="w-4 text-center text-muted-foreground">{isExpanded ? "▼" : "▶"}</span>
+            Connection Settings
+          </button>
+
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={debugMode}
+                onChange={(e) => setDebugMode(e.target.checked)}
+              />
+              <span className="text-xs font-medium">Debug Mode</span>
+            </label>
+
+            <div className="text-xs flex items-center gap-2 border-l pl-3 ml-1">
+              <span>
+                Status: <strong>{wsStatus}</strong>
+              </span>
+              {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* Spoiler Body */}
+        {isExpanded && (
+          <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
             <input
-              type="checkbox"
-              checked={secureInput}
-              onChange={(e) => setSecureInput(e.target.checked)}
+              type="text"
+              className="border rounded px-2 py-1 w-[24rem] text-sm"
+              placeholder="Traccar Base URL (e.g. localhost:8082)"
+              value={baseUrlInput}
+              onChange={(e) => setBaseUrlInput(e.target.value)}
             />
-            Secure (HTTPS/WSS)
-          </label>
-          <input
-            type="password"
-            className="border rounded px-2 py-1 w-48"
-            placeholder="API Token"
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.target.value)}
-          />
-          <button className="px-3 py-1 rounded bg-primary text-white" onClick={onApplySettings}>
-            Save
-          </button>
-          <button className="px-3 py-1 rounded border" onClick={onClearSettings}>
-            Clear
-          </button>
-          <button className="px-3 py-1 rounded border" onClick={onReconnect}>
-            Reconnect
-          </button>
-          <button className="px-3 py-1 rounded border" onClick={onDisconnect}>
-            Disconnect
-          </button>
-          <label className="flex items-center gap-1 px-2">
-            <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
-            <span className="text-xs">Debug</span>
-          </label>
-        </div>
-        <div className="text-xs mt-2">
-          <span className="mr-2">Status: <strong>{wsStatus}</strong></span>
-          {wsError ? <span className="text-red-500">Error: {wsError}</span> : null}
-        </div>
+            <label className="flex items-center gap-1 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={secureInput}
+                onChange={(e) => setSecureInput(e.target.checked)}
+              />
+              Secure (HTTPS/WSS)
+            </label>
+            <input
+              type="password"
+              className="border rounded px-2 py-1 w-48 text-sm"
+              placeholder="API Token"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+            />
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
+              <button
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"
+                onClick={onApplySettings}
+              >
+                Save
+              </button>
+              <button
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"
+                onClick={onClearSettings}
+              >
+                Clear
+              </button>
+              <button
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"
+                onClick={onReconnect}
+              >
+                Reconnect
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

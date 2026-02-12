@@ -335,7 +335,6 @@ export function App() {
               onApplySettings={applySettings}
               onClearSettings={clearSettings}
               onReconnect={reconnect}
-              onDisconnect={disconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
             />
