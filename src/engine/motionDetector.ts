@@ -67,9 +67,9 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     weakVarianceInflation: 6,
     anchorVarianceInflationOnNoise: 1.35,
     motionSettleWindowSize: 3,
-    motionSettleMahalanobisThreshold: 100,
+    motionSettleMahalanobisThreshold: 120,
     motionSettleDirectionThreshold: 0.2,
-    maxCentroidRadiusMeters: 10,
+    maxCentroidRadiusMeters: 15,
   },
 };
 
