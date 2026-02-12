@@ -1,7 +1,7 @@
 import type { DevicePoint, Vec2 } from "@/ui/types";
 
 export const CONFIDENCE_HIGH_THRESHOLD = 0.8;
-export const CONFIDENCE_MEDIUM_THRESHOLD = 0.4;
+export const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
 
 export class Anchor {
   mean: Vec2;
@@ -10,7 +10,7 @@ export class Anchor {
   endTimestamp: number | null;
   confidence: number;
   lastUpdateTimestamp: number;
-  constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.5, lastUpdateTimestamp?: number) {
+  constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.1, lastUpdateTimestamp?: number) {
     this.mean = mean;
     this.variance = variance;
     this.startTimestamp = startTimestamp;
