@@ -4,7 +4,6 @@ import DeviceOverlay from "./ui/DeviceOverlay";
 import { useTraccarConnection } from "./hooks/useTraccarConnection";
 import MapView from "./ui/MapView";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
-import TrackerGroupsModal from "./ui/TrackerGroupsModal";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 import { useStore } from "./store";
 
@@ -12,11 +11,6 @@ export function App() {
   const setRefLat = useStore(state => state.setRefLat);
   const setRefLon = useStore(state => state.setRefLon);
   const setFirstPosition = useStore(state => state.setFirstPosition);
-  const createGroup = useStore(state => state.createGroup);
-  const deleteGroup = useStore(state => state.deleteGroup);
-  const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
-  const removeDeviceFromGroup = useStore(state => state.removeDeviceFromGroup);
-  const updateGroup = useStore(state => state.updateGroup);
   const processPositions = useStore(state => state.processPositions);
   const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
 
@@ -62,8 +56,6 @@ export function App() {
   const setTokenInput = useStore(state => state.setInputToken);
   const inputSecure = useStore(state => state.settings.inputSecure);
   const inputToken = useStore(state => state.settings.inputToken);
-  const showGroupsModal = useStore(state => state.ui.showGroupsModal);
-  const setShowGroupsModal = useStore(state => state.setShowGroupsModal);
   const traccarSecure = useStore(state => state.settings.secure);
   const traccarToken = useStore(state => state.settings.token);
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
@@ -126,13 +118,6 @@ export function App() {
       processPositions();
     }
   }, [groupDevices, processPositions]);
-
-  // Group CRUD handlers
-  const handleCreateGroup = createGroup;
-  const handleDeleteGroup = deleteGroup;
-  const handleAddDeviceToGroup = addDeviceToGroup;
-  const handleRemoveDeviceFromGroup = removeDeviceFromGroup;
-  const handleUpdateGroup = updateGroup;
 
   const applySettings = () => {
     useStore.getState().applySettings();
@@ -310,7 +295,6 @@ export function App() {
         }}
         isOpen={isSidePanelOpen}
         onToggle={() => setIsSidePanelOpen(!isSidePanelOpen)}
-        onShowGroupsModal={() => setShowGroupsModal(true)}
       />
       <MapView
         debugFrame={currentDebugFrame}
@@ -360,22 +344,6 @@ export function App() {
 
           </div>
         }
-      />
-      <TrackerGroupsModal
-        isOpen={showGroupsModal}
-        onClose={() => setShowGroupsModal(false)}
-        groupDevices={groupDevices}
-        allDevices={Object.entries(deviceNames)
-          .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
-          .map(([id, name]) => ({
-            id: Number(id),
-            name,
-          }))}
-        onCreateGroup={handleCreateGroup}
-        onDeleteGroup={handleDeleteGroup}
-        onAddDeviceToGroup={handleAddDeviceToGroup}
-        onRemoveDeviceFromGroup={handleRemoveDeviceFromGroup}
-        onUpdateGroup={handleUpdateGroup}
       />
       <UnifiedEditModal
         isOpen={!!editingTarget}

@@ -69,7 +69,6 @@ type StoreState = {
   ui: {
     selectedDeviceId: number | null;
     isSidePanelOpen: boolean;
-    showGroupsModal: boolean;
     debugMode: boolean;
     debugFrameIndex: number;
     refLat: number | null;
@@ -125,7 +124,6 @@ type StoreActions = {
   setSelectedDeviceId: (id: number | null) => void;
   toggleSidePanel: () => void;
   setIsSidePanelOpen: (open: boolean) => void;
-  setShowGroupsModal: (show: boolean) => void;
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
   setRefLat: (lat: number | null) => void;
@@ -158,7 +156,6 @@ const initialState: StoreState = {
   ui: {
     selectedDeviceId: null,
     isSidePanelOpen: true,
-    showGroupsModal: false,
     debugMode: false,
     debugFrameIndex: 0,
     refLat: null,
@@ -840,15 +837,6 @@ export const useStore = create<Store>()(
           ui: {
             ...state.ui,
             isSidePanelOpen: open,
-          }
-        }));
-      },
-
-      setShowGroupsModal: (show: boolean) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            showGroupsModal: show,
           }
         }));
       },
