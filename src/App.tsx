@@ -307,6 +307,7 @@ export function App() {
         }}
         isOpen={isSidePanelOpen}
         onToggle={() => setIsSidePanelOpen(!isSidePanelOpen)}
+        onShowGroupsModal={() => setShowGroupsModal(true)}
       />
       <MapView
         debugFrame={currentDebugFrame}
@@ -335,7 +336,6 @@ export function App() {
               onClearSettings={clearSettings}
               onReconnect={reconnect}
               onDisconnect={disconnect}
-              onShowGroupsModal={() => setShowGroupsModal(true)}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
             />

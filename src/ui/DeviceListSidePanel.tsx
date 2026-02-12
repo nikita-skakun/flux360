@@ -37,7 +37,8 @@ const DeviceListSidePanel: React.FC<{
   onSelectDevice: (id: number | string) => void;
   isOpen: boolean;
   onToggle: () => void;
-}> = ({ devices, selectedDeviceId, onSelectDevice, isOpen, onToggle }) => {
+  onShowGroupsModal: () => void;
+}> = ({ devices, selectedDeviceId, onSelectDevice, isOpen, onToggle, onShowGroupsModal }) => {
   const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
 
   useEffect(() => { if (!isOpen) setExpanded(new Set()); }, [isOpen]);
@@ -66,7 +67,10 @@ const DeviceListSidePanel: React.FC<{
     e.stopPropagation();
     setExpanded(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id))
+        next.delete(id);
+      else
+        next.add(id);
       return next;
     });
   };
@@ -77,7 +81,7 @@ const DeviceListSidePanel: React.FC<{
     const colorStr = `rgb(${r}, ${g}, ${b})`;
     const status = getOnlineStatus(device.lastSeen);
     const displayName = device.name || `Device ${device.id}`;
-    const children = (device.isGroup ? device.memberDeviceIds || [] : [])
+    const children = (device.isGroup ? device.memberDeviceIds ?? [] : [])
       .map(id => memberMap.get(id)).filter((d): d is Device => !!d);
 
     const sortedChildren = sort(children);
@@ -136,8 +140,11 @@ const DeviceListSidePanel: React.FC<{
       </button>
 
       <div className={`fixed top-0 left-0 h-full bg-white shadow-xl z-[1001] transition-all duration-300 ease-in-out ${isOpen ? "translate-x-0 pointer-events-auto" : "-translate-x-full pointer-events-none"}`} style={{ width: "280px" }}>
-        <div className="p-4 border-b bg-gray-50 flex items-center gap-4 pl-16">
+        <div className="p-4 border-b bg-gray-50 flex items-center justify-between pl-20">
           <div><h2 className="text-lg font-semibold text-gray-800">Devices</h2><p className="text-sm text-gray-500">{devices.length} total</p></div>
+          <button onClick={onShowGroupsModal} className="w-10 h-10 flex items-center justify-center rounded-full bg-white shadow-sm border border-gray-200 hover:bg-gray-50 transition-all" title="Manage Tracker Groups">
+            <span className="material-symbols-outlined text-gray-600">devices_other</span>
+          </button>
         </div>
         <div className="overflow-y-auto" style={{ height: "calc(100% - 110px)" }}>
           {devices.length === 0 ? <div className="p-4 text-center text-gray-500 text-sm">No devices found</div> : (

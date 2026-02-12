@@ -11,7 +11,6 @@ type Props = {
   onClearSettings: () => void;
   onReconnect: () => void;
   onDisconnect: () => void;
-  onShowGroupsModal: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
 };
@@ -31,7 +30,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   onClearSettings,
   onReconnect,
   onDisconnect,
-  onShowGroupsModal,
   debugMode,
   setDebugMode,
 }: Props) {
@@ -72,9 +70,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
           </button>
           <button className="px-3 py-1 rounded border" onClick={onDisconnect}>
             Disconnect
-          </button>
-          <button className="px-3 py-1 rounded border" onClick={onShowGroupsModal}>
-            Tracker Groups
           </button>
           <label className="flex items-center gap-1 px-2">
             <input type="checkbox" checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />
