@@ -81,7 +81,7 @@ function DeviceOverlayComponent({
   const mostRecentSourceName = mostRecentSourceId ? (deviceNames[mostRecentSourceId] ?? `Device ${mostRecentSourceId}`) : null;
 
   return (
-    <div className="p-2 rounded border bg-white/90 text-foreground">
+    <div className="p-2 rounded border bg-background/90 text-foreground backdrop-blur-sm border-border">
       <div className="flex items-start">
         <div className="flex-1">
           {(() => {
@@ -102,7 +102,7 @@ function DeviceOverlayComponent({
           <button
             aria-label="Edit settings"
             title="Edit Settings"
-            className="w-8 h-8 flex items-center justify-center rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            className="w-8 h-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted"
             onClick={() => setEditingTarget({ type: group ? 'group' : 'device', id: chosen.device })}
           >
             <span className="material-symbols-outlined text-lg">edit</span>
@@ -110,7 +110,7 @@ function DeviceOverlayComponent({
           <button
             aria-label="Deselect device"
             title="Close"
-            className="w-8 h-8 flex items-center justify-center rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 text-2xl leading-none pb-1"
+            className="w-8 h-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted text-2xl leading-none pb-1"
             onClick={() => setSelectedDeviceId(null)}
           >
             ×

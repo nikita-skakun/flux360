@@ -56,7 +56,7 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange }: P
           aria-label="Previous report"
           disabled={prevTime == null}
           onClick={() => prevTime != null && onChange(prevTime)}
-          className="h-8 px-2 rounded border bg-white text-sm hover:bg-gray-100 disabled:opacity-40 flex items-center justify-center leading-none"
+          className="h-8 px-2 rounded border bg-background text-sm hover:bg-muted disabled:opacity-40 flex items-center justify-center leading-none text-foreground border-border"
         >
           ‹
         </button>
@@ -88,7 +88,7 @@ export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange }: P
           aria-label="Next report"
           disabled={nextTime == null}
           onClick={() => nextTime != null && onChange(nextTime)}
-          className="h-8 px-2 rounded border bg-white text-sm hover:bg-gray-100 disabled:opacity-40 flex items-center justify-center leading-none"
+          className="h-8 px-2 rounded border bg-background text-sm hover:bg-muted disabled:opacity-40 flex items-center justify-center leading-none text-foreground border-border"
         >
           ›
         </button>
