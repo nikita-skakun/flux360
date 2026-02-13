@@ -83,7 +83,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
         <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={onClose} />
             <div className="relative bg-background text-foreground rounded-lg shadow-xl w-full max-w-md flex flex-col p-6 gap-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between border-b pb-4">
+                <div className="flex items-center justify-between">
                     <h2 className="text-xl font-bold">Edit {type === "device" ? "Device" : "Group"}</h2>
                     <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted text-2xl leading-none pb-1" aria-label="Close modal">×</button>
                 </div>
@@ -124,7 +124,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                                 }}
                                                 className={`text-xs w-full py-1.5 rounded border transition-colors ${color === null
                                                     ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800 font-medium"
-                                                    : "text-muted-foreground border-transparent hover:bg-muted/50"
+                                                    : "text-muted-foreground border-transparent hover:bg-muted/50 border border-border dark:border-white/10"
                                                     }`}
                                             >
                                                 Use Auto Color
@@ -140,7 +140,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                 value={name}
                                 onChange={e => setName(e.target.value)}
                                 placeholder="Name"
-                                className="flex-1 border rounded px-3 py-2 disabled:opacity-50 bg-background text-foreground border-border"
+                                className="flex-1 border border-border dark:border-white/10 rounded px-3 py-2 disabled:opacity-50 bg-background text-foreground"
                                 disabled={isLoading}
                             />
                         </div>
@@ -182,7 +182,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                     onClick={() => setMotionProfile(opt.value as MotionProfileName | null)}
                                     className={`py-2 px-3 rounded border text-sm font-medium transition-colors flex-auto ${motionProfile === opt.value
                                         ? "bg-blue-600 text-white border-blue-600"
-                                        : "bg-background text-foreground border-border hover:bg-muted/50"
+                                        : "bg-background text-foreground hover:bg-muted/50 border-border dark:border-white/10"
                                         }`}
                                     disabled={isLoading}
                                 >
@@ -194,7 +194,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
 
                 </div>
 
-                <div className="flex justify-end gap-2 mt-2 pt-4 border-t">
+                <div className="flex justify-end gap-2 mt-2">
                     <button
                         onClick={onClose}
                         className="px-4 py-2 rounded text-muted-foreground hover:bg-muted text-foreground"
