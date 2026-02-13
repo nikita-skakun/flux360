@@ -102,3 +102,10 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .border,
+  .border-border {
+    border-color: var(--border);
+  }
+}
