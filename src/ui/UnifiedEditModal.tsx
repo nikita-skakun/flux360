@@ -163,7 +163,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                             placeholder="Or type icon name (material symbols)"
                             value={emoji}
                             onChange={e => setEmoji(e.target.value)}
-                            className="w-full text-xs border rounded px-2 py-1 bg-background text-foreground border-border"
+                            className="w-full text-xs border border-border dark:border-white/10 rounded px-2 py-1 bg-background text-foreground"
                             disabled={isLoading}
                         />
                     </div>

@@ -36,8 +36,8 @@
   --accent-foreground: hsl(0 0% 98%);
   --destructive: hsl(0 62.8% 30.6%);
   --destructive-foreground: hsl(0 0% 98%);
-  --border: transparent;
-  --input: transparent;
+  --border: hsl(240 3.7% 15.9%);
+  --input: hsl(240 3.7% 15.9%);
   --ring: hsl(240 4.9% 83.9%);
 }
 
@@ -86,16 +86,8 @@
 }
 
 @layer base {
-  *,
-  ::after,
-  ::before,
-  ::backdrop,
-  ::file-selector-button {
-    @apply border-border dark:border-white/10;
-  }
-
   * {
-    @apply outline-ring/50;
+    @apply border-border outline-ring/50;
   }
 
   body {
