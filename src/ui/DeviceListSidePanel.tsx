@@ -308,7 +308,7 @@ const DeviceListSidePanel: React.FC<{
 
                 <div className="flex-1 overflow-y-auto px-4 min-h-0">
                   <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 bg-background z-10 py-1">Select Devices ({selectedCreateDevices.length})</label>
-                  <div className="border rounded divide-y bg-gray-50">
+                  <div className="border rounded divide-y bg-muted/10 border-border divide-border">
                     {allDevices.length === 0 ? (
                       <div className="p-3 text-center text-muted-foreground text-sm">No devices available</div>
                     ) : (
