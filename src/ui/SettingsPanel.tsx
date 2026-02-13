@@ -5,6 +5,8 @@ type Props = {
   setSecureInput: (value: boolean) => void;
   tokenInput: string;
   setTokenInput: (value: string) => void;
+  maptilerApiKeyInput: string;
+  setMaptilerApiKeyInput: (value: string) => void;
   wsStatus: "unknown" | "connecting" | "connected" | "disconnected" | "error";
   wsError: string | null;
   onApplySettings: () => void;
@@ -23,6 +25,8 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   setSecureInput,
   tokenInput,
   setTokenInput,
+  maptilerApiKeyInput,
+  setMaptilerApiKeyInput,
   wsStatus,
   wsError,
   onApplySettings,
@@ -89,6 +93,13 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               placeholder="API Token"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
+            />
+            <input
+              type="password"
+              className="border rounded px-2 py-1 w-56 text-sm"
+              placeholder="MapTiler API Key"
+              value={maptilerApiKeyInput}
+              onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
             />
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <button

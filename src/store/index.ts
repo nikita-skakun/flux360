@@ -57,6 +57,8 @@ type StoreState = {
     inputBaseUrl: string;
     inputSecure: boolean;
     inputToken: string;
+    maptilerApiKey: string;
+    inputMaptilerApiKey: string;
   };
 
   // Positions slice
@@ -120,6 +122,7 @@ type StoreActions = {
   setInputBaseUrl: (value: string) => void;
   setInputSecure: (value: boolean) => void;
   setInputToken: (value: string) => void;
+  setInputMaptilerApiKey: (value: string) => void;
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;
@@ -148,6 +151,8 @@ const initialState: StoreState = {
     inputBaseUrl: '',
     inputSecure: false,
     inputToken: '',
+    maptilerApiKey: '',
+    inputMaptilerApiKey: '',
   },
   positions: {
     allPositions: [],
@@ -818,6 +823,7 @@ export const useStore = create<Store>()(
             baseUrl: state.settings.inputBaseUrl,
             secure: state.settings.inputSecure,
             token: state.settings.inputToken,
+            maptilerApiKey: state.settings.inputMaptilerApiKey,
           }
         }));
       },
@@ -832,6 +838,8 @@ export const useStore = create<Store>()(
             inputBaseUrl: '',
             inputSecure: false,
             inputToken: '',
+            maptilerApiKey: '',
+            inputMaptilerApiKey: '',
           }
         }));
       },
@@ -859,6 +867,15 @@ export const useStore = create<Store>()(
           settings: {
             ...state.settings,
             inputToken: value,
+          }
+        }));
+      },
+
+      setInputMaptilerApiKey: (value: string) => {
+        set(state => ({
+          settings: {
+            ...state.settings,
+            inputMaptilerApiKey: value,
           }
         }));
       },

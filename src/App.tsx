@@ -62,11 +62,14 @@ export function App() {
   const setBaseUrlInput = useStore(state => state.setInputBaseUrl);
   const setSecureInput = useStore(state => state.setInputSecure);
   const setTokenInput = useStore(state => state.setInputToken);
+  const setMaptilerApiKeyInput = useStore(state => state.setInputMaptilerApiKey);
   const inputSecure = useStore(state => state.settings.inputSecure);
   const inputToken = useStore(state => state.settings.inputToken);
+  const inputMaptilerApiKey = useStore(state => state.settings.inputMaptilerApiKey);
   const traccarSecure = useStore(state => state.settings.secure);
   const traccarToken = useStore(state => state.settings.token);
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
+  const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
@@ -334,6 +337,7 @@ export function App() {
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
         deviceColors={deviceColors}
+        maptilerApiKey={maptilerApiKey}
         overlay={
           <div className="flex flex-col gap-2">
             <SettingsPanel
@@ -343,6 +347,8 @@ export function App() {
               setSecureInput={setSecureInput}
               tokenInput={inputToken}
               setTokenInput={setTokenInput}
+              maptilerApiKeyInput={inputMaptilerApiKey}
+              setMaptilerApiKeyInput={setMaptilerApiKeyInput}
               wsStatus={wsStatus}
               wsError={wsError}
               onApplySettings={applySettings}

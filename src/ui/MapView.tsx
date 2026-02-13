@@ -2,6 +2,7 @@ import { getColorForDevice } from "./color";
 import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
+import "@maptiler/leaflet-maptilersdk";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { DevicePoint } from "@/ui/types";
 
@@ -20,12 +21,14 @@ type Props = {
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   pulsingDeviceIds?: number[];
+  maptilerApiKey?: string;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | unknown | null>(null);
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -177,10 +180,23 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     const map = L.map(mapContainer, { attributionControl: false, zoomControl: false });
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+    // Use MapTiler vector tiles if API key is available, otherwise fallback to OpenStreetMap
+    if (maptilerApiKey) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ml = new (L as unknown as { MaptilerLayer: new (options: { apiKey: string; style: string }) => unknown }).MaptilerLayer({
+        apiKey: maptilerApiKey,
+        style: "dataviz-dark", // Default to dark theme
+      });
+      (ml as unknown as L.Layer).addTo(map);
+      tileLayerRef.current = ml;
+    } else {
+      const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      });
+      tl.addTo(map);
+      tileLayerRef.current = tl;
+    }
 
     const initialLat = refLatRef.current;
     const initialLon = refLonRef.current;
@@ -278,8 +294,39 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       container.removeEventListener("mouseleave", onMouseLeave);
       map.remove();
       mapRef.current = null;
+      tileLayerRef.current = null;
     };
   }, []);
+
+  // Update tile layer when maptilerApiKey changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Remove existing tile layer
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current as L.Layer);
+      tileLayerRef.current = null;
+    }
+
+    // Add new tile layer based on API key
+    if (maptilerApiKey) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ml = new (L as unknown as { MaptilerLayer: new (options: { apiKey: string; style: string }) => unknown }).MaptilerLayer({
+        apiKey: maptilerApiKey,
+        style: "dataviz-dark", // Default to dark theme
+      });
+      (ml as unknown as L.Layer).addTo(map);
+      tileLayerRef.current = ml;
+    } else {
+      const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      });
+      tl.addTo(map);
+      tileLayerRef.current = tl;
+    }
+  }, [maptilerApiKey]);
 
   useEffect(() => {
     const map = mapRef.current;
