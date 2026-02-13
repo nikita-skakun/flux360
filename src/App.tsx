@@ -74,6 +74,14 @@ export function App() {
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const darkMode = useStore(state => state.settings.darkMode);
 
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
   const isSidePanelOpen = useStore(state => state.ui.isSidePanelOpen);
@@ -305,7 +313,7 @@ export function App() {
   }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice]);
 
   return (
-    <div className={`h-screen w-screen ${darkMode ? 'dark' : ''}`}>
+    <div className="h-screen w-screen">
       <DeviceListSidePanel
         devices={deviceList}
         selectedDeviceId={selectedDeviceId}
