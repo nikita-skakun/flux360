@@ -2,7 +2,7 @@ import { getColorForDevice } from "./color";
 import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
-import "@maptiler/leaflet-maptilersdk";
+import { MaptilerLayer } from "@maptiler/leaflet-maptilersdk";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { DevicePoint } from "@/ui/types";
 
@@ -182,12 +182,11 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     // Use MapTiler vector tiles if API key is available, otherwise fallback to OpenStreetMap
     if (maptilerApiKey) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ml = new (L as unknown as { MaptilerLayer: new (options: { apiKey: string; style: string }) => unknown }).MaptilerLayer({
+      const ml = new MaptilerLayer({
         apiKey: maptilerApiKey,
         style: "dataviz-dark", // Default to dark theme
       });
-      (ml as unknown as L.Layer).addTo(map);
+      ml.addTo(map);
       tileLayerRef.current = ml;
     } else {
       const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -311,12 +310,11 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     // Add new tile layer based on API key
     if (maptilerApiKey) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ml = new (L as unknown as { MaptilerLayer: new (options: { apiKey: string; style: string }) => unknown }).MaptilerLayer({
+      const ml = new MaptilerLayer({
         apiKey: maptilerApiKey,
         style: "dataviz-dark", // Default to dark theme
       });
-      (ml as unknown as L.Layer).addTo(map);
+      ml.addTo(map);
       tileLayerRef.current = ml;
     } else {
       const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
