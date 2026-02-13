@@ -531,6 +531,11 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: typeof height === "number" ? `${height}px` : height }}>
+      <style>{`
+        .leaflet-control-attribution {
+          display: none !important;
+        }
+      `}</style>
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
       <div className="absolute inset-0 pointer-events-none z-[1000]">
         <CanvasView
