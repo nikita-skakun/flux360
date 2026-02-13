@@ -180,7 +180,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     const map = L.map(mapContainer, { attributionControl: true, zoomControl: false });
 
-    // Use MapTiler vector tiles if API key is available, otherwise fallback to OpenStreetMap
+    // Use MapTiler vector tiles
     if (maptilerApiKey) {
       const ml = new MaptilerLayer({
         apiKey: maptilerApiKey,
@@ -188,12 +188,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       });
       ml.addTo(map);
       tileLayerRef.current = ml;
-    } else {
-      const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      });
-      tl.addTo(map);
-      tileLayerRef.current = tl;
     }
 
     const initialLat = refLatRef.current;
@@ -315,12 +309,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       });
       ml.addTo(map);
       tileLayerRef.current = ml;
-    } else {
-      const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-      });
-      tl.addTo(map);
-      tileLayerRef.current = tl;
     }
   }, [maptilerApiKey]);
 
