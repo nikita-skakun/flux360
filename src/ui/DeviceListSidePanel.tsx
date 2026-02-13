@@ -222,7 +222,7 @@ const DeviceListSidePanel: React.FC<{
       <>
         <button
           onClick={() => mode === "create" ? setMode("list") : onToggle()}
-          className="fixed top-4 left-4 z-[1002] px-3 py-2 rounded-lg shadow-md bg-background hover:bg-muted transition-all"
+          className="fixed top-4 left-4 z-[1002] px-3 py-2 rounded-lg shadow-md bg-background text-foreground hover:bg-muted transition-all"
           title={mode === "create" ? "Back to list" : (isOpen ? "Close" : "Open")}
         >
           <span className="material-symbols-outlined text-xl select-none">

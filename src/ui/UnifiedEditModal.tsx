@@ -140,7 +140,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                 value={name}
                                 onChange={e => setName(e.target.value)}
                                 placeholder="Name"
-                                className="flex-1 border rounded px-3 py-2 disabled:opacity-50 bg-background"
+                                className="flex-1 border rounded px-3 py-2 disabled:opacity-50 bg-background text-foreground"
                                 disabled={isLoading}
                             />
                         </div>
@@ -154,7 +154,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                     className={`w-9 h-9 flex items-center justify-center rounded hover:bg-background text-lg transition-all ${emoji === opt ? 'bg-background shadow ring-1 ring-blue-500' : ''}`}
                                     disabled={isLoading}
                                 >
-                                    <span className="material-symbols-outlined text-lg leading-none">{opt}</span>
+                                    <span className="material-symbols-outlined text-lg leading-none text-foreground">{opt}</span>
                                 </button>
                             ))}
                         </div>
@@ -163,7 +163,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                             placeholder="Or type icon name (material symbols)"
                             value={emoji}
                             onChange={e => setEmoji(e.target.value)}
-                            className="w-full text-xs border rounded px-2 py-1 bg-background"
+                            className="w-full text-xs border rounded px-2 py-1 bg-background text-foreground"
                             disabled={isLoading}
                         />
                     </div>
