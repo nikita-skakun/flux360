@@ -293,7 +293,19 @@ export const useStore = create<Store>()(
         const newGroup: GroupDevice = { id: tempId, name, emoji, color, memberDeviceIds, motionProfile: null };
 
         set(state => ({
+          ui: { ...state.ui, selectedDeviceId: tempId },
           groups: [...state.groups, newGroup],
+          devices: {
+            ...state.devices,
+            [tempId]: {
+              name,
+              emoji,
+              lastSeen: Math.max(...memberDeviceIds.map(id => state.devices[id]?.lastSeen ?? 0), 0) || null,
+              effectiveMotionProfile: 'person',
+              motionProfile: null,
+              color
+            }
+          },
           refs: {
             ...state.refs,
             groupIds: new Set([...state.refs.groupIds, tempId]),
@@ -309,22 +321,38 @@ export const useStore = create<Store>()(
           }, name, emoji, memberDeviceIds);
 
           // Replace temp with real
-          set(state => ({
-            groups: state.groups.map(g => g.id === tempId ? { ...g, id: created.id } : g),
-            refs: {
-              ...state.refs,
-              groupIds: new Set([...Array.from(state.refs.groupIds).filter(id => id !== tempId), created.id]),
+          set(state => {
+            const newDevices = { ...state.devices };
+            const newColor = rgbToHex(...colorForDevice(created.id));
+            if (newDevices[tempId]) {
+              newDevices[created.id] = { ...newDevices[tempId]!, color: newColor };
+              delete newDevices[tempId];
             }
-          }));
+            return {
+              ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: created.id } : state.ui,
+              groups: state.groups.map(g => g.id === tempId ? { ...g, id: created.id, color: newColor } : g),
+              devices: newDevices,
+              refs: {
+                ...state.refs,
+                groupIds: new Set([...Array.from(state.refs.groupIds).filter(id => id !== tempId), created.id]),
+              }
+            };
+          });
         } catch (error) {
           // Rollback
-          set(state => ({
-            groups: state.groups.filter(g => g.id !== tempId),
-            refs: {
-              ...state.refs,
-              groupIds: new Set([...state.refs.groupIds].filter(id => id !== tempId)),
-            }
-          }));
+          set(state => {
+            const newDevices = { ...state.devices };
+            delete newDevices[tempId];
+            return {
+              ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: null } : state.ui,
+              groups: state.groups.filter(g => g.id !== tempId),
+              devices: newDevices,
+              refs: {
+                ...state.refs,
+                groupIds: new Set([...state.refs.groupIds].filter(id => id !== tempId)),
+              }
+            };
+          });
           throw error;
         }
       },
@@ -338,7 +366,9 @@ export const useStore = create<Store>()(
         set(state => {
           const newDevices = { ...state.devices };
           delete newDevices[groupId];
+
           return {
+            ui: state.ui.selectedDeviceId === groupId ? { ...state.ui, selectedDeviceId: null } : state.ui,
             groups: state.groups.filter(g => g.id !== groupId),
             devices: newDevices,
             refs: {
@@ -452,18 +482,26 @@ export const useStore = create<Store>()(
 
         // Optimistic update
         const original = { ...group };
-        set(state => ({
-          groups: state.groups.map(g => {
-            if (g.id !== groupId) return g;
+        const newGroup = {
+          ...group,
+          name: updates.name ?? group.name,
+          emoji: updates.emoji ?? group.emoji,
+          color: updates.color === null ? defaultColor! : (updates.color ?? group.color),
+          motionProfile: updates.motionProfile !== undefined ? updates.motionProfile : group.motionProfile
+        };
 
-            return {
-              ...g,
-              name: updates.name ?? g.name,
-              emoji: updates.emoji ?? g.emoji,
-              color: updates.color === null ? defaultColor! : (updates.color ?? g.color),
-              motionProfile: updates.motionProfile !== undefined ? updates.motionProfile : g.motionProfile
-            };
-          }),
+        set(state => ({
+          groups: state.groups.map(g => g.id === groupId ? newGroup : g),
+          devices: {
+            ...state.devices,
+            [groupId]: {
+              ...state.devices[groupId]!,
+              name: newGroup.name,
+              emoji: newGroup.emoji,
+              color: newGroup.color,
+              motionProfile: newGroup.motionProfile,
+            }
+          }
         }));
 
         try {
@@ -556,7 +594,6 @@ export const useStore = create<Store>()(
           processedKeys.add(key);
           return true;
         });
-        if (newPositions.length === 0) return null;
 
         const groupIdsTouched = new Set<number>();
         for (const p of newPositions) {
@@ -583,6 +620,20 @@ export const useStore = create<Store>()(
 
           return acc;
         }, {} as Record<number, NormalizedPosition[]>);
+
+        // Bootstrap missing group engines (including new groups)
+        for (const group of groupDevices) {
+          if (!engines.has(group.id)) {
+            const memberIds = new Set(group.memberDeviceIds);
+            const historical = allPositions.filter(p => memberIds.has(p.device));
+            if (historical.length > 0) {
+              historical.sort((a, b) => a.timestamp - b.timestamp);
+              posByDevice[group.id] = historical;
+            }
+          }
+        }
+
+        if (Object.keys(posByDevice).length === 0) return null;
 
         if (groupIdsTouched.size > 0) {
           const membersByGroup = new Map<number, number[]>();

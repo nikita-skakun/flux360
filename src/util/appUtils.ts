@@ -53,38 +53,43 @@ export function buildEngineSnapshotsFromByDevice(
     const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
     const dominantAnchors = new Map<number, Anchor | null>();
     for (const deviceId of enginesRef.keys()) {
-      const engine = enginesRef.get(deviceId);
-      if (!engine) continue;
-      const snapshot = engine.getCurrentSnapshot();
-      snapshotsByDevice.set(Number(deviceId), [snapshot]);
-      dominantAnchors.set(Number(deviceId), engine.getDominantAnchorAt(Date.now()));
-      if (snapshot.activeAnchor) {
-        // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
-        const dId = Number(deviceId);
-        const measurements: DevicePoint[] = measurementsByDevice[dId] ?? [];
-        const lastTs = engine.lastTimestamp ?? Date.now();
-        let latestMeasurementTime = lastTs;
-        if (measurements.length > 0) {
-          latestMeasurementTime = measurements.at(-1)?.timestamp ?? lastTs;
-        }
-
-        const timestamp = latestMeasurementTime;
-        const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
-        const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
-
-        if (engine.motionActive) {
-          const latestRaw = positionsAll.filter(p => p.device === dId).pop();
-          if (latestRaw) {
-            const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1 };
-            currentSnapshots[dId] = [point];
-            continue;
+      try {
+        const engine = enginesRef.get(deviceId);
+        if (!engine) continue;
+        const snapshot = engine.getCurrentSnapshot();
+        snapshotsByDevice.set(Number(deviceId), [snapshot]);
+        dominantAnchors.set(Number(deviceId), engine.getDominantAnchorAt(Date.now()));
+        if (snapshot.activeAnchor) {
+          // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
+          const dId = Number(deviceId);
+          const measurements: DevicePoint[] = measurementsByDevice[dId] ?? [];
+          const lastTs = engine.lastTimestamp ?? Date.now();
+          let latestMeasurementTime = lastTs;
+          if (measurements.length > 0) {
+            latestMeasurementTime = measurements.at(-1)?.timestamp ?? lastTs;
           }
-        }
 
-        const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
-        currentSnapshots[dId] = [point];
-      } else {
-        currentSnapshots[Number(deviceId)] = [];
+          const timestamp = latestMeasurementTime;
+          const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
+          const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
+
+          if (engine.motionActive) {
+            const latestRaw = positionsAll.filter(p => p.device === dId).pop();
+            if (latestRaw) {
+              const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1 };
+              currentSnapshots[dId] = [point];
+              continue;
+            }
+          }
+
+          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
+          currentSnapshots[dId] = [point];
+        } else {
+          currentSnapshots[Number(deviceId)] = [];
+        }
+      } catch (innerError) {
+        console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
+        // Continue to next device, don't crash everything
       }
     }
     return { positionsByDevice: currentSnapshots, snapshotsByDevice, dominantAnchors };

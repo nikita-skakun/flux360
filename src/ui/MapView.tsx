@@ -9,6 +9,7 @@ type Props = {
   components: DevicePoint[];
   deviceNames: Record<number, string>;
   deviceIcons: Record<number, string>;
+  deviceColors: Record<number, string>;
   refLat: number | null;
   refLon: number | null;
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
@@ -18,9 +19,10 @@ type Props = {
   onSelectDevice: (id: number) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
+  pulsingDeviceIds?: number[];
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, debugFrame, debugAnchors }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -109,6 +111,37 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const v = Math.log10(m);
     return Math.max(0.25, Math.min(1.5, v * 0.22 + 0.15));
   };
+
+  const componentsRef = useRef(components);
+  useEffect(() => { componentsRef.current = components; }, [components]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !pulsingDeviceIds || pulsingDeviceIds.length === 0 || refLatRef.current == null || refLonRef.current == null) return;
+
+    // Defer slightly to allow render to settle if needed, but synchronous is usually fine for map events
+    // Logic: Find all selected devices in CURRENT components (latest known positions)
+    const points: L.LatLng[] = [];
+    for (const id of pulsingDeviceIds) {
+      const comp = componentsRef.current.find(c => Number(c.device) === id);
+      if (comp && comp.mean) {
+        const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLatRef.current, refLonRef.current);
+        points.push(L.latLng(deg.lat, deg.lon));
+      }
+    }
+
+    if (points.length === 0) return;
+
+    try {
+      if (map.stop) map.stop();
+      // Use fitBounds for all cases (single or multiple) to ensure consistent behavior
+      // maxZoom: 18 allows close zoom for single or clusters of devices
+      const bounds = L.latLngBounds(points);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 18, animate: true, duration: 1.5 });
+    } catch {
+      // ignore map errors
+    }
+  }, [pulsingDeviceIds]);
 
   useEffect(() => {
     if (prevSelectedRef.current != null && selectedDeviceId == null) {
@@ -285,7 +318,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const deg = metersToDegrees(sel.mean[0], sel.mean[1], refLat, refLon);
 
     try {
-      const ZOOM_FOR_SELECTED = 16;
+      const ZOOM_FOR_SELECTED = 18;
       const PAN_DISTANCE_METERS = 20;
 
       const center = map.getCenter();
@@ -390,7 +423,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
               const left = Math.round(radius * Math.cos(angle));
               const top = Math.round(radius * Math.sin(angle));
 
-              const col: [number, number, number] = getColorForDevice(it.device);
+              const col: [number, number, number] = getColorForDevice(it.device, deviceColors[it.device]);
               const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
 
               const enterDelay = i * 20;
@@ -428,6 +461,31 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     );
   }
 
+  const pulsingMarkers = useMemo(() => {
+    if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !mapRef.current || refLat == null || refLon == null) return null;
+
+    return pulsingDeviceIds.map(id => {
+      const comp = components.find(c => Number(c.device) === id);
+      if (!comp || !comp.mean) return null;
+
+      const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLat, refLon);
+      const pt = mapRef.current!.latLngToContainerPoint(L.latLng(deg.lat, deg.lon));
+
+      return (
+        <div
+          key={`pulse-${id}`}
+          className="absolute z-[999] pointer-events-none"
+          style={{ left: pt.x, top: pt.y, transform: 'translate(-50%, -50%)' }}
+        >
+          <span className="relative flex h-12 w-12 items-center justify-center">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-8 w-8 border-2 border-blue-500 opacity-0"></span>
+          </span>
+        </div>
+      );
+    });
+  }, [pulsingDeviceIds, components, refLat, refLon, size, centerMeters]);
+
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: typeof height === "number" ? `${height}px` : height }}>
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
@@ -436,6 +494,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           ref={canvasApiRef}
           components={components}
           deviceIcons={deviceIcons}
+          deviceColors={deviceColors}
           width={size.width}
           height={size.height}
           zoom={pixelsPerMeter}
@@ -462,6 +521,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           </div>
         </div>
       ) : null}
+      {pulsingMarkers}
       {clusterChooser}
       <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
         <div className="w-full sm:w-80 bg-white/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">

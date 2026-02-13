@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
 import type { DevicePoint } from "@/ui/types";
 
-import { colorForDevice, rgbaString, type Color } from "./color";
+import { getColorForDevice, rgbaString, type Color } from "./color";
 import type { DrawItem, Cluster } from "@/util/clustering";
 import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters } from "@/util/clustering";
 
@@ -24,6 +24,7 @@ export type CanvasViewProps = {
   debugFrame: DebugFrame | null;
   debugAnchors: DebugAnchor[];
   deviceIcons: Record<number, string>;
+  deviceColors: Record<number, string>;
 };
 
 type DebugAnchor = {
@@ -43,7 +44,7 @@ type DebugFrame = {
   timestamp: number;
 };
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons, deviceColors }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -143,7 +144,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     const processed = components.map(c => {
       const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
       const variance = typeof c.variance === 'number' ? c.variance : 100;
-      return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: colorForDevice(c.device) };
+      return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: getColorForDevice(c.device, deviceColors[c.device]) };
     });
 
     let anchorX = refMeters.x;

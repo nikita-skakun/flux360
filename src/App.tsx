@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import { useTraccarConnection } from "./hooks/useTraccarConnection";
@@ -11,6 +11,9 @@ export function App() {
   const setRefLat = useStore(state => state.setRefLat);
   const setRefLon = useStore(state => state.setRefLon);
   const setFirstPosition = useStore(state => state.setFirstPosition);
+  const createGroup = useStore(state => state.createGroup);
+  const deleteGroup = useStore(state => state.deleteGroup);
+  const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
   const processPositions = useStore(state => state.processPositions);
   const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
 
@@ -25,6 +28,7 @@ export function App() {
   const enginesRef = useStore(state => state.refs.engines);
   const devices = useStore(state => state.devices);
   const deviceNames = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.name])), [devices]);
+  const deviceColors = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.color || ""])), [devices]);
   const deviceIcons = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.emoji])), [devices]);
   const deviceLastSeen = useMemo(() => {
     const lastSeen = Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.lastSeen]));
@@ -77,6 +81,8 @@ export function App() {
     token: traccarToken,
     onDevices: setDevicesFromApi,
   });
+
+  const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
 
@@ -295,6 +301,14 @@ export function App() {
         }}
         isOpen={isSidePanelOpen}
         onToggle={() => setIsSidePanelOpen(!isSidePanelOpen)}
+        onCreateGroup={createGroup}
+        onDeleteGroup={deleteGroup}
+        onAddDeviceToGroup={addDeviceToGroup}
+        onEditGroup={(groupId) => setEditingTarget({ type: 'group', id: groupId })}
+        onCreateGroupSelectionChange={setPulsingDeviceIds}
+        allDevices={Object.entries(deviceNames)
+          .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
+          .map(([id, name]) => ({ id: Number(id), name, emoji: deviceIcons[Number(id)] ?? name?.charAt(0).toUpperCase() ?? "?" }))}
       />
       <MapView
         debugFrame={currentDebugFrame}
@@ -305,9 +319,11 @@ export function App() {
         worldBounds={worldBounds}
         height="100vh"
         selectedDeviceId={selectedDeviceId}
+        pulsingDeviceIds={pulsingDeviceIds}
         onSelectDevice={(id) => setSelectedDeviceId(id)}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
+        deviceColors={deviceColors}
         overlay={
           <div className="flex flex-col gap-2">
             <SettingsPanel

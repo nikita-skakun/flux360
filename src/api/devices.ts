@@ -111,8 +111,17 @@ export async function updateGroupDevice(
   const authHeader = buildAuthHeader(opts.auth);
   if (authHeader) headers["Authorization"] = authHeader;
 
-  // Build the attributes object with updated values
-  const attributes: Record<string, unknown> = {};
+  // Fetch existing because PUT replaces/needs full object usually
+  const existing = await performGet(fetcher, url, headers);
+  if (!existing || typeof existing !== "object") throw new Error("Group not found");
+  const group = existing as Record<string, unknown>;
+
+  // Build the attributes object by merging
+  const existingAttributes = (group["attributes"] && typeof group["attributes"] === "object")
+    ? (group["attributes"] as Record<string, unknown>)
+    : {};
+  const attributes: Record<string, unknown> = { ...existingAttributes };
+
   if (updates.emoji !== undefined) attributes["emoji"] = updates.emoji;
   if (updates.color !== undefined) attributes["color"] = updates.color;
   if (updates.motionProfile !== undefined) attributes["motionProfile"] = updates.motionProfile;
@@ -120,9 +129,11 @@ export async function updateGroupDevice(
     attributes["memberDeviceIds"] = JSON.stringify(updates.memberDeviceIds);
   }
 
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = {
+    ...group,
+    attributes
+  };
   if (updates.name !== undefined) payload["name"] = updates.name;
-  if (Object.keys(attributes).length > 0) payload["attributes"] = attributes;
 
   await performPut(fetcher, url, headers, payload);
 }

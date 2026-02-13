@@ -12,7 +12,7 @@ type Props = {
     id: number;
 };
 
-const EMOJI_OPTIONS = ["group", "groups", "directions_car", "personal_bag", "luggage", "directions_bike", "devices", "person", "smartphone", "watch", "bolt", "star", "backpack", "home", "location_on", "pets"];
+import { EMOJI_OPTIONS } from "./constants";
 
 const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     const device = useStore((state) => state.devices[id]);
