@@ -82,7 +82,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     return (
         <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-            <div className="relative bg-background rounded-lg shadow-xl w-full max-w-md flex flex-col p-6 gap-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="relative bg-background text-foreground rounded-lg shadow-xl w-full max-w-md flex flex-col p-6 gap-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex items-center justify-between border-b pb-4">
                     <h2 className="text-xl font-bold">Edit {type === "device" ? "Device" : "Group"}</h2>
                     <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted text-2xl leading-none pb-1" aria-label="Close modal">×</button>
