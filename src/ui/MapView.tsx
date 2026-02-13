@@ -178,7 +178,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const mapContainer = mapDivRef.current;
     if (!mapContainer) return;
 
-    const map = L.map(mapContainer, { attributionControl: false, zoomControl: false });
+    const map = L.map(mapContainer, { attributionControl: true, zoomControl: false });
 
     // Use MapTiler vector tiles if API key is available, otherwise fallback to OpenStreetMap
     if (maptilerApiKey) {
