@@ -115,19 +115,19 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             </label>
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
                 onClick={onApplySettings}
               >
                 Save
               </button>
               <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
                 onClick={onClearSettings}
               >
                 Clear
               </button>
               <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
                 onClick={onReconnect}
               >
                 Reconnect
