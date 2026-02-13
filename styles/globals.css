@@ -91,13 +91,7 @@
   ::before,
   ::backdrop,
   ::file-selector-button {
-    @apply border-border;
-  }
-
-  .dark *,
-  .dark ::after,
-  .dark ::before {
-    border-color: transparent;
+    @apply border-border dark:border-white/10;
   }
 
   * {
