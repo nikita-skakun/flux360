@@ -197,7 +197,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                 <div className="flex justify-end gap-2 mt-2 pt-4 border-t">
                     <button
                         onClick={onClose}
-                        className="px-4 py-2 rounded text-muted-foreground hover:bg-muted"
+                        className="px-4 py-2 rounded text-muted-foreground hover:bg-muted text-foreground"
                         disabled={isLoading}
                     >
                         Cancel
