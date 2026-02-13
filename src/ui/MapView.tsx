@@ -191,7 +191,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     } else {
       const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       });
       tl.addTo(map);
       tileLayerRef.current = tl;
@@ -319,7 +318,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     } else {
       const tl = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       });
       tl.addTo(map);
       tileLayerRef.current = tl;
