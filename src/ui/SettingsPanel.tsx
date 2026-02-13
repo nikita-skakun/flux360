@@ -78,7 +78,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
           <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
             <input
               type="text"
-              className="border rounded px-2 py-1 w-[24rem] text-sm bg-background text-foreground border-border"
+              className="border rounded px-2 py-1 w-[24rem] text-sm bg-background text-foreground border-border dark:border-white/10"
               placeholder="Traccar Base URL (e.g. localhost:8082)"
               value={baseUrlInput}
               onChange={(e) => setBaseUrlInput(e.target.value)}
@@ -93,14 +93,14 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             </label>
             <input
               type="password"
-              className="border rounded px-2 py-1 w-48 text-sm bg-background text-foreground border-border"
+              className="border rounded px-2 py-1 w-48 text-sm bg-background text-foreground border-border dark:border-white/10"
               placeholder="API Token"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
             />
             <input
               type="password"
-              className="border rounded px-2 py-1 w-56 text-sm bg-background text-foreground border-border"
+              className="border rounded px-2 py-1 w-56 text-sm bg-background text-foreground border-border dark:border-white/10"
               placeholder="MapTiler API Key"
               value={maptilerApiKeyInput}
               onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
