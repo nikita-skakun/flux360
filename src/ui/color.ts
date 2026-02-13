@@ -41,3 +41,7 @@ export function rgbaString(color: Color, a: number = 1): string {
   const [r, g, b] = color;
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
+
+export function rgbToHex(r: number, g: number, b: number): string {
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}

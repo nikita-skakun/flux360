@@ -27,27 +27,31 @@ export function App() {
   const setWorldBounds = useStore(state => state.setWorldBounds);
   const enginesRef = useStore(state => state.refs.engines);
   const devices = useStore(state => state.devices);
-  const deviceNames = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.name])), [devices]);
-  const deviceColors = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.color || ""])), [devices]);
-  const deviceIcons = useMemo(() => Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.emoji])), [devices]);
-  const deviceLastSeen = useMemo(() => {
-    const lastSeen = Object.fromEntries(Object.keys(devices).map(id => [Number(id), devices[Number(id)]!.lastSeen]));
-
+  const { deviceNames, deviceColors, deviceIcons, deviceLastSeen } = useMemo(() => {
+    const names: Record<number, string> = {};
+    const colors: Record<number, string> = {};
+    const icons: Record<number, string> = {};
+    const lastSeen: Record<number, number | null> = {};
+    for (const id of Object.keys(devices)) {
+      const numId = Number(id);
+      const d = devices[numId]!;
+      names[numId] = d.name;
+      colors[numId] = d.color ?? "";
+      icons[numId] = d.emoji;
+      lastSeen[numId] = d.lastSeen;
+    }
     // Add groups to deviceLastSeen
     for (const group of groupDevices) {
       let maxLastSeen: number | null = null;
       for (const memberId of group.memberDeviceIds) {
-        const memberTimestamp = lastSeen[memberId];
-        if (memberTimestamp) {
-          if (!maxLastSeen || memberTimestamp > maxLastSeen) {
-            maxLastSeen = memberTimestamp;
-          }
+        const ts = lastSeen[memberId];
+        if (ts && (maxLastSeen == null || ts > maxLastSeen)) {
+          maxLastSeen = ts;
         }
       }
       lastSeen[group.id] = maxLastSeen;
     }
-
-    return lastSeen;
+    return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
   }, [devices, groupDevices]);
   const positionsAllRef = useStore(state => state.refs.positionsAll);
   const setPositionsAll = useStore(state => state.setPositionsAll);
@@ -187,24 +191,30 @@ export function App() {
   }, [selectedDeviceId, debugMode]);
 
   // current debug frame to render on the map (if any)
-  const currentDebugFrame = (selectedDeviceId != null && debugMode && enginesRef.get(selectedDeviceId)) ? (() => {
-    const fr = enginesRef.get(selectedDeviceId)?.getDebugFrames();
-    if (!fr || fr.length === 0) return null;
-    const idx = Math.max(0, Math.min(fr.length - 1, debugFrameIndex));
-    return fr[idx] ?? null;
-  })() : null;
-
-  const currentDebugAnchors = (selectedDeviceId != null && debugMode && enginesRef.get(selectedDeviceId)) ? (() => {
+  const currentDebugFrame = useMemo(() => {
+    if (selectedDeviceId == null || !debugMode) return null;
     const eng = enginesRef.get(selectedDeviceId);
-    if (!eng) return [] as Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
-    const anchors: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }> = [];
-    if (eng.activeAnchor) anchors.push({ mean: [eng.activeAnchor.mean[0], eng.activeAnchor.mean[1]], variance: eng.activeAnchor.variance, type: "active", startTimestamp: eng.activeAnchor.startTimestamp, endTimestamp: eng.activeAnchor.endTimestamp, confidence: eng.activeAnchor.confidence, lastUpdateTimestamp: eng.activeAnchor.lastUpdateTimestamp });
-    if (eng.candidateAnchor) anchors.push({ mean: [eng.candidateAnchor.mean[0], eng.candidateAnchor.mean[1]], variance: eng.candidateAnchor.variance, type: "candidate", startTimestamp: eng.candidateAnchor.startTimestamp, endTimestamp: eng.candidateAnchor.endTimestamp, confidence: eng.candidateAnchor.confidence, lastUpdateTimestamp: eng.candidateAnchor.lastUpdateTimestamp });
-    for (const anchor of eng.closedAnchors) {
-      anchors.push({ mean: [anchor.mean[0], anchor.mean[1]], variance: anchor.variance, type: "closed", startTimestamp: anchor.startTimestamp, endTimestamp: anchor.endTimestamp, confidence: anchor.confidence, lastUpdateTimestamp: anchor.lastUpdateTimestamp });
-    }
+    if (!eng) return null;
+    const fr = eng.getDebugFrames();
+    if (fr.length === 0) return null;
+    return fr[Math.max(0, Math.min(fr.length - 1, debugFrameIndex))] ?? null;
+  }, [selectedDeviceId, debugMode, enginesRef, debugFrameIndex]);
+
+  const currentDebugAnchors = useMemo(() => {
+    if (selectedDeviceId == null || !debugMode) return [];
+    const eng = enginesRef.get(selectedDeviceId);
+    if (!eng) return [];
+    type AnchorView = { mean: [number, number]; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number };
+    const anchors: AnchorView[] = [];
+    const pushAnchor = (a: typeof eng.activeAnchor, type: AnchorView["type"]) => {
+      if (!a) return;
+      anchors.push({ mean: [a.mean[0], a.mean[1]], variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
+    };
+    pushAnchor(eng.activeAnchor, "active");
+    pushAnchor(eng.candidateAnchor, "candidate");
+    for (const a of eng.closedAnchors) pushAnchor(a, "closed");
     return anchors;
-  })() : [];
+  }, [selectedDeviceId, debugMode, enginesRef]);
 
   const deviceList = useMemo(() => {
     // Build set of member device IDs so we can skip them

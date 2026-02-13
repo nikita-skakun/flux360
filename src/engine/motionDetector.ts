@@ -109,13 +109,6 @@ export function directionFromAnchor(anchor: Vec2, point: Vec2): Vec2 | null {
 }
 
 /**
- * Compute dot product of two 2D vectors.
- */
-export function dot(a: Vec2, b: Vec2): number {
-  return a[0] * b[0] + a[1] * b[1];
-}
-
-/**
  * Check if a set of outlier samples are directionally coherent.
  * Outliers are considered coherent if their directions are sufficiently aligned
  * (above the threshold cosine similarity).
@@ -135,7 +128,8 @@ export function computeCoherence(outliers: OutlierSample[], threshold: number): 
   const avg: Vec2 = [sx / mag, sy / mag];
   for (const o of outliers) {
     if (!o.direction) return false;
-    if (dot(o.direction, avg) < threshold) return false;
+    // Inline dot product: a[0] * b[0] + a[1] * b[1]
+    if (o.direction[0] * avg[0] + o.direction[1] * avg[1] < threshold) return false;
   }
   return true;
 }

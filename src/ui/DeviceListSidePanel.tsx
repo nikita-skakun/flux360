@@ -124,18 +124,20 @@ const DeviceListSidePanel: React.FC<{
       });
     };
 
-    const handleCreateSubmit = async () => {
-      if (!newGroupName.trim() || selectedCreateDevices.length === 0) return;
-      setIsCreating(true);
-      try {
-        await onCreateGroup(newGroupName, selectedCreateDevices, selectedEmoji);
-        setMode("list");
-        setNewGroupName("");
-        setSelectedCreateDevices([]);
-        setSelectedEmoji("group");
-      } finally {
-        setIsCreating(false);
-      }
+    const handleCreateSubmit = () => {
+      void (async () => {
+        if (!newGroupName.trim() || selectedCreateDevices.length === 0) return;
+        setIsCreating(true);
+        try {
+          await onCreateGroup(newGroupName, selectedCreateDevices, selectedEmoji);
+          setMode("list");
+          setNewGroupName("");
+          setSelectedCreateDevices([]);
+          setSelectedEmoji("group");
+        } finally {
+          setIsCreating(false);
+        }
+      })();
     };
 
     const handleContextMenu = (e: React.MouseEvent, groupId: number) => {
@@ -209,8 +211,6 @@ const DeviceListSidePanel: React.FC<{
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">Last seen: {formatLastSeen(device.lastSeen)}</div>
               </div>
-
-
             </div>
           </li>
           {expanded.has(device.id) && sortedChildren.map((c, i) => renderItem(c, depth + 1, i === sortedChildren.length - 1, i === 0))}
@@ -389,7 +389,7 @@ const DeviceListSidePanel: React.FC<{
                 <div className="absolute left-full top-0 ml-1 bg-white rounded-lg shadow-xl border border-gray-100 py-1 hidden group-hover/add:block min-w-[200px] max-h-[300px] overflow-y-auto">
                   {(() => {
                     const groupDevice = devices.find(d => d.id === contextMenu.groupId);
-                    const memberIds = new Set(groupDevice?.memberDeviceIds || []);
+                    const memberIds = new Set(groupDevice?.memberDeviceIds ?? []);
                     const availableDevices = allDevices.filter(d => !memberIds.has(d.id));
 
                     if (availableDevices.length === 0) {
@@ -400,9 +400,10 @@ const DeviceListSidePanel: React.FC<{
                       <button
                         key={d.id}
                         className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 truncate flex items-center gap-2"
-                        onClick={async () => {
-                          await onAddDeviceToGroup(contextMenu.groupId, d.id);
-                          setContextMenu(null);
+                        onClick={() => {
+                          void onAddDeviceToGroup(contextMenu.groupId, d.id).then(() => {
+                            setContextMenu(null);
+                          });
                         }}
                       >
                         <span className="w-6 inline-flex items-center justify-center flex-shrink-0">
@@ -422,11 +423,12 @@ const DeviceListSidePanel: React.FC<{
               <div className="h-px bg-gray-100 my-1" />
               <button
                 className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
-                onClick={async () => {
+                onClick={() => {
                   const groupName = devices.find(d => d.id === contextMenu.groupId)?.name;
-                  if (confirm(`Delete group "${groupName}"?`)) {
-                    await onDeleteGroup(contextMenu.groupId);
-                    setContextMenu(null);
+                  if (window.confirm(`Delete group "${groupName}"?`)) {
+                    void onDeleteGroup(contextMenu.groupId).then(() => {
+                      setContextMenu(null);
+                    });
                   }
                 }}
               >

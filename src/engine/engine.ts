@@ -50,7 +50,6 @@ export type DebugFrame = {
 
 const DEBUG_BUFFER_SIZE = 200;
 
-
 export class Engine {
   activeAnchor: Anchor | null = null;
   closedAnchors: Anchor[] = [];
@@ -79,15 +78,8 @@ export class Engine {
     return MOTION_PROFILES[this.normalizeProfileName(profile)];
   }
   private insertOutlier(sample: OutlierSample) {
-    let lo = 0;
-    let hi = this.outliers.length;
-    const ts = sample.point.timestamp;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if ((this.outliers[mid]?.point.timestamp ?? 0) <= ts) lo = mid + 1;
-      else hi = mid;
-    }
-    this.outliers.splice(lo, 0, sample);
+    this.outliers.push(sample);
+    this.outliers.sort((a, b) => a.point.timestamp - b.point.timestamp);
   }
   private computeCentroid(points: DevicePoint[]): [number, number] {
     // Computes the centroid (geometric center) of points, effectively clustering them into a single representative position.
@@ -166,8 +158,7 @@ export class Engine {
     this.seenDebugKeys.add(key);
     this.debugFrames.push(frame);
     if (this.debugFrames.length > DEBUG_BUFFER_SIZE) {
-      this.debugFrames.sort((a, b) => a.timestamp - b.timestamp);
-      this.debugFrames.splice(0, this.debugFrames.length - DEBUG_BUFFER_SIZE);
+      this.debugFrames = this.debugFrames.slice(-DEBUG_BUFFER_SIZE);
     }
   }
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
@@ -200,7 +191,6 @@ export class Engine {
       } else {
         const dist2Active = this.activeAnchor.mahalanobis2(m);
         mahalanobis2 = dist2Active;
-
 
         if (!this.motionActive) {
           if (dist2Active < profile.stationaryMahalanobisThreshold) {

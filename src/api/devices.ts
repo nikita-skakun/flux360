@@ -9,17 +9,24 @@ export type TraccarDevice = {
   attributes: Record<string, unknown>;
 };
 
-export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarDevice[]> {
-  const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? 'https' : 'http';
-  const base = `${protocol}://${opts.baseUrl}/api`;
-  let url = `${base}/devices`;
-
-  const headers: Record<string, string> = {
-    "Accept": "application/json",
-  };
+function buildHeaders(opts: TraccarClientOptions, json = false): Record<string, string> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (json) headers["Content-Type"] = "application/json";
   const authHeader = buildAuthHeader(opts.auth);
   if (authHeader) headers["Authorization"] = authHeader;
+  return headers;
+}
+
+function buildBaseUrl(opts: TraccarClientOptions): string {
+  const protocol = opts.secure ? "https" : "http";
+  return `${protocol}://${opts.baseUrl}/api`;
+}
+
+export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarDevice[]> {
+  const fetcher = opts.fetchImpl ?? fetch;
+  const base = buildBaseUrl(opts);
+  const url = `${base}/devices`;
+  const headers = buildHeaders(opts);
 
   const json: unknown = await performGet(fetcher, url, headers);
   let arr: unknown[] = [];
@@ -54,16 +61,9 @@ export async function createGroupDevice(
   memberDeviceIds: number[]
 ): Promise<TraccarDevice> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? 'https' : 'http';
-  const base = `${protocol}://${opts.baseUrl}/api`;
+  const base = buildBaseUrl(opts);
   const url = `${base}/devices`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-  };
-  const authHeader = buildAuthHeader(opts.auth);
-  if (authHeader) headers["Authorization"] = authHeader;
+  const headers = buildHeaders(opts, true);
 
   const payload = {
     name,
@@ -88,37 +88,31 @@ export async function createGroupDevice(
   };
 }
 
-export async function updateGroupDevice(
+type DeviceUpdates = {
+  name?: string;
+  emoji?: string;
+  color?: string | null;
+  motionProfile?: string | null;
+  memberDeviceIds?: number[];
+};
+
+async function updateDeviceBase(
   opts: TraccarClientOptions,
   deviceId: number,
-  updates: {
-    name?: string;
-    emoji?: string;
-    color?: string | null;
-    motionProfile?: string | null;
-    memberDeviceIds?: number[];
-  }
+  updates: DeviceUpdates,
+  notFoundError: string
 ): Promise<void> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? 'https' : 'http';
-  const base = `${protocol}://${opts.baseUrl}/api`;
+  const base = buildBaseUrl(opts);
   const url = `${base}/devices/${deviceId}`;
+  const headers = buildHeaders(opts, true);
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-  };
-  const authHeader = buildAuthHeader(opts.auth);
-  if (authHeader) headers["Authorization"] = authHeader;
-
-  // Fetch existing because PUT replaces/needs full object usually
   const existing = await performGet(fetcher, url, headers);
-  if (!existing || typeof existing !== "object") throw new Error("Group not found");
-  const group = existing as Record<string, unknown>;
+  if (!existing || typeof existing !== "object") throw new Error(notFoundError);
+  const obj = existing as Record<string, unknown>;
 
-  // Build the attributes object by merging
-  const existingAttributes = (group["attributes"] && typeof group["attributes"] === "object")
-    ? (group["attributes"] as Record<string, unknown>)
+  const existingAttributes = (obj["attributes"] && typeof obj["attributes"] === "object")
+    ? (obj["attributes"] as Record<string, unknown>)
     : {};
   const attributes: Record<string, unknown> = { ...existingAttributes };
 
@@ -129,13 +123,18 @@ export async function updateGroupDevice(
     attributes["memberDeviceIds"] = JSON.stringify(updates.memberDeviceIds);
   }
 
-  const payload: Record<string, unknown> = {
-    ...group,
-    attributes
-  };
+  const payload: Record<string, unknown> = { ...obj, attributes };
   if (updates.name !== undefined) payload["name"] = updates.name;
 
   await performPut(fetcher, url, headers, payload);
+}
+
+export async function updateGroupDevice(
+  opts: TraccarClientOptions,
+  deviceId: number,
+  updates: DeviceUpdates
+): Promise<void> {
+  await updateDeviceBase(opts, deviceId, updates, "Group not found");
 }
 
 export async function updateDeviceAttributes(
@@ -144,16 +143,9 @@ export async function updateDeviceAttributes(
   updates: Record<string, unknown>
 ): Promise<unknown> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? "https" : "http";
-  const base = `${protocol}://${opts.baseUrl}/api`;
+  const base = buildBaseUrl(opts);
   const url = `${base}/devices/${deviceId}`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-  };
-  const authHeader = buildAuthHeader(opts.auth);
-  if (authHeader) headers["Authorization"] = authHeader;
+  const headers = buildHeaders(opts, true);
 
   const existing = await performGet(fetcher, url, headers);
   const device = (existing && typeof existing === "object") ? (existing as Record<string, unknown>) : {};
@@ -169,54 +161,9 @@ export async function updateDeviceAttributes(
 export async function updateDevice(
   opts: TraccarClientOptions,
   deviceId: number,
-  updates: {
-    name?: string;
-    emoji?: string;
-    color?: string | null;
-    motionProfile?: string | null;
-  }
+  updates: Omit<DeviceUpdates, 'memberDeviceIds'>
 ): Promise<void> {
-  const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? 'https' : 'http';
-  const base = `${protocol}://${opts.baseUrl}/api`;
-  const url = `${base}/devices/${deviceId}`;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-  };
-  const authHeader = buildAuthHeader(opts.auth);
-  if (authHeader) headers["Authorization"] = authHeader;
-
-  // We need to fetch existing because PUT replaces the object usually, 
-  // or at least we need to merge attributes carefully. 
-  // Traccar PUT /devices/id often requires the full object or at least `id` and `uniqueId`.
-  const existing = await performGet(fetcher, url, headers);
-  if (!existing || typeof existing !== "object") throw new Error("Device not found");
-
-  const device = existing as Record<string, unknown>;
-  const uniqueId = device["uniqueId"];
-
-  const existingAttributes = (device["attributes"] && typeof device["attributes"] === "object")
-    ? (device["attributes"] as Record<string, unknown>)
-    : {};
-
-  const attributes: Record<string, unknown> = { ...existingAttributes };
-
-  if (updates.emoji !== undefined) attributes["emoji"] = updates.emoji;
-  if (updates.color !== undefined) attributes["color"] = updates.color;
-  if (updates.motionProfile !== undefined) attributes["motionProfile"] = updates.motionProfile;
-
-  const payload: Record<string, unknown> = {
-    id: deviceId,
-    uniqueId,
-    ...device,
-    attributes
-  };
-
-  if (updates.name !== undefined) payload["name"] = updates.name;
-
-  await performPut(fetcher, url, headers, payload);
+  await updateDeviceBase(opts, deviceId, updates, "Device not found");
 }
 
 export async function deleteGroupDevice(
@@ -224,15 +171,9 @@ export async function deleteGroupDevice(
   deviceId: number
 ): Promise<void> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? 'https' : 'http';
-  const base = `${protocol}://${opts.baseUrl}/api`;
+  const base = buildBaseUrl(opts);
   const url = `${base}/devices/${deviceId}`;
-
-  const headers: Record<string, string> = {
-    "Accept": "application/json",
-  };
-  const authHeader = buildAuthHeader(opts.auth);
-  if (authHeader) headers["Authorization"] = authHeader;
+  const headers = buildHeaders(opts);
 
   await performDelete(fetcher, url, headers);
 }

@@ -9,6 +9,7 @@ import type { EngineState } from '@/engine/engine';
 import type { Anchor } from '@/engine/anchor';
 import { degreesToMeters } from '@/util/geo';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
+import { rgbToHex } from '@/ui/color';
 
 export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
@@ -184,7 +185,6 @@ export const useStore = create<Store>()(
       // Device/Group Management
       setDevicesFromApi: async (devices: TraccarDevice[]) => {
         const { colorForDevice } = await import("@/ui/color");
-        const rgbToHex = (r: number, g: number, b: number): string => `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
         const nameMap: Record<number, string> = {};
         const iconMap: Record<number, string> = {};
         const lastSeenMap: Record<number, number | null> = {};
@@ -206,7 +206,7 @@ export const useStore = create<Store>()(
           motionProfileMap[device.id] = profile;
           motionProfileAttributeMap[device.id] = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
 
-          const colorAttr = typeof device.attributes["color"] === "string" ? device.attributes["color"] as string : null;
+          const colorAttr = typeof device.attributes["color"] === "string" ? device.attributes["color"] : null;
           colorAttributeMap[device.id] = colorAttr;
 
           // Check if it's a group device
@@ -285,7 +285,6 @@ export const useStore = create<Store>()(
         const state = get();
         const { createGroupDevice } = await import("@/api/devices");
         const { colorForDevice } = await import("@/ui/color");
-        const rgbToHex = (r: number, g: number, b: number): string => `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 
         // Optimistic update
         const tempId = Date.now(); // Temporary ID until API response
@@ -325,7 +324,7 @@ export const useStore = create<Store>()(
             const newDevices = { ...state.devices };
             const newColor = rgbToHex(...colorForDevice(created.id));
             if (newDevices[tempId]) {
-              newDevices[created.id] = { ...newDevices[tempId]!, color: newColor };
+              newDevices[created.id] = { ...newDevices[tempId], color: newColor };
               delete newDevices[tempId];
             }
             return {
@@ -472,7 +471,6 @@ export const useStore = create<Store>()(
         let defaultColor: string | null = null;
         if (updates.color === null) {
           const { colorForDevice } = await import("@/ui/color");
-          const rgbToHex = (r: number, g: number, b: number): string => `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
           defaultColor = rgbToHex(...colorForDevice(groupId));
         }
 
@@ -565,8 +563,8 @@ export const useStore = create<Store>()(
       },
 
       updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => {
-        // Wrapper for updateDevice just for motion profile
-        get().updateDevice(deviceId, { motionProfile: profile });
+        // Wrapper for updateDevice just for motion profile (fire-and-forget)
+        void get().updateDevice(deviceId, { motionProfile: profile });
       },
 
       addPositions: (positions: NormalizedPosition[]) => {
