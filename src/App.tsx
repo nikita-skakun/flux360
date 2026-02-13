@@ -93,7 +93,7 @@ export function App() {
   const editingTarget = useStore(state => state.ui.editingTarget);
   const setEditingTarget = useStore(state => state.setEditingTarget);
 
-  const { wsStatus, wsError, updateCounter, reconnect, disconnect, positions } = useTraccarConnection({
+  const { wsStatus, wsError, updateCounter, reconnect, positions } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
     token: traccarToken,
@@ -146,11 +146,6 @@ export function App() {
   const applySettings = () => {
     useStore.getState().applySettings();
     reconnect();
-  };
-
-  const clearSettings = () => {
-    useStore.getState().clearSettings();
-    disconnect();
   };
 
   const visibleComponents = useMemo(() => {
@@ -366,7 +361,6 @@ export function App() {
               wsStatus={wsStatus}
               wsError={wsError}
               onApplySettings={applySettings}
-              onClearSettings={clearSettings}
               onReconnect={reconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}

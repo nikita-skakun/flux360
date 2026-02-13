@@ -561,7 +561,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       {pulsingMarkers}
       {clusterChooser}
       <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
-        <div className="w-full sm:w-80 bg-background/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto border border-border">
+        <div className="w-full sm:w-80 bg-background/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
           {overlay}
         </div>
       </div>

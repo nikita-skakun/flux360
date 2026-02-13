@@ -12,7 +12,6 @@ type Props = {
   wsStatus: "unknown" | "connecting" | "connected" | "disconnected" | "error";
   wsError: string | null;
   onApplySettings: () => void;
-  onClearSettings: () => void;
   onReconnect: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
@@ -34,7 +33,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   wsStatus,
   wsError,
   onApplySettings,
-  onClearSettings,
   onReconnect,
   debugMode,
   setDebugMode,
@@ -43,7 +41,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
 
   return (
     <div className="w-full">
-      <div className="mb-3 p-2 rounded bg-muted/10 border">
+      <div className="mb-3 p-2 rounded bg-muted/10">
         {/* Header: Spoiler Toggle + Debug + Status */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
@@ -62,7 +60,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
             </div>
 
-            <label className="flex items-center gap-1 cursor-pointer border-l pl-3 ml-1">
+            <label className="flex items-center gap-1 cursor-pointer border-l border-border dark:border-white/10 pl-3 ml-1">
               <input
                 type="checkbox"
                 checked={debugMode}
@@ -119,12 +117,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
                 onClick={onApplySettings}
               >
                 Save
-              </button>
-              <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
-                onClick={onClearSettings}
-              >
-                Clear
               </button>
               <button
                 className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
