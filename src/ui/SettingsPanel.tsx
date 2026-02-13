@@ -7,6 +7,8 @@ type Props = {
   setTokenInput: (value: string) => void;
   maptilerApiKeyInput: string;
   setMaptilerApiKeyInput: (value: string) => void;
+  darkModeInput: boolean;
+  setDarkModeInput: (value: boolean) => void;
   wsStatus: "unknown" | "connecting" | "connected" | "disconnected" | "error";
   wsError: string | null;
   onApplySettings: () => void;
@@ -27,6 +29,8 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   setTokenInput,
   maptilerApiKeyInput,
   setMaptilerApiKeyInput,
+  darkModeInput,
+  setDarkModeInput,
   wsStatus,
   wsError,
   onApplySettings,
@@ -101,6 +105,14 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               value={maptilerApiKeyInput}
               onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
             />
+            <label className="flex items-center gap-1 text-sm cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={darkModeInput}
+                onChange={(e) => setDarkModeInput(e.target.checked)}
+              />
+              Dark Mode
+            </label>
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <button
                 className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors"

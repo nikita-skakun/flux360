@@ -59,6 +59,8 @@ type StoreState = {
     inputToken: string;
     maptilerApiKey: string;
     inputMaptilerApiKey: string;
+    darkMode: boolean;
+    inputDarkMode: boolean;
   };
 
   // Positions slice
@@ -123,6 +125,7 @@ type StoreActions = {
   setInputSecure: (value: boolean) => void;
   setInputToken: (value: string) => void;
   setInputMaptilerApiKey: (value: string) => void;
+  setInputDarkMode: (value: boolean) => void;
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;
@@ -153,6 +156,8 @@ const initialState: StoreState = {
     inputToken: '',
     maptilerApiKey: '',
     inputMaptilerApiKey: '',
+    darkMode: true,
+    inputDarkMode: true,
   },
   positions: {
     allPositions: [],
@@ -824,6 +829,7 @@ export const useStore = create<Store>()(
             secure: state.settings.inputSecure,
             token: state.settings.inputToken,
             maptilerApiKey: state.settings.inputMaptilerApiKey,
+            darkMode: state.settings.inputDarkMode,
           }
         }));
       },
@@ -840,6 +846,8 @@ export const useStore = create<Store>()(
             inputToken: '',
             maptilerApiKey: '',
             inputMaptilerApiKey: '',
+            darkMode: true,
+            inputDarkMode: true,
           }
         }));
       },
@@ -876,6 +884,15 @@ export const useStore = create<Store>()(
           settings: {
             ...state.settings,
             inputMaptilerApiKey: value,
+          }
+        }));
+      },
+
+      setInputDarkMode: (value: boolean) => {
+        set(state => ({
+          settings: {
+            ...state.settings,
+            inputDarkMode: value,
           }
         }));
       },

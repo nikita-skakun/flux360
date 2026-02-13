@@ -22,9 +22,10 @@ type Props = {
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
+  darkMode?: boolean;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode = true }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -184,7 +185,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     if (maptilerApiKey) {
       const ml = new MaptilerLayer({
         apiKey: maptilerApiKey,
-        style: "dataviz-dark", // Default to dark theme
+        style: darkMode ? "dataviz-dark" : "dataviz",
       });
       ml.addTo(map);
       tileLayerRef.current = ml;
@@ -305,12 +306,12 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     if (maptilerApiKey) {
       const ml = new MaptilerLayer({
         apiKey: maptilerApiKey,
-        style: "dataviz-dark", // Default to dark theme
+        style: darkMode ? "dataviz-dark" : "dataviz",
       });
       ml.addTo(map);
       tileLayerRef.current = ml;
     }
-  }, [maptilerApiKey]);
+  }, [maptilerApiKey, darkMode]);
 
   useEffect(() => {
     const map = mapRef.current;

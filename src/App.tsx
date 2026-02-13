@@ -63,13 +63,16 @@ export function App() {
   const setSecureInput = useStore(state => state.setInputSecure);
   const setTokenInput = useStore(state => state.setInputToken);
   const setMaptilerApiKeyInput = useStore(state => state.setInputMaptilerApiKey);
+  const setDarkModeInput = useStore(state => state.setInputDarkMode);
   const inputSecure = useStore(state => state.settings.inputSecure);
   const inputToken = useStore(state => state.settings.inputToken);
   const inputMaptilerApiKey = useStore(state => state.settings.inputMaptilerApiKey);
+  const inputDarkMode = useStore(state => state.settings.inputDarkMode);
   const traccarSecure = useStore(state => state.settings.secure);
   const traccarToken = useStore(state => state.settings.token);
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
+  const darkMode = useStore(state => state.settings.darkMode);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
@@ -302,7 +305,7 @@ export function App() {
   }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice]);
 
   return (
-    <div className="h-screen w-screen">
+    <div className={`h-screen w-screen ${darkMode ? 'dark' : ''}`}>
       <DeviceListSidePanel
         devices={deviceList}
         selectedDeviceId={selectedDeviceId}
@@ -338,6 +341,7 @@ export function App() {
         deviceIcons={deviceIcons}
         deviceColors={deviceColors}
         maptilerApiKey={maptilerApiKey}
+        darkMode={darkMode}
         overlay={
           <div className="flex flex-col gap-2">
             <SettingsPanel
@@ -349,6 +353,8 @@ export function App() {
               setTokenInput={setTokenInput}
               maptilerApiKeyInput={inputMaptilerApiKey}
               setMaptilerApiKeyInput={setMaptilerApiKeyInput}
+              darkModeInput={inputDarkMode}
+              setDarkModeInput={setDarkModeInput}
               wsStatus={wsStatus}
               wsError={wsError}
               onApplySettings={applySettings}
