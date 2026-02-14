@@ -309,6 +309,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       map.off("click", onMapClick);
       map.off("mousemove", onMapMove);
       container.removeEventListener("mouseleave", onMouseLeave);
+      // Stop any ongoing animations before removing the map to prevent errors
+      if (map.stop) map.stop();
       map.remove();
       mapRef.current = null;
       tileLayerRef.current = null;
@@ -501,8 +503,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
               return (
                 <div key={`${it.device}-${i}`} style={{ position: 'absolute', left: `${left}px`, top: `${top}px`, transform: 'translate(-50%, -50%)' }}>
                   <div
-                    className="w-10 h-10 rounded-full bg-background shadow flex items-center justify-center cursor-pointer hover:scale-110"
-                    style={innerStyle}
+                    className="w-10 h-10 rounded-full shadow flex items-center justify-center cursor-pointer hover:scale-110 border-2"
+                    style={{ ...innerStyle, backgroundColor: darkMode ? 'rgb(40,40,40)' : 'rgb(255,255,255)', borderColor: colorStr }}
                     onClick={(e) => { e.stopPropagation(); onSelectDevice(it.device); closeClusterPopupAnimated(); }}
                     title={deviceNames[it.device] ?? String(it.device)}
                   >
@@ -525,7 +527,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       if (!comp?.mean) return null;
 
       const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLat, refLon);
-      const pt = mapRef.current!.latLngToContainerPoint(L.latLng(deg.lat, deg.lon));
+      const map = mapRef.current;
+      if (!map) return null;
+      const pt = map.latLngToContainerPoint(L.latLng(deg.lat, deg.lon));
 
       return (
         <div
