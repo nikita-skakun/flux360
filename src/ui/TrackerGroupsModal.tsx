@@ -97,14 +97,14 @@ const TrackerGroupsModal: React.FC<Props> = ({
         onClick={onClose}
       />
       <div
-        className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        className="relative bg-background rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between p-6 border-b shrink-0">
           <h2 className="text-xl font-bold">Tracker Groups</h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+            className="text-muted-foreground hover:text-foreground text-2xl leading-none"
           >
             ×
           </button>
@@ -116,11 +116,11 @@ const TrackerGroupsModal: React.FC<Props> = ({
           <div className="mb-8">
             <h3 className="text-lg font-semibold mb-4">Existing Groups</h3>
             {groupDevices.length === 0 ? (
-              <p className="text-gray-500">No groups created yet</p>
+              <p className="text-muted-foreground">No groups created yet</p>
             ) : (
               <div className="space-y-4">
                 {groupDevices.map((group) => (
-                  <div key={group.id} className="border rounded-lg p-4 bg-gray-50">
+                  <div key={group.id} className="border rounded-lg p-4 bg-muted/30">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3 flex-1">
                         <span className="material-symbols-outlined text-2xl w-12 text-center" style={{ color: group.color }}>{group.emoji}</span>
@@ -137,12 +137,12 @@ const TrackerGroupsModal: React.FC<Props> = ({
                               }
                             }}
                             autoFocus
-                            className="border rounded px-2 py-1 text-sm flex-1"
+                            className="border rounded px-2 py-1 text-sm flex-1 bg-background text-foreground"
                             disabled={isLoading}
                           />
                         ) : (
                           <h4
-                            className="font-semibold cursor-pointer hover:text-blue-600"
+                            className="font-semibold cursor-pointer hover:text-blue-600 dark:hover:text-blue-400"
                             onClick={() => startEditingGroup(group)}
                           >
                             {group.name}
@@ -162,7 +162,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                             }
                           })();
                         }}
-                        className="text-red-600 hover:text-red-700 text-sm px-2 py-1 rounded border border-red-200 disabled:opacity-50"
+                        className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-sm px-2 py-1 rounded border border-red-200 dark:border-red-800 disabled:opacity-50"
                         disabled={isLoading}
                       >
                         Delete
@@ -174,7 +174,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                         return (
                           <span
                             key={deviceId}
-                            className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm flex items-center gap-2"
+                            className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1 rounded-full text-sm flex items-center gap-2"
                           >
                             {device?.name ?? `Device ${deviceId}`}
                             <button
@@ -190,7 +190,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                                   }
                                 })();
                               }}
-                              className="hover:text-blue-900 disabled:opacity-50"
+                              className="hover:text-blue-900 dark:hover:text-blue-100 disabled:opacity-50"
                               disabled={isLoading}
                             >
                               ×
@@ -218,7 +218,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                               })();
                             }
                           }}
-                          className="border rounded px-2 py-1 text-sm disabled:opacity-50"
+                          className="border rounded px-2 py-1 text-sm disabled:opacity-50 bg-background text-foreground"
                           disabled={isLoading}
                         >
                           <option value="">Add device...</option>
@@ -249,7 +249,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                   value={newGroupName}
                   onChange={(e) => setNewGroupName(e.target.value)}
                   placeholder="e.g., My Fleet"
-                  className="w-full border rounded px-3 py-2 disabled:opacity-50"
+                  className="w-full border rounded px-3 py-2 disabled:opacity-50 bg-background text-foreground"
                   disabled={isLoading}
                 />
               </div>
@@ -263,8 +263,8 @@ const TrackerGroupsModal: React.FC<Props> = ({
                       key={icon}
                       onClick={() => setSelectedEmoji(icon)}
                       className={`p-2 rounded border-2 transition-all ${selectedEmoji === icon
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300"
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30"
+                        : "border-border hover:border-muted-foreground"
                         }`}
                       disabled={isLoading}
                     >
@@ -277,7 +277,7 @@ const TrackerGroupsModal: React.FC<Props> = ({
                 <label className="block text-sm font-medium mb-2">
                   Devices ({selectedDevices.length} selected)
                 </label>
-                <div className="space-y-2 max-h-40 overflow-y-auto border rounded p-3 bg-gray-50">
+                <div className="space-y-2 max-h-40 overflow-y-auto border rounded p-3 bg-muted/30">
                   {ungroupedDevices.map((device) => (
                     <label key={device.id} className="flex items-center gap-2">
                       <input
@@ -306,13 +306,13 @@ const TrackerGroupsModal: React.FC<Props> = ({
                 <button
                   onClick={() => void handleCreateGroup()}
                   disabled={!newGroupName.trim() || selectedDevices.length === 0 || isLoading}
-                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? "Creating..." : "Create Group"}
                 </button>
                 <button
                   onClick={onClose}
-                  className="px-4 py-2 border rounded hover:bg-gray-50 disabled:opacity-50"
+                  className="px-4 py-2 border rounded hover:bg-muted disabled:opacity-50"
                   disabled={isLoading}
                 >
                   Close

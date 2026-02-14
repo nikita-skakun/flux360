@@ -57,6 +57,10 @@ type StoreState = {
     inputBaseUrl: string;
     inputSecure: boolean;
     inputToken: string;
+    maptilerApiKey: string;
+    inputMaptilerApiKey: string;
+    darkMode: boolean;
+    inputDarkMode: boolean;
   };
 
   // Positions slice
@@ -120,6 +124,8 @@ type StoreActions = {
   setInputBaseUrl: (value: string) => void;
   setInputSecure: (value: boolean) => void;
   setInputToken: (value: string) => void;
+  setInputMaptilerApiKey: (value: string) => void;
+  setInputDarkMode: (value: boolean) => void;
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;
@@ -148,6 +154,10 @@ const initialState: StoreState = {
     inputBaseUrl: '',
     inputSecure: false,
     inputToken: '',
+    maptilerApiKey: '',
+    inputMaptilerApiKey: '',
+    darkMode: true,
+    inputDarkMode: true,
   },
   positions: {
     allPositions: [],
@@ -818,6 +828,8 @@ export const useStore = create<Store>()(
             baseUrl: state.settings.inputBaseUrl,
             secure: state.settings.inputSecure,
             token: state.settings.inputToken,
+            maptilerApiKey: state.settings.inputMaptilerApiKey,
+            darkMode: state.settings.inputDarkMode,
           }
         }));
       },
@@ -832,6 +844,10 @@ export const useStore = create<Store>()(
             inputBaseUrl: '',
             inputSecure: false,
             inputToken: '',
+            maptilerApiKey: '',
+            inputMaptilerApiKey: '',
+            darkMode: true,
+            inputDarkMode: true,
           }
         }));
       },
@@ -859,6 +875,24 @@ export const useStore = create<Store>()(
           settings: {
             ...state.settings,
             inputToken: value,
+          }
+        }));
+      },
+
+      setInputMaptilerApiKey: (value: string) => {
+        set(state => ({
+          settings: {
+            ...state.settings,
+            inputMaptilerApiKey: value,
+          }
+        }));
+      },
+
+      setInputDarkMode: (value: boolean) => {
+        set(state => ({
+          settings: {
+            ...state.settings,
+            inputDarkMode: value,
           }
         }));
       },

@@ -2,6 +2,7 @@ import { getColorForDevice } from "./color";
 import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
+import { MaptilerLayer } from "@maptiler/leaflet-maptilersdk";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { DevicePoint } from "@/ui/types";
 
@@ -20,12 +21,15 @@ type Props = {
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   pulsingDeviceIds?: number[];
+  maptilerApiKey?: string;
+  darkMode?: boolean;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode = true }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | unknown | null>(null);
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -175,12 +179,17 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const mapContainer = mapDivRef.current;
     if (!mapContainer) return;
 
-    const map = L.map(mapContainer, { attributionControl: false, zoomControl: false });
+    const map = L.map(mapContainer, { attributionControl: true, zoomControl: false });
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+    // Use MapTiler vector tiles
+    if (maptilerApiKey) {
+      const ml = new MaptilerLayer({
+        apiKey: maptilerApiKey,
+        style: darkMode ? "dataviz-dark" : "dataviz",
+      });
+      ml.addTo(map);
+      tileLayerRef.current = ml;
+    }
 
     const initialLat = refLatRef.current;
     const initialLon = refLonRef.current;
@@ -278,8 +287,31 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       container.removeEventListener("mouseleave", onMouseLeave);
       map.remove();
       mapRef.current = null;
+      tileLayerRef.current = null;
     };
   }, []);
+
+  // Update tile layer when maptilerApiKey changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Remove existing tile layer
+    if (tileLayerRef.current) {
+      map.removeLayer(tileLayerRef.current as L.Layer);
+      tileLayerRef.current = null;
+    }
+
+    // Add new tile layer based on API key
+    if (maptilerApiKey) {
+      const ml = new MaptilerLayer({
+        apiKey: maptilerApiKey,
+        style: darkMode ? "dataviz-dark" : "dataviz",
+      });
+      ml.addTo(map);
+      tileLayerRef.current = ml;
+    }
+  }, [maptilerApiKey, darkMode]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -445,7 +477,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
               return (
                 <div key={`${it.device}-${i}`} style={{ position: 'absolute', left: `${left}px`, top: `${top}px`, transform: 'translate(-50%, -50%)' }}>
                   <div
-                    className="w-10 h-10 rounded-full bg-white shadow flex items-center justify-center cursor-pointer hover:scale-110"
+                    className="w-10 h-10 rounded-full bg-background shadow flex items-center justify-center cursor-pointer hover:scale-110"
                     style={innerStyle}
                     onClick={(e) => { e.stopPropagation(); onSelectDevice(it.device); closeClusterPopupAnimated(); }}
                     title={deviceNames[it.device] ?? String(it.device)}
@@ -488,6 +520,11 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: typeof height === "number" ? `${height}px` : height }}>
+      <style>{`
+        .leaflet-control-attribution {
+          display: none !important;
+        }
+      `}</style>
       <div ref={mapDivRef} className="absolute inset-0 z-0" />
       <div className="absolute inset-0 pointer-events-none z-[1000]">
         <CanvasView
@@ -512,7 +549,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
           className="absolute z-[1003] pointer-events-none"
           style={{ left: anchorHover.x + 12, top: anchorHover.y + 12 }}
         >
-          <div className="text-xs bg-white/90 border shadow rounded px-2 py-1">
+          <div className="text-xs bg-background/90 border shadow rounded px-2 py-1 text-foreground backdrop-blur-sm border-border">
             <div className="font-medium">{anchorHoverLabel.typeLabel} anchor</div>
             <div>Confidence: {anchorHoverLabel.confidence.toFixed(2)}</div>
             <div>Started: {anchorHoverLabel.started}</div>
@@ -524,7 +561,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       {pulsingMarkers}
       {clusterChooser}
       <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
-        <div className="w-full sm:w-80 bg-white/70 backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
+        <div className="w-full sm:w-80 bg-background backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
           {overlay}
         </div>
       </div>

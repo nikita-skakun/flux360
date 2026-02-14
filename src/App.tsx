@@ -62,11 +62,25 @@ export function App() {
   const setBaseUrlInput = useStore(state => state.setInputBaseUrl);
   const setSecureInput = useStore(state => state.setInputSecure);
   const setTokenInput = useStore(state => state.setInputToken);
+  const setMaptilerApiKeyInput = useStore(state => state.setInputMaptilerApiKey);
+  const setDarkModeInput = useStore(state => state.setInputDarkMode);
   const inputSecure = useStore(state => state.settings.inputSecure);
   const inputToken = useStore(state => state.settings.inputToken);
+  const inputMaptilerApiKey = useStore(state => state.settings.inputMaptilerApiKey);
+  const inputDarkMode = useStore(state => state.settings.inputDarkMode);
   const traccarSecure = useStore(state => state.settings.secure);
   const traccarToken = useStore(state => state.settings.token);
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
+  const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
+  const darkMode = useStore(state => state.settings.darkMode);
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
@@ -79,7 +93,7 @@ export function App() {
   const editingTarget = useStore(state => state.ui.editingTarget);
   const setEditingTarget = useStore(state => state.setEditingTarget);
 
-  const { wsStatus, wsError, updateCounter, reconnect, disconnect, positions } = useTraccarConnection({
+  const { wsStatus, wsError, updateCounter, reconnect, positions } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
     token: traccarToken,
@@ -132,11 +146,6 @@ export function App() {
   const applySettings = () => {
     useStore.getState().applySettings();
     reconnect();
-  };
-
-  const clearSettings = () => {
-    useStore.getState().clearSettings();
-    disconnect();
   };
 
   const visibleComponents = useMemo(() => {
@@ -334,6 +343,8 @@ export function App() {
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
         deviceColors={deviceColors}
+        maptilerApiKey={maptilerApiKey}
+        darkMode={darkMode}
         overlay={
           <div className="flex flex-col gap-2">
             <SettingsPanel
@@ -343,10 +354,13 @@ export function App() {
               setSecureInput={setSecureInput}
               tokenInput={inputToken}
               setTokenInput={setTokenInput}
+              maptilerApiKeyInput={inputMaptilerApiKey}
+              setMaptilerApiKeyInput={setMaptilerApiKeyInput}
+              darkModeInput={inputDarkMode}
+              setDarkModeInput={setDarkModeInput}
               wsStatus={wsStatus}
               wsError={wsError}
               onApplySettings={applySettings}
-              onClearSettings={clearSettings}
               onReconnect={reconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
