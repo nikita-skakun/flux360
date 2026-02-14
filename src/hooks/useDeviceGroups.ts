@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useCallback, useEffect } from "react";
-import type { MotionProfileName } from "@/engine/motionDetector";
+import type { MotionProfileName } from "@/types";
 
 type GroupDevice = { id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] };
 

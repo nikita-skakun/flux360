@@ -20,3 +20,16 @@ export type NormalizedPosition = {
   lon: number;
   accuracy: number; // meters
 };
+
+export type MotionProfileName = 'person' | 'car';
+
+export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
+
+export type GroupDevice = {
+  id: number;
+  name: string;
+  emoji: string;
+  color: string;
+  memberDeviceIds: number[];
+  motionProfile: MotionProfileName | null;
+};

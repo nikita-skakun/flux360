@@ -1,7 +1,7 @@
 import { Anchor } from "./anchor";
 import { distanceMeters, directionFromPoints, computeCentroid } from "@/util/geo";
-import { MOTION_PROFILES, computeCoherence, type MotionProfileName, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import type { DevicePoint } from "@/types";
+import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
+import type { DevicePoint, MotionProfileName } from "@/types";
 
 // Snapshot for UI/Historical view
 export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number | null; activeConfidence: number };

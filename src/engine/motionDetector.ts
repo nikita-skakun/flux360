@@ -5,10 +5,7 @@
  * with coherence analysis to handle noisy GPS data.
  */
 
-export { distanceMeters, directionFromPoints } from "@/util/geo";
-import type { DevicePoint, Vec2 } from "@/types";
-
-export type MotionProfileName = "person" | "car";
+import type { DevicePoint, Vec2, MotionProfileName } from "@/types";
 
 /**
  * Configuration for motion detection behavior.

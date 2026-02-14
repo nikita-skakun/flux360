@@ -4,7 +4,7 @@ import { EMOJI_OPTIONS } from "./constants";
 import { HexColorPicker } from "react-colorful";
 import { useStore } from "@/store";
 import React, { useState, useEffect, useRef } from "react";
-import type { MotionProfileName } from "@/engine/motionDetector";
+import type { MotionProfileName } from "@/types";
 
 type Props = {
     isOpen: boolean;
@@ -54,7 +54,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
             setName(target.name);
             setEmoji(target.emoji);
             setColor(target.color);
-            setMotionProfile(target.motionProfile);
+            setMotionProfile(target.motionProfile as MotionProfileName | null);
         }
     }, [isOpen, target, type, id]);
 
