@@ -193,7 +193,7 @@ const DeviceListSidePanel: React.FC<{
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2 h-6">
                   <span
-                    className="font-medium text-foreground truncate block hover:text-blue-600 dark:hover:text-blue-400"
+                    className="font-medium text-foreground truncate block group-hover:text-blue-700 dark:group-hover:text-blue-400"
                     title={displayName}
                   >
                     {displayName}

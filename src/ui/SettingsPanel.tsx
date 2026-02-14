@@ -7,11 +7,12 @@ type Props = {
   setTokenInput: (value: string) => void;
   maptilerApiKeyInput: string;
   setMaptilerApiKeyInput: (value: string) => void;
-  darkModeInput: boolean;
-  setDarkModeInput: (value: boolean) => void;
+  darkModeInput: 'light' | 'dark' | 'system';
+  setDarkModeInput: (value: 'light' | 'dark' | 'system') => void;
   wsStatus: "unknown" | "connecting" | "connected" | "disconnected" | "error";
   wsError: string | null;
   onApplySettings: () => void;
+  onApplyTheme: (theme: 'light' | 'dark' | 'system') => void;
   onReconnect: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
@@ -33,16 +34,41 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   wsStatus,
   wsError,
   onApplySettings,
+  onApplyTheme,
   onReconnect,
   debugMode,
   setDebugMode,
 }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Cycle through theme modes: system -> dark -> light -> dark...
+  // Applies immediately without needing to click Save
+  const cycleTheme = () => {
+    const nextTheme: 'light' | 'dark' | 'system' =
+      darkModeInput === 'system' ? 'dark' :
+      darkModeInput === 'dark' ? 'light' : 'dark';
+    setDarkModeInput(nextTheme);
+    onApplyTheme(nextTheme);
+  };
+
+  // Get the appropriate icon and label
+  const getThemeInfo = () => {
+    switch (darkModeInput) {
+      case 'system':
+        return { icon: 'brightness_auto', label: 'Auto' };
+      case 'dark':
+        return { icon: 'dark_mode', label: 'Dark' };
+      case 'light':
+        return { icon: 'light_mode', label: 'Light' };
+    }
+  };
+
+  const themeInfo = getThemeInfo();
+
   return (
     <div className="w-full">
       <div className="p-2 rounded bg-muted/30">
-        {/* Header: Spoiler Toggle + Debug + Status */}
+        {/* Header: Spoiler Toggle + Debug + Status + Theme */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <button
             onClick={() => setIsExpanded(!isExpanded)}
@@ -60,23 +86,33 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
             </div>
 
+            {/* Theme Toggle Button */}
+            <button
+              onClick={cycleTheme}
+              className="flex items-center gap-1 px-2 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
+              title={`Theme: ${themeInfo.label} (click to cycle)`}
+            >
+              <span className="material-icons text-lg">{themeInfo.icon}</span>
+              <span className="text-xs">{themeInfo.label}</span>
+            </button>
+
             <label className="flex items-center gap-1 cursor-pointer border-l border-border dark:border-white/10 pl-3 ml-1">
               <input
                 type="checkbox"
                 checked={debugMode}
                 onChange={(e) => setDebugMode(e.target.checked)}
               />
-              <span className="text-xs font-medium">Debug Mode</span>
+              <span className="text-xs font-medium">Debug</span>
             </label>
           </div>
         </div>
 
         {/* Spoiler Body */}
         {isExpanded && (
-          <div className="mt-3 border-border flex flex-wrap items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="mt-3 border-border flex flex-col gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
             <input
               type="text"
-              className="border rounded px-2 py-1 w-[24rem] text-sm bg-background text-foreground border-border dark:border-white/10"
+              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border dark:border-white/10"
               placeholder="Traccar Base URL (e.g. localhost:8082)"
               value={baseUrlInput}
               onChange={(e) => setBaseUrlInput(e.target.value)}
@@ -91,26 +127,18 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             </label>
             <input
               type="password"
-              className="border rounded px-2 py-1 w-48 text-sm bg-background text-foreground border-border dark:border-white/10"
+              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border dark:border-white/10"
               placeholder="API Token"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
             />
             <input
               type="password"
-              className="border rounded px-2 py-1 w-56 text-sm bg-background text-foreground border-border dark:border-white/10"
+              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border dark:border-white/10"
               placeholder="MapTiler API Key"
               value={maptilerApiKeyInput}
               onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
             />
-            <label className="flex items-center gap-1 text-sm cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={darkModeInput}
-                onChange={(e) => setDarkModeInput(e.target.checked)}
-              />
-              Dark Mode
-            </label>
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <button
                 className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"

@@ -74,12 +74,37 @@ export function App() {
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const darkMode = useStore(state => state.settings.darkMode);
 
+  // Handle theme switching with support for 'system', 'light', and 'dark'
+  const isDark = useMemo(() => {
+    if (darkMode === 'dark') return true;
+    if (darkMode === 'light') return false;
+    // System mode - check media query
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  }, [darkMode]);
+
   useEffect(() => {
-    if (darkMode) {
+    if (isDark) {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
     }
+  }, [isDark]);
+
+  // Listen for system theme changes when in system mode
+  useEffect(() => {
+    if (darkMode !== 'system') return;
+    
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+    
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
   }, [darkMode]);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
@@ -148,6 +173,17 @@ export function App() {
   const applySettings = () => {
     useStore.getState().applySettings();
     reconnect();
+  };
+
+  // Apply theme immediately without affecting other settings
+  const applyTheme = (theme: 'light' | 'dark' | 'system') => {
+    useStore.setState(state => ({
+      settings: {
+        ...state.settings,
+        darkMode: theme,
+        inputDarkMode: theme,
+      }
+    }));
   };
 
   const visibleComponents = useMemo(() => {
@@ -350,7 +386,7 @@ export function App() {
         deviceIcons={deviceIcons}
         deviceColors={deviceColors}
         maptilerApiKey={maptilerApiKey}
-        darkMode={darkMode}
+        darkMode={isDark}
         overlay={
           <div className="flex flex-col gap-2">
             <SettingsPanel
@@ -367,6 +403,7 @@ export function App() {
               wsStatus={wsStatus}
               wsError={wsError}
               onApplySettings={applySettings}
+              onApplyTheme={applyTheme}
               onReconnect={reconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
