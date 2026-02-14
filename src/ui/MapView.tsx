@@ -50,6 +50,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
 
   const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
+  const prevMaptilerApiKeyRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     clusterPopupRef.current = clusterPopup;
@@ -312,9 +313,21 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       container.removeEventListener("mouseleave", onMouseLeave);
       // Stop any ongoing animations before removing the map to prevent errors
       if (map.stop) map.stop();
+
+      // Explicitly remove tile layer first to prevent "el is undefined" errors
+      if (tileLayerRef.current) {
+        try {
+          if (map.hasLayer(tileLayerRef.current)) {
+            map.removeLayer(tileLayerRef.current);
+          }
+        } catch {
+          // ignore removal errors
+        }
+        tileLayerRef.current = null;
+      }
+
       map.remove();
       mapRef.current = null;
-      tileLayerRef.current = null;
     };
   }, []);
 
@@ -323,20 +336,45 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     const map = mapRef.current;
     if (!map) return;
 
-    // Remove existing tile layer
+    // Optimization: if only changing style (dark mode) and API key matches, try to use setStyle
+    // to avoid destroying/recreating the layer which causes animation errors.
+    if (tileLayerRef.current &&
+      prevMaptilerApiKeyRef.current === maptilerApiKey &&
+      maptilerApiKey) {
+      try {
+        const layer = tileLayerRef.current as InstanceType<typeof MaptilerLayer>;
+        layer.setStyle(darkMode ? "dataviz-dark" : "dataviz");
+      } catch (e) {
+        console.warn("Error updating layer style:", e);
+      }
+    }
+
+    prevMaptilerApiKeyRef.current = maptilerApiKey;
+
+    // Remove existing tile layer safely
     if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current);
+      try {
+        if (map.hasLayer(tileLayerRef.current)) {
+          map.removeLayer(tileLayerRef.current);
+        }
+      } catch (e) {
+        console.warn("Error removing tile layer:", e);
+      }
       tileLayerRef.current = null;
     }
 
     // Add new tile layer based on API key
     if (maptilerApiKey) {
-      const ml = new MaptilerLayer({
-        apiKey: maptilerApiKey,
-        style: darkMode ? "dataviz-dark" : "dataviz",
-      });
-      ml.addTo(map);
-      tileLayerRef.current = ml;
+      try {
+        const ml = new MaptilerLayer({
+          apiKey: maptilerApiKey,
+          style: darkMode ? "dataviz-dark" : "dataviz",
+        });
+        ml.addTo(map);
+        tileLayerRef.current = ml;
+      } catch (e) {
+        console.error("Error adding tile layer:", e);
+      }
     }
   }, [maptilerApiKey, darkMode]);
 
@@ -552,6 +590,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       <style>{`
         .leaflet-control-attribution {
           display: none !important;
+        }
+        .leaflet-container {
+          background-color: ${darkMode ? 'rgb(40, 40, 40)' : '#ddd'} !important;
         }
       `}</style>
       <div ref={mapDivRef} className="absolute inset-0 z-0" />

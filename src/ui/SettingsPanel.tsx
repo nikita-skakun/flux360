@@ -54,12 +54,13 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   // Get the appropriate icon and label
   const getThemeInfo = () => {
     switch (darkModeInput) {
-      case 'system':
-        return { icon: 'brightness_auto', label: 'Auto' };
       case 'dark':
         return { icon: 'dark_mode', label: 'Dark' };
       case 'light':
         return { icon: 'light_mode', label: 'Light' };
+      case 'system':
+      default:
+        return { icon: 'brightness_auto', label: 'Auto' };
     }
   };
 
