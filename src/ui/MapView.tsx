@@ -26,7 +26,7 @@ type Props = {
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
-  darkMode?: boolean;
+  darkMode: boolean;
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode }, ref) => {
@@ -566,6 +566,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           openClusterPoint={clusterPoint}
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
+          darkMode={darkMode}
         />
       </div>
       {anchorHover && anchorHoverLabel ? (

@@ -25,6 +25,7 @@ export type CanvasViewProps = {
   debugAnchors: DebugAnchor[];
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
+  darkMode: boolean;
 };
 
 type DebugAnchor = {
@@ -44,7 +45,7 @@ type DebugFrame = {
   timestamp: number;
 };
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons, deviceColors }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons, deviceColors, darkMode }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -218,11 +219,13 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
 
       ctx.closePath();
 
-      ctx.fillStyle = "rgb(255,255,255)";
+      // Marker background color: white in light mode, dark gray in dark mode
+      ctx.fillStyle = darkMode ? "rgb(40,40,40)" : "rgb(255,255,255)";
       ctx.fill();
 
-      ctx.lineWidth = isSelected ? 3 : 1;
-      ctx.strokeStyle = "rgba(0,0,0,0.1)";
+      ctx.lineWidth = isSelected ? 3 : 2;
+      // Use the device color for the outline
+      ctx.strokeStyle = rgbaString(iconColor, 0.7);
       ctx.lineJoin = "round";
       ctx.stroke();
 
@@ -243,10 +246,12 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         const bx = tipX + PIN_R * 0.75;
         const by = headY + PIN_R * 0.6;
         ctx.beginPath();
-        ctx.fillStyle = "rgb(230, 230, 230)";
+        // Badge background: light gray in light mode, dark gray in dark mode
+        ctx.fillStyle = darkMode ? "rgb(30,30,30)" : "rgb(230, 230, 230)";
         ctx.arc(bx, by, badgeRadius, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "rgb(0,0,0)";
+        // Badge text: black in light mode, white in dark mode
+        ctx.fillStyle = darkMode ? "rgb(255,255,255)" : "rgb(0,0,0)";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.font = `${Math.round(badgeRadius)}px -apple-system, system-ui, Arial`;
@@ -443,7 +448,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, darkMode]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 });
