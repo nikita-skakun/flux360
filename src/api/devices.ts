@@ -1,6 +1,11 @@
 import type { TraccarClientOptions } from "./httpUtils";
 import { performGet, performPost, performPut, performDelete, buildAuthHeader } from "./httpUtils";
 
+export function buildJsonHeaders(opts: TraccarClientOptions): Record<string, string> {
+  return buildJsonHeaders(opts);
+}
+
+
 export type TraccarDevice = {
   id: number;
   name: string;
@@ -63,7 +68,7 @@ export async function createGroupDevice(
   const fetcher = opts.fetchImpl ?? fetch;
   const base = buildBaseUrl(opts);
   const url = `${base}/devices`;
-  const headers = buildHeaders(opts, true);
+  const headers = buildJsonHeaders(opts);
 
   const payload = {
     name,
@@ -105,7 +110,7 @@ async function updateDeviceBase(
   const fetcher = opts.fetchImpl ?? fetch;
   const base = buildBaseUrl(opts);
   const url = `${base}/devices/${deviceId}`;
-  const headers = buildHeaders(opts, true);
+  const headers = buildJsonHeaders(opts);
 
   const existing = await performGet(fetcher, url, headers);
   if (!existing || typeof existing !== "object") throw new Error(notFoundError);
@@ -145,7 +150,7 @@ export async function updateDeviceAttributes(
   const fetcher = opts.fetchImpl ?? fetch;
   const base = buildBaseUrl(opts);
   const url = `${base}/devices/${deviceId}`;
-  const headers = buildHeaders(opts, true);
+  const headers = buildJsonHeaders(opts);
 
   const existing = await performGet(fetcher, url, headers);
   const device = (existing && typeof existing === "object") ? (existing as Record<string, unknown>) : {};

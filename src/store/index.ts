@@ -156,8 +156,8 @@ const initialState: StoreState = {
     inputToken: '',
     maptilerApiKey: '',
     inputMaptilerApiKey: '',
-    darkMode: true,
-    inputDarkMode: true,
+    darkMode: false,
+    inputDarkMode: false,
   },
   positions: {
     allPositions: [],

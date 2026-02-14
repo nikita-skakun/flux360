@@ -25,11 +25,11 @@ type Props = {
   darkMode?: boolean;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode = true }) => {
+const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.TileLayer | unknown | null>(null);
+  const tileLayerRef = useRef<L.Layer | null>(null);
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -128,7 +128,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const points: L.LatLng[] = [];
     for (const id of pulsingDeviceIds) {
       const comp = componentsRef.current.find(c => Number(c.device) === id);
-      if (comp && comp.mean) {
+      if (comp?.mean) {
         const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLatRef.current, refLonRef.current);
         points.push(L.latLng(deg.lat, deg.lon));
       }
@@ -179,17 +179,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
     const mapContainer = mapDivRef.current;
     if (!mapContainer) return;
 
-    const map = L.map(mapContainer, { attributionControl: true, zoomControl: false });
-
-    // Use MapTiler vector tiles
-    if (maptilerApiKey) {
-      const ml = new MaptilerLayer({
-        apiKey: maptilerApiKey,
-        style: darkMode ? "dataviz-dark" : "dataviz",
-      });
-      ml.addTo(map);
-      tileLayerRef.current = ml;
-    }
+    const map = L.map(mapContainer, { attributionControl: true, zoomControl: false, maxZoom: 22 });
 
     const initialLat = refLatRef.current;
     const initialLon = refLonRef.current;
@@ -197,7 +187,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       const sw = metersToDegrees(worldBounds.minX, worldBounds.minY, initialLat, initialLon);
       const ne = metersToDegrees(worldBounds.maxX, worldBounds.maxY, initialLat, initialLon);
       try {
-        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40] });
+        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
       } catch {
         map.setView([initialLat, initialLon], 15);
       }
@@ -298,7 +288,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     // Remove existing tile layer
     if (tileLayerRef.current) {
-      map.removeLayer(tileLayerRef.current as L.Layer);
+      map.removeLayer(tileLayerRef.current);
       tileLayerRef.current = null;
     }
 
@@ -325,7 +315,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       const sw = metersToDegrees(worldBounds.minX, worldBounds.minY, refLat, refLon);
       const ne = metersToDegrees(worldBounds.maxX, worldBounds.maxY, refLat, refLon);
       try {
-        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40] });
+        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
       } catch {
         map.setView([refLat, refLon], 15);
       }
@@ -498,7 +488,7 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
     return pulsingDeviceIds.map(id => {
       const comp = components.find(c => Number(c.device) === id);
-      if (!comp || !comp.mean) return null;
+      if (!comp?.mean) return null;
 
       const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLat, refLon);
       const pt = mapRef.current!.latLngToContainerPoint(L.latLng(deg.lat, deg.lon));
