@@ -106,10 +106,10 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                     )}
                                 </button>
                                 {showColorPicker && createPortal(
-                                    <div className="fixed inset-0 z-[9999] isolate">
+                                    <div className="fixed inset-0 z-[9999] isolate border-0">
                                         <div className="fixed inset-0" onClick={() => setShowColorPicker(false)} />
                                         <div
-                                            className="fixed z-[10000] bg-background p-2 rounded-lg shadow-xl border flex flex-col gap-2"
+                                            className="fixed z-[10000] bg-background p-2 rounded-lg shadow-xl flex flex-col gap-2"
                                             style={{
                                                 left: popoverPos.left,
                                                 top: popoverPos.top,
@@ -124,7 +124,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                                 }}
                                                 className={`text-xs w-full py-1.5 rounded border transition-colors ${color === null
                                                     ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800 font-medium"
-                                                    : "text-muted-foreground border-transparent hover:bg-muted/50 border border-border dark:border-white/10"
+                                                    : "text-muted-foreground hover:bg-muted/50 border border-border"
                                                     }`}
                                             >
                                                 Use Auto Color
@@ -140,7 +140,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                 value={name}
                                 onChange={e => setName(e.target.value)}
                                 placeholder="Name"
-                                className="flex-1 border border-border dark:border-white/10 rounded px-3 py-2 disabled:opacity-50 bg-background text-foreground"
+                                className="flex-1 border border-border rounded px-3 py-2 disabled:opacity-50 bg-background text-foreground"
                                 disabled={isLoading}
                             />
                         </div>
@@ -163,7 +163,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                             placeholder="Or type icon name (material symbols)"
                             value={emoji}
                             onChange={e => setEmoji(e.target.value)}
-                            className="w-full text-xs border border-border dark:border-white/10 rounded px-2 py-1 bg-background text-foreground"
+                            className="w-full text-xs border border-border rounded px-2 py-1 bg-background text-foreground"
                             disabled={isLoading}
                         />
                     </div>
@@ -182,7 +182,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                     onClick={() => setMotionProfile(opt.value as MotionProfileName | null)}
                                     className={`py-2 px-3 rounded border text-sm font-medium transition-colors flex-auto ${motionProfile === opt.value
                                         ? "bg-blue-600 text-white border-blue-600"
-                                        : "bg-background text-foreground hover:bg-muted/50 border-border dark:border-white/10"
+                                        : "bg-background text-foreground hover:bg-muted/50 border-border"
                                         }`}
                                     disabled={isLoading}
                                 >

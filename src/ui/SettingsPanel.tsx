@@ -86,17 +86,10 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
             </div>
 
-            {/* Theme Toggle Button */}
-            <button
-              onClick={cycleTheme}
-              className="flex items-center gap-1 px-2 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
-              title={`Theme: ${themeInfo.label} (click to cycle)`}
-            >
-              <span className="material-icons text-lg">{themeInfo.icon}</span>
-              <span className="text-xs">{themeInfo.label}</span>
-            </button>
+            {/* Vertical divider */}
+            <div className="w-px h-4 bg-border" />
 
-            <label className="flex items-center gap-1 cursor-pointer border-l border-border dark:border-white/10 pl-3 ml-1">
+            <label className="flex items-center gap-1 cursor-pointer">
               <input
                 type="checkbox"
                 checked={debugMode}
@@ -104,15 +97,27 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               />
               <span className="text-xs font-medium">Debug</span>
             </label>
+
+            {/* Vertical divider */}
+            <div className="w-px h-4 bg-border" />
+
+            {/* Theme Toggle Button */}
+            <button
+              onClick={cycleTheme}
+              className="flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-muted transition-colors border-border"
+              title={`Theme: ${themeInfo.label} (click to cycle)`}
+            >
+              <span className="material-icons text-lg">{themeInfo.icon}</span>
+            </button>
           </div>
         </div>
 
         {/* Spoiler Body */}
         {isExpanded && (
-          <div className="mt-3 border-border flex flex-col gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="mt-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
             <input
               type="text"
-              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border dark:border-white/10"
+              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border"
               placeholder="Traccar Base URL (e.g. localhost:8082)"
               value={baseUrlInput}
               onChange={(e) => setBaseUrlInput(e.target.value)}
@@ -127,27 +132,27 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             </label>
             <input
               type="password"
-              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border dark:border-white/10"
+              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border"
               placeholder="API Token"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
             />
             <input
               type="password"
-              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border dark:border-white/10"
+              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border"
               placeholder="MapTiler API Key"
               value={maptilerApiKeyInput}
               onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
             />
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border"
                 onClick={onApplySettings}
               >
                 Save
               </button>
               <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border dark:border-white/10"
+                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border"
                 onClick={onReconnect}
               >
                 Reconnect
