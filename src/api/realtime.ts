@@ -1,6 +1,6 @@
-import type { TraccarAuth } from "./httpUtils";
-import type { NormalizedPosition } from "./positions";
 import { normalizePosition } from "./positions";
+import type { NormalizedPosition } from "@/types";
+import type { TraccarAuth } from "./httpUtils";
 
 export type RealtimeConnectOptions = {
   baseUrl: string;

@@ -1,15 +1,13 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { TraccarDevice } from '@/api/devices';
-import type { NormalizedPosition } from '@/api/positions';
-import type { DevicePoint } from '@/ui/types';
-import type { MotionProfileName } from '@/engine/motionDetector';
-import { Engine } from '@/engine/engine';
-import type { EngineState } from '@/engine/engine';
-import type { Anchor } from '@/engine/anchor';
 import { degreesToMeters } from '@/util/geo';
+import { Engine, type EngineState } from '@/engine/engine';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
+import { persist } from 'zustand/middleware';
 import { rgbToHex } from '@/ui/color';
+import type { Anchor } from '@/engine/anchor';
+import type { MotionProfileName } from '@/engine/motionDetector';
+import type { NormalizedPosition, DevicePoint } from '@/types';
+import type { TraccarDevice } from '@/api/devices';
 
 export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 

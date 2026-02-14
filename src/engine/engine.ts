@@ -1,7 +1,7 @@
-import type { DevicePoint } from "@/ui/types";
 import { Anchor } from "./anchor";
-import { MOTION_PROFILES, distanceMeters, directionFromAnchor, computeCoherence } from "./motionDetector";
-import type { MotionProfileName, MotionProfileConfig, OutlierSample } from "./motionDetector";
+import { distanceMeters, directionFromPoints, computeCentroid } from "@/util/geo";
+import { MOTION_PROFILES, computeCoherence, type MotionProfileName, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
+import type { DevicePoint } from "@/types";
 
 // Snapshot for UI/Historical view
 export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number | null; activeConfidence: number };
@@ -81,15 +81,6 @@ export class Engine {
     this.outliers.push(sample);
     this.outliers.sort((a, b) => a.point.timestamp - b.point.timestamp);
   }
-  private computeCentroid(points: DevicePoint[]): [number, number] {
-    // Computes the centroid (geometric center) of points, effectively clustering them into a single representative position.
-    let sumX = 0, sumY = 0;
-    for (const p of points) {
-      sumX += p.mean[0];
-      sumY += p.mean[1];
-    }
-    return [sumX / points.length, sumY / points.length];
-  }
   private computeAverageVariance(points: DevicePoint[]): number {
     let sum = 0;
     for (const p of points) sum += p.variance;
@@ -138,7 +129,7 @@ export class Engine {
     return true; // all pairs have low dot, directions are random
   }
   private isCentroidCentered(points: DevicePoint[], maxRadius: number): boolean {
-    const centroid = this.computeCentroid(points);
+    const centroid = computeCentroid(points.map(p => p.mean));
     for (const p of points) {
       if (distanceMeters(centroid, p.mean) > maxRadius) return false;
     }
@@ -230,7 +221,7 @@ export class Engine {
             } else {
               const timeFactor = Math.log1p(dtMinutes + 1);
               const score = (distance / (m.accuracy + profile.accuracyK)) * timeFactor;
-              const direction = directionFromAnchor(this.activeAnchor.mean, m.mean);
+              const direction = directionFromPoints(this.activeAnchor.mean, m.mean);
               this.insertOutlier({ point: m, score, direction });
 
               const coherence = computeCoherence(this.outliers, profile.coherenceCosineThreshold);
@@ -297,7 +288,7 @@ export class Engine {
             if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
             if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
               const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
-              const newMean = this.computeCentroid(points);
+              const newMean = computeCentroid(points.map(p => p.mean));
               const newVariance = this.computeAverageVariance(points);
               this.activeAnchor.endTimestamp = m.timestamp;
               this.closedAnchors.push(this.activeAnchor);
@@ -384,8 +375,8 @@ export class Engine {
       motionProfile: this.motionProfile,
       motionActive: this.motionActive,
       motionStartTimestamp: this.motionStartTimestamp,
-      outliers: JSON.parse(JSON.stringify(this.outliers)) as OutlierSample[], // Deep copy outliers
-      recentMotionPoints: JSON.parse(JSON.stringify(this.recentMotionPoints)) as DevicePoint[], // Deep copy points
+      outliers: structuredClone(this.outliers), // Use structuredClone for deep copy
+      recentMotionPoints: structuredClone(this.recentMotionPoints), // Use structuredClone for deep copy
       debugFrames: [...this.debugFrames], // Shallow copy array of frames (frames themselves are immutable-ish once created)
       seenDebugKeys: new Set(this.seenDebugKeys),
     };
@@ -398,8 +389,8 @@ export class Engine {
     this.motionProfile = state.motionProfile;
     this.motionActive = state.motionActive;
     this.motionStartTimestamp = state.motionStartTimestamp;
-    this.outliers = JSON.parse(JSON.stringify(state.outliers)) as OutlierSample[];
-    this.recentMotionPoints = JSON.parse(JSON.stringify(state.recentMotionPoints)) as DevicePoint[];
+    this.outliers = structuredClone(state.outliers);
+    this.recentMotionPoints = structuredClone(state.recentMotionPoints);
     this.debugFrames = [...state.debugFrames];
     this.seenDebugKeys = new Set(state.seenDebugKeys);
   }

@@ -32,3 +32,36 @@ export function metersToDegrees(x: number, y: number, refLat: number = 0, refLon
     lon: Number.isFinite(lon) ? lon : safeRefLon 
   };
 }
+
+/**
+ * Calculate Euclidean distance in meters between two points (x, y).
+ */
+export function distanceMeters(a: [number, number], b: [number, number]): number {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Calculate unit vector direction from source point to target point.
+ */
+export function directionFromPoints(from: [number, number], to: [number, number]): [number, number] | null {
+  const dx = to[0] - from[0];
+  const dy = to[1] - from[1];
+  const mag = Math.hypot(dx, dy);
+  if (mag === 0) return null;
+  return [dx / mag, dy / mag];
+}
+
+/**
+ * Computes the centroid (geometric center) of a list of points.
+ */
+export function computeCentroid(points: [number, number][]): [number, number] {
+  if (points.length === 0) return [0, 0];
+  let sumX = 0, sumY = 0;
+  for (const p of points) {
+    sumX += p[0];
+    sumY += p[1];
+  }
+  return [sumX / points.length, sumY / points.length];
+}

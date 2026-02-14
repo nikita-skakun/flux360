@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import { colorForDevice } from "./color";
 import { createPortal } from "react-dom";
+import { EMOJI_OPTIONS } from "./constants";
 import { HexColorPicker } from "react-colorful";
 import { useStore } from "@/store";
+import React, { useState, useEffect, useRef } from "react";
 import type { MotionProfileName } from "@/engine/motionDetector";
-import { colorForDevice } from "./color";
 
 type Props = {
     isOpen: boolean;
@@ -11,8 +12,6 @@ type Props = {
     type: "device" | "group";
     id: number;
 };
-
-import { EMOJI_OPTIONS } from "./constants";
 
 const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     const device = useStore((state) => state.devices[id]);

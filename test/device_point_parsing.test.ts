@@ -1,5 +1,5 @@
-import type { NormalizedPosition } from "@/api/positions";
 import { test, expect } from "bun:test";
+import type { NormalizedPosition } from "@/types";
 
 test("parsing DevicePoint arrays yields positions with normalized timestamps", () => {
   const now = Date.now();

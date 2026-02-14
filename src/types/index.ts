@@ -12,3 +12,11 @@ export type DevicePoint = {
   anchorAgeMs: number;
   confidence: number;
 };
+
+export type NormalizedPosition = {
+  device: number;
+  timestamp: number; // epoch ms
+  lat: number;
+  lon: number;
+  accuracy: number; // meters
+};

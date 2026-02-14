@@ -22,7 +22,8 @@ export default [
         clearTimeout: 'readonly',
         console: 'readonly',
         process: 'readonly',
-        React: 'readonly'
+        React: 'readonly',
+        structuredClone: 'readonly'
       }
     },
     plugins: {

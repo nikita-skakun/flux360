@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import type { DevicePoint } from "@/ui/types";
+import type { DevicePoint } from "@/types";
 
 const makePoint = (device: number, timestamp: number, lat: number, lon: number) => ({
   device,

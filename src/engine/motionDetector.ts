@@ -5,7 +5,8 @@
  * with coherence analysis to handle noisy GPS data.
  */
 
-import type { DevicePoint, Vec2 } from "@/ui/types";
+export { distanceMeters, directionFromPoints } from "@/util/geo";
+import type { DevicePoint, Vec2 } from "@/types";
 
 export type MotionProfileName = "person" | "car";
 
@@ -87,26 +88,6 @@ export type OutlierSample = {
   score: number;
   direction: Vec2 | null;
 };
-
-/**
- * Calculate Euclidean distance in meters between two points.
- */
-export function distanceMeters(a: Vec2, b: Vec2): number {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.hypot(dx, dy);
-}
-
-/**
- * Calculate unit vector direction from anchor point to a target point.
- */
-export function directionFromAnchor(anchor: Vec2, point: Vec2): Vec2 | null {
-  const dx = point[0] - anchor[0];
-  const dy = point[1] - anchor[1];
-  const mag = Math.hypot(dx, dy);
-  if (mag === 0) return null;
-  return [dx / mag, dy / mag];
-}
 
 /**
  * Check if a set of outlier samples are directionally coherent.

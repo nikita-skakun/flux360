@@ -1,13 +1,6 @@
 import type { TraccarClientOptions } from "./httpUtils";
 import { performGet, buildAuthHeader } from "./httpUtils";
-
-export type NormalizedPosition = {
-  device: number;
-  timestamp: number; // epoch ms
-  lat: number;
-  lon: number;
-  accuracy: number; // meters
-};
+import type { NormalizedPosition } from "@/types";
 
 export function normalizePosition(raw: unknown): NormalizedPosition | null {
   if (!raw || typeof raw !== "object") return null;

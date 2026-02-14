@@ -1,4 +1,4 @@
-import type { DevicePoint, Vec2 } from "@/ui/types";
+import type { DevicePoint, Vec2 } from "@/types";
 
 export const CONFIDENCE_HIGH_THRESHOLD = 0.8;
 export const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;

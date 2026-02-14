@@ -1,10 +1,8 @@
+import { Engine, type EngineSnapshot } from "@/engine/engine";
 import { metersToDegrees } from "./geo";
-import type { DevicePoint } from "@/ui/types";
-import type { EngineSnapshot } from "@/engine/engine";
 import type { Anchor } from "@/engine/anchor";
-import { Engine } from "@/engine/engine";
+import type { DevicePoint, NormalizedPosition } from "@/types";
 import type { MotionProfileName } from "@/engine/motionDetector";
-import type { NormalizedPosition } from "@/api/positions";
 
 export function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;

@@ -1,9 +1,7 @@
-import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint } from "@/ui/types";
-
+import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters, type DrawItem, type Cluster } from "@/util/clustering";
 import { getColorForDevice, rgbaString, type Color } from "./color";
-import type { DrawItem, Cluster } from "@/util/clustering";
-import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters } from "@/util/clustering";
+import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
+import type { DevicePoint } from "@/types";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;

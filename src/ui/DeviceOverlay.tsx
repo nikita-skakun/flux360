@@ -1,8 +1,8 @@
-import type { DevicePoint } from "@/ui/types";
 import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
-import { metersToDegrees } from "@/util/geo";
 import { Engine } from "@/engine/engine";
+import { metersToDegrees } from "@/util/geo";
 import React from "react";
+import type { DevicePoint } from "@/types";
 
 type Props = {
   selectedDeviceId: number | null;

@@ -1,5 +1,5 @@
-import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
+import type { DevicePoint } from "@/types";
 
 const VERBOSE = process.env["VERBOSE"] === "1" || process.argv.includes("--verbose");
 

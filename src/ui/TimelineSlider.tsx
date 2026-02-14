@@ -1,5 +1,5 @@
 import React from "react";
-import type { DevicePoint } from "./types";
+import type { DevicePoint } from "@/types";
 
 type Props = {
   snapshots: DevicePoint[];

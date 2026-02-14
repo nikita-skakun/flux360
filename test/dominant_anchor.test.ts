@@ -1,5 +1,5 @@
-import type { DevicePoint } from "@/ui/types";
 import { test, expect } from "bun:test";
+import type { DevicePoint } from "@/types";
 
 test("dominant anchor at timestamp", async () => {
   const { Engine } = await import("../src/engine/engine");

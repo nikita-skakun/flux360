@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import type { NormalizedPosition } from "@/api/positions";
+import type { NormalizedPosition } from "@/types";
 
 interface TraccarDevice {
   id: number;
