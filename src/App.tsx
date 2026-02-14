@@ -1,8 +1,8 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import { useTraccarConnection } from "./hooks/useTraccarConnection";
-import MapView from "./ui/MapView";
+import MapView, { type MapViewHandle } from "./ui/MapView";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 import { useStore } from "./store";
@@ -103,6 +103,8 @@ export function App() {
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
+
+  const mapViewRef = useRef<MapViewHandle>(null);
 
   useEffect(() => {
     if (positions.length > 0) {
@@ -314,6 +316,9 @@ export function App() {
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           if (typeof id === "number") {
+            if (selectedDeviceId === id) {
+              mapViewRef.current?.flyToDevice(id);
+            }
             setSelectedDeviceId(id);
           }
           setIsSidePanelOpen(false);
@@ -330,6 +335,7 @@ export function App() {
           .map(([id, name]) => ({ id: Number(id), name, emoji: deviceIcons[Number(id)] ?? name?.charAt(0).toUpperCase() ?? "?" }))}
       />
       <MapView
+        ref={mapViewRef}
         debugFrame={currentDebugFrame}
         debugAnchors={currentDebugAnchors}
         components={frame.components}

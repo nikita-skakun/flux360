@@ -3,8 +3,12 @@ import { degreesToMeters, metersToDegrees } from "../util/geo";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import { MaptilerLayer } from "@maptiler/leaflet-maptilersdk";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
 import type { DevicePoint } from "@/ui/types";
+
+export type MapViewHandle = {
+  flyToDevice: (id: number) => void;
+};
 
 type Props = {
   components: DevicePoint[];
@@ -25,7 +29,7 @@ type Props = {
   darkMode?: boolean;
 };
 
-const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode }) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -118,6 +122,36 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
 
   const componentsRef = useRef(components);
   useEffect(() => { componentsRef.current = components; }, [components]);
+
+  useImperativeHandle(ref, () => ({
+    flyToDevice: (id: number) => {
+      const map = mapRef.current;
+      if (!map || refLatRef.current == null || refLonRef.current == null) return;
+
+      const sel = componentsRef.current.find((c) => Number(c.device) === Number(id));
+      if (!sel?.mean) return;
+
+      const deg = metersToDegrees(sel.mean[0], sel.mean[1], refLatRef.current, refLonRef.current);
+      const ZOOM_FOR_SELECTED = 18;
+
+      try {
+        if (map.stop) map.stop();
+        const center = map.getCenter();
+        const centerLatLng = L.latLng(center.lat, center.lng);
+        const targetLatLng = L.latLng(deg.lat, deg.lon);
+        const distMeters = centerLatLng.distanceTo(targetLatLng);
+
+        const dur = flyDurationForMeters(distMeters);
+        const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
+
+        map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
+        // Set this to true so we don't double-animate if selectedDeviceId changes right after
+        selectedZoomedRef.current = true;
+      } catch {
+        // ignore map animation errors
+      }
+    }
+  }));
 
   useEffect(() => {
     const map = mapRef.current;
@@ -557,6 +591,6 @@ const MapView: React.FC<Props> = ({ components, refLat, refLon, worldBounds, hei
       </div>
     </div>
   );
-};
+});
 
 export default React.memo(MapView);
