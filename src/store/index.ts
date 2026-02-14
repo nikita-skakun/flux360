@@ -1,11 +1,11 @@
 import { create } from 'zustand';
+import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
 import { rgbToHex } from '@/ui/color';
 import type { Anchor } from '@/engine/anchor';
 import type { GroupDevice, MotionProfileName, DevicePoint, NormalizedPosition, WorldBounds } from '@/types';
-import type { TraccarDevice } from '@/api/devices';
-import { parseDevices, computeProcessedPositions } from './processors';
 import type { Store, StoreState } from './types';
+import type { TraccarDevice } from '@/api/devices';
 
 const initialState: StoreState = {
   devices: {},

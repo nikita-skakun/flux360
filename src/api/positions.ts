@@ -1,5 +1,4 @@
-import type { TraccarClientOptions } from "./httpUtils";
-import { performGet, buildAuthHeader } from "./httpUtils";
+import { performGet, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
 import type { NormalizedPosition } from "@/types";
 
 export function normalizePosition(raw: unknown): NormalizedPosition | null {

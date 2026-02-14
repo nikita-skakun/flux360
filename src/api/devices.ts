@@ -1,10 +1,8 @@
-import type { TraccarClientOptions } from "./httpUtils";
-import { performGet, performPost, performPut, performDelete, buildAuthHeader } from "./httpUtils";
+import { performGet, performPost, performPut, performDelete, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
 
 export function buildJsonHeaders(opts: TraccarClientOptions): Record<string, string> {
   return buildJsonHeaders(opts);
 }
-
 
 export type TraccarDevice = {
   id: number;

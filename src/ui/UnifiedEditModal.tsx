@@ -54,7 +54,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
             setName(target.name);
             setEmoji(target.emoji);
             setColor(target.color);
-            setMotionProfile(target.motionProfile as MotionProfileName | null);
+            setMotionProfile(target.motionProfile);
         }
     }, [isOpen, target, type, id]);
 

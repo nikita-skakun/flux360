@@ -1,11 +1,11 @@
-import { useEffect, useState, useMemo, useRef } from "react";
 import { SettingsPanel } from "./ui/SettingsPanel";
-import DeviceOverlay from "./ui/DeviceOverlay";
-import { useTraccarConnection } from "./hooks/useTraccarConnection";
-import MapView, { type MapViewHandle } from "./ui/MapView";
-import DeviceListSidePanel from "./ui/DeviceListSidePanel";
-import UnifiedEditModal from "./ui/UnifiedEditModal";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useStore } from "./store";
+import { useTraccarConnection } from "./hooks/useTraccarConnection";
+import DeviceListSidePanel from "./ui/DeviceListSidePanel";
+import DeviceOverlay from "./ui/DeviceOverlay";
+import MapView, { type MapViewHandle } from "./ui/MapView";
+import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
   const setRefLat = useStore(state => state.setRefLat);
@@ -276,16 +276,8 @@ export function App() {
   }, [selectedDeviceId, debugMode, enginesRef]);
 
   const deviceList = useMemo(() => {
-    // Build set of member device IDs so we can skip them
-    const memberDeviceIds = new Set<number>();
-    for (const groupDevice of groupDevices) {
-      for (const memberId of groupDevice.memberDeviceIds) {
-        memberDeviceIds.add(memberId);
-      }
-    }
-
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-    const devices: Array<{
+    const result: Array<{
       id: number | string;
       isGroup: boolean;
       name: string;
@@ -305,8 +297,7 @@ export function App() {
     // Add individual devices (skip if they're members of a group or if they're group devices themselves)
     for (const [id, name] of Object.entries(deviceNames)) {
       const numId = Number(id);
-      // TEMP: Unhide member devices for debugging
-      // if (memberDeviceIds.has(numId)) continue; // Skip members
+      
       if (groupIds.has(numId)) {
         continue; // Skip if it's a group device
       }
@@ -317,14 +308,15 @@ export function App() {
       const lastSeen = deviceLastSeen[numId] ?? null;
       if (!lastSeen || lastSeen <= cutoff) continue; // Skip old devices
 
-      devices.push({
+      const color = deviceColors[numId];
+      result.push({
         id: numId,
         isGroup: false,
         name,
         emoji: deviceIcons[numId] ?? "device_unknown",
         lastSeen,
         hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
-        color: devices[numId]?.color ?? null,
+        color: color && color !== "" ? color : null,
       });
       seenIds.add(numId);
     }
@@ -339,7 +331,7 @@ export function App() {
       // Calculate lastSeen as max of all member devices
       const groupLastSeen = deviceLastSeen[groupDevice.id] ?? null;
 
-      devices.push({
+      result.push({
         id: groupDevice.id,
         isGroup: true,
         name: groupDevice.name,
@@ -353,9 +345,9 @@ export function App() {
     }
 
     // Sort alphabetically
-    devices.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    return devices;
-  }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice]);
+    result.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+    return result;
+  }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice, deviceColors]);
 
   return (
     <div className="h-screen w-screen">

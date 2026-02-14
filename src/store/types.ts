@@ -1,6 +1,5 @@
-
-import type { Engine, EngineState } from '@/engine/engine';
 import type { Anchor } from '@/engine/anchor';
+import type { Engine, EngineState } from '@/engine/engine';
 import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
