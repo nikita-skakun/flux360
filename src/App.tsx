@@ -385,7 +385,12 @@ export function App() {
         height="100vh"
         selectedDeviceId={selectedDeviceId}
         pulsingDeviceIds={pulsingDeviceIds}
-        onSelectDevice={(id) => setSelectedDeviceId(id)}
+        onSelectDevice={(id) => {
+          if (selectedDeviceId === id) {
+            mapViewRef.current?.flyToDevice(id);
+          }
+          setSelectedDeviceId(id);
+        }}
         memberDeviceIds={memberDeviceIds}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}

@@ -52,6 +52,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
   const prevMaptilerApiKeyRef = useRef<string | undefined>(undefined);
+  const onSelectDeviceRef = useRef(onSelectDevice);
 
   useEffect(() => {
     clusterPopupRef.current = clusterPopup;
@@ -61,6 +62,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   useEffect(() => {
     deviceNamesRef.current = deviceNames;
   }, [deviceNames]);
+
+  useEffect(() => {
+    onSelectDeviceRef.current = onSelectDevice;
+  }, [onSelectDevice]);
 
   const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
     if (clusterAnimationTimerRef.current) {
@@ -246,7 +251,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
         if (hit.items.length === 1) {
           const devKey = hit.items[0]!.device;
           const devNum = Number(devKey);
-          if (Number.isFinite(devNum)) onSelectDevice(devNum);
+          if (Number.isFinite(devNum)) onSelectDeviceRef.current(devNum);
           closeClusterPopupAnimated();
         } else {
           const clusterPoint = map.containerPointToLatLng(L.point(hit.x, hit.y));
