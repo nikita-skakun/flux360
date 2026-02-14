@@ -53,6 +53,18 @@ export function App() {
     }
     return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
   }, [devices, groupDevices]);
+
+  // Build set of member device IDs to hide them on the map (but keep in side panel)
+  const memberDeviceIds = useMemo(() => {
+    const memberIds = new Set<number>();
+    for (const group of groupDevices) {
+      for (const memberId of group.memberDeviceIds) {
+        memberIds.add(memberId);
+      }
+    }
+    return memberIds;
+  }, [groupDevices]);
+
   const positionsAllRef = useStore(state => state.refs.positionsAll);
   const setPositionsAll = useStore(state => state.setPositionsAll);
   const firstPositionRef = useStore(state => state.refs.firstPosition as { lat: number; lon: number } | null);
@@ -382,6 +394,7 @@ export function App() {
         selectedDeviceId={selectedDeviceId}
         pulsingDeviceIds={pulsingDeviceIds}
         onSelectDevice={(id) => setSelectedDeviceId(id)}
+        memberDeviceIds={memberDeviceIds}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
         deviceColors={deviceColors}

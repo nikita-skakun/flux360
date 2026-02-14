@@ -26,6 +26,7 @@ export type CanvasViewProps = {
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
   darkMode: boolean;
+  memberDeviceIds: Set<number>;
 };
 
 type DebugAnchor = {
@@ -45,11 +46,12 @@ type DebugFrame = {
   timestamp: number;
 };
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons, deviceColors, darkMode }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
   const debugAnchorsRef = useRef<Array<{ anchor: DebugAnchor; x: number; y: number; r: number }>>([]);
+  const processedComponentsRef = useRef<DevicePoint[]>([]);
 
   const [pinOpacity, setPinOpacity] = useState(1);
 
@@ -99,12 +101,14 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         if (!best || hitDist < best.dist) best = { cluster: cl, dist: hitDist, radius: usedRadius };
       }
       if (!best) return null;
-      const items = best.cluster.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint));
+      // Use processedComponentsRef which already has member devices filtered out
+      const items = best.cluster.items
+        .map((it) => processedComponentsRef.current[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint));
       if (items.length === 0) return null;
       return { items, x: best.cluster.x, y: best.cluster.y };
     },
     getClusters: () => {
-      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => components[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
+      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => processedComponentsRef.current[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
     },
     hitTestAnchor: (px: number, py: number) => {
       if (!debugAnchorsRef.current.length) return null;
@@ -120,7 +124,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       }
       return best ? { anchor: best.anchor, x: best.x, y: best.y } : null;
     },
-  }), [components]);
+  }), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -142,11 +146,16 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     ctx.clearRect(0, 0, width, height);
 
     let localZoom = zoom ?? 1;
-    const processed = components.map(c => {
-      const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
-      const variance = typeof c.variance === 'number' ? c.variance : 100;
-      return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: getColorForDevice(c.device, deviceColors[c.device]) };
-    });
+    const processed = components
+      .filter(c => !memberDeviceIds?.has(c.device)) // Hide member devices of groups on the map
+      .map(c => {
+        const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
+        const variance = typeof c.variance === 'number' ? c.variance : 100;
+        return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: getColorForDevice(c.device, deviceColors[c.device]) };
+      });
+    
+    // Store processed components for hit testing (indices in drawItems refer to this array)
+    processedComponentsRef.current = components.filter(c => !memberDeviceIds?.has(c.device));
 
     let anchorX = refMeters.x;
     let anchorY = refMeters.y;
@@ -448,7 +457,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, darkMode]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, darkMode, memberDeviceIds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 });

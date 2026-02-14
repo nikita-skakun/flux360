@@ -27,9 +27,10 @@ type Props = {
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
   darkMode: boolean;
+  memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode }, ref) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -571,6 +572,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
           darkMode={darkMode}
+          memberDeviceIds={memberDeviceIds}
         />
       </div>
       {anchorHover && anchorHoverLabel ? (
