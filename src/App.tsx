@@ -270,7 +270,6 @@ export function App() {
       anchors.push({ mean: [a.mean[0], a.mean[1]], variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
     };
     pushAnchor(eng.activeAnchor, "active");
-    pushAnchor(eng.candidateAnchor, "candidate");
     for (const a of eng.closedAnchors) pushAnchor(a, "closed");
     return anchors;
   }, [selectedDeviceId, debugMode, enginesRef]);

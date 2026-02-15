@@ -4,13 +4,12 @@ import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type Outli
 import type { DevicePoint, MotionProfileName } from "@/types";
 
 // Snapshot for UI/Historical view
-export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; candidateAnchor: Anchor | null; timestamp: number | null; activeConfidence: number };
+export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: number | null; activeConfidence: number };
 
 // Full engine state for checkpointing
 export type EngineState = {
   activeAnchor: Anchor | null;
   closedAnchors: Anchor[];
-  candidateAnchor: Anchor | null;
   lastTimestamp: number | null;
   motionProfile: MotionProfileName;
   motionActive: boolean;
@@ -51,7 +50,6 @@ export type DebugFrame = {
 export class Engine {
   activeAnchor: Anchor | null = null;
   closedAnchors: Anchor[] = [];
-  candidateAnchor: Anchor | null = null;
   lastTimestamp: number | null = null;
   motionProfile: MotionProfileName = "person";
   motionActive: boolean = false;
@@ -200,7 +198,6 @@ export class Engine {
             decision = 'updated';
 
             this.outliers = [];
-            this.candidateAnchor = null;
           } else {
             decision = 'resisted';
             const lastConfirm = this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
@@ -238,7 +235,6 @@ export class Engine {
               if (singlePointTriggers || bufferTriggers) {
                 this.motionActive = true;
                 this.motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
-                this.candidateAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, this.motionStartTimestamp);
                 this.recentMotionPoints = [];
                 this.recentMotionPoints.push(m);
                 this.outliers = [];
@@ -251,34 +247,10 @@ export class Engine {
             this.motionActive = false;
             this.motionStartTimestamp = null;
             this.outliers = [];
-            this.candidateAnchor = null;
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
 
             decision = 'motion-end';
           } else {
-            this.candidateAnchor ??= new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp);
-            const dist2Candidate = this.candidateAnchor.mahalanobis2(m);
-            const dist2ActiveNow = this.activeAnchor.mahalanobis2(m);
-            if (dist2Candidate < profile.stationaryMahalanobisThreshold) {
-              this.candidateAnchor.kalmanUpdate(m, GAIN_RATE);
-              decision = 'candidate-updated';
-            } else {
-              this.insertOutlier({ point: m, score: 0, direction: null });
-              this.candidateAnchor.kalmanUpdate(m, GAIN_RATE);
-              decision = 'candidate-updated';
-              if (dist2ActiveNow < profile.stationaryMahalanobisThreshold) {
-                this.motionActive = false;
-                this.motionStartTimestamp = null;
-                this.candidateAnchor = null;
-                this.outliers = [];
-                this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
-
-                decision = 'motion-end';
-              }
-            }
-            // New settling logic: Detects end of motion by evaluating a sliding window of recent points during active motion.
-            // If points are consistent (spatially clustered) and directions are random (undirected noise), settle on a new anchor
-            // at the centroid of the window, closing the previous anchor and resetting motion state.
             this.recentMotionPoints.push(m);
             if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
             if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
@@ -332,12 +304,12 @@ export class Engine {
       });
 
       this.lastTimestamp = m.timestamp;
-      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp, DECAY_RATE_ACTIVE) : 0 });
+      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp, DECAY_RATE_ACTIVE) : 0 });
     }
     return snapshots;
   }
   getCurrentSnapshot(): EngineSnapshot {
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], candidateAnchor: this.candidateAnchor, timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
+    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
   }
   getDominantAnchorAt(timestamp: number): Anchor | null {
     const candidates: Anchor[] = [];
@@ -365,7 +337,6 @@ export class Engine {
     return {
       activeAnchor: this.activeAnchor ? this.activeAnchor.clone() : null,
       closedAnchors: this.closedAnchors.map(a => a.clone()),
-      candidateAnchor: this.candidateAnchor ? this.candidateAnchor.clone() : null,
       lastTimestamp: this.lastTimestamp,
       motionProfile: this.motionProfile,
       motionActive: this.motionActive,
@@ -379,7 +350,6 @@ export class Engine {
   restoreSnapshot(state: EngineState): void {
     this.activeAnchor = state.activeAnchor ? state.activeAnchor.clone() : null;
     this.closedAnchors = state.closedAnchors.map(a => a.clone());
-    this.candidateAnchor = state.candidateAnchor ? state.candidateAnchor.clone() : null;
     this.lastTimestamp = state.lastTimestamp;
     this.motionProfile = state.motionProfile;
     this.motionActive = state.motionActive;
