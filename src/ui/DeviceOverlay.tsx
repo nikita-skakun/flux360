@@ -1,6 +1,9 @@
+import { Button } from "@/components/ui/button";
 import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import { metersToDegrees } from "@/util/geo";
+import { Pencil, X } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import React from "react";
 import type { DevicePoint } from "@/types";
 
@@ -81,7 +84,7 @@ function DeviceOverlayComponent({
   const mostRecentSourceName = mostRecentSourceId ? (deviceNames[mostRecentSourceId] ?? `Device ${mostRecentSourceId}`) : null;
 
   return (
-    <div className="p-2 rounded bg-muted/30 text-foreground backdrop-blur-sm">
+    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border">
       <div className="flex items-start">
         <div className="flex-1">
           {(() => {
@@ -89,48 +92,59 @@ function DeviceOverlayComponent({
             return <div className="text-sm font-medium">{displayName}</div>;
           })()}
           {group && contributors.length > 0 && (
-            <div className="text-xs text-foreground/60 mt-1">
+            <div className="text-xs text-muted-foreground mt-1">
               <span className="font-medium">Sources:</span> {contributors.join(", ")}
-              {mostRecentSourceName && <div className="text-foreground/50 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
-              {(chosen).sourceDeviceId !== undefined && <div className="text-foreground/50 text-xs mt-0.5">Current source: {deviceNames[(chosen).sourceDeviceId] ?? `Device ${(chosen).sourceDeviceId}`}</div>}
+              {mostRecentSourceName && <div className="text-muted-foreground/70 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
+              {(chosen).sourceDeviceId !== undefined && <div className="text-muted-foreground/70 text-xs mt-0.5">Current source: {deviceNames[(chosen).sourceDeviceId] ?? `Device ${(chosen).sourceDeviceId}`}</div>}
             </div>
           )}
-          <div className="text-xs text-foreground/70">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
-          <div className="text-xs text-foreground/70">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
+          <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
+          <div className="text-xs text-muted-foreground">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
         </div>
         <div className="flex items-center gap-1">
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="Edit settings"
             title="Edit Settings"
-            className="w-8 h-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+            className="h-8 w-8"
             onClick={() => setEditingTarget({ type: group ? 'group' : 'device', id: chosen.device })}
           >
-            <span className="material-symbols-outlined text-lg">edit</span>
-          </button>
-          <button
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             aria-label="Deselect device"
             title="Close"
-            className="w-8 h-8 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted text-2xl leading-none pb-1"
+            className="h-8 w-8"
             onClick={() => setSelectedDeviceId(null)}
           >
-            ×
-          </button>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
       </div>
-      <div className="text-xs text-foreground/70">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
+      <div className="text-xs text-muted-foreground">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
 
       {debugMode ? (
         <div className="mt-2 text-xs">
           <div className="mb-2">Debug frames: {frames.length}</div>
           {frames.length > 0 ? (
             <div className="flex gap-2 items-center">
-              <input type="range" min={0} max={Math.max(0, frames.length - 1)} value={debugFrameIndex} onChange={(e) => setDebugFrameIndex(Number(e.target.value))} />
-              <div className="w-20 text-right">#{frameIndex}</div>
+              <Slider
+                min={0}
+                max={Math.max(0, frames.length - 1)}
+                step={1}
+                value={[debugFrameIndex]}
+                onValueChange={(value) => setDebugFrameIndex(value[0] ?? 0)}
+                className="flex-1"
+              />
+              <div className="w-20 text-right">#{frameIndex ?? 0}</div>
             </div>
-          ) : <div className="text-xs text-foreground/60">No debug frames</div>}
+          ) : <div className="text-xs text-muted-foreground">No debug frames</div>}
 
           {chosenFrame ? (
-            <div className="mt-2 text-xs bg-muted/20 p-2 rounded">
+            <div className="mt-2 text-xs bg-muted/50 p-2 rounded-lg">
               <div>Accuracy: {Math.round(chosenFrame.measurement.accuracy)} m</div>
               <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
               <div>Motion active (before): {chosenFrame.motionActiveBefore ? 'yes' : 'no'}</div>

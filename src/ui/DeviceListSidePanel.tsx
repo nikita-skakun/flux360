@@ -1,6 +1,12 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
-import { EMOJI_OPTIONS } from "./constants";
+import { ArrowLeft, ChevronLeft, ChevronUp, ChevronDown, Smartphone, Plus,  Settings, UserPlus, ChevronRight, Trash2, MoreHorizontal } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { colorForDevice } from "./color";
+import { EMOJI_OPTIONS } from "./constants";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 
 type Device = {
   id: number | string;
@@ -161,7 +167,7 @@ const DeviceListSidePanel: React.FC<{
             }
           }}>
             <div
-              className={`w-full p-3 flex items-start gap-3 transition-colors relative cursor-pointer ${selectedDeviceId === device.id ? "bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500" : "hover:bg-muted/50 border-l-4 border-transparent"
+              className={`w-full p-3 flex items-start gap-3 transition-colors relative cursor-pointer ${selectedDeviceId === device.id ? "bg-primary/10 border-l-4 border-primary" : "hover:bg-muted/50 border-l-4 border-transparent"
                 } group`}
               style={{ paddingLeft: `${12 + depth * 32}px` }}
               onClick={() => onSelectDevice(device.id)}
@@ -185,7 +191,11 @@ const DeviceListSidePanel: React.FC<{
                 </div>
                 {sortedChildren.length > 0 && (
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-background rounded-full border border-border shadow-sm flex items-center justify-center z-10">
-                    <span className="material-symbols-outlined text-xs text-muted-foreground select-none">{expanded.has(device.id) ? "expand_less" : "expand_more"}</span>
+                    {expanded.has(device.id) ? (
+                      <ChevronUp className="h-3 w-3 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                    )}
                   </div>
                 )}
               </div>
@@ -193,7 +203,7 @@ const DeviceListSidePanel: React.FC<{
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2 h-6">
                   <span
-                    className="font-medium text-foreground truncate block group-hover:text-blue-700 dark:group-hover:text-blue-400"
+                    className="font-medium text-foreground truncate block group-hover:text-primary"
                     title={displayName}
                   >
                     {displayName}
@@ -210,30 +220,32 @@ const DeviceListSidePanel: React.FC<{
 
     return (
       <>
-        <button
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => mode === "create" ? setMode("list") : onToggle()}
-          className="fixed top-4 left-4 z-[1002] px-3 py-2 rounded-lg shadow-md bg-background text-foreground hover:bg-muted transition-all"
+          className="fixed top-4 left-4 z-[1002] shadow-md"
           title={mode === "create" ? "Back to list" : (isOpen ? "Close" : "Open")}
         >
-          <span className="material-symbols-outlined text-xl select-none">
-            {mode === "create" ? "arrow_back" : (isOpen ? "chevron_left" : "devices")}
-          </span>
-        </button>
+          {mode === "create" ? <ArrowLeft className="h-5 w-5" /> : (isOpen ? <ChevronLeft className="h-5 w-5" /> : <Smartphone className="h-5 w-5" />)}
+        </Button>
 
-        <div className={`fixed top-0 left-0 h-full bg-background shadow-xl z-[1001] transition-all duration-300 ease-in-out ${isOpen ? "translate-x-0 pointer-events-auto" : "-translate-x-full pointer-events-none"}`} style={{ width: "280px" }}>
+        <div className={`fixed top-0 left-0 h-full w-[280px] bg-background shadow-xl z-[1001] transition-all duration-300 ease-in-out ${isOpen ? "translate-x-0 pointer-events-auto" : "-translate-x-full pointer-events-none"}`}>
 
           {/* Header */}
           <div className="p-4 border-b border-border bg-muted/30 flex items-center justify-between pl-20 h-[73px]">
             {mode === "list" ? (
               <>
                 <div><h2 className="text-lg font-semibold text-foreground">Devices</h2><p className="text-sm text-muted-foreground">{devices.length} total</p></div>
-                <button
+                <Button
+                  variant="outline"
+                  size="icon"
                   onClick={() => setMode("create")}
-                  className="w-8 h-8 flex items-center justify-center rounded-full bg-background border border-border shadow-sm hover:bg-muted text-blue-600 transition-all"
+                  className="h-8 w-8 rounded-full"
                   title="Create Group"
                 >
-                  <span className="material-symbols-outlined text-lg">add</span>
-                </button>
+                  <Plus className="h-4 w-4" />
+                </Button>
               </>
             ) : (
               <div className="flex items-center justify-between w-full">
@@ -256,78 +268,79 @@ const DeviceListSidePanel: React.FC<{
               <div className="flex flex-col h-full bg-background">
                 <div className="p-4 space-y-4 flex-shrink-0">
                   <div>
-                    <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Group Name</label>
-                    <input
+                    <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Group Name</Label>
+                    <Input
                       type="text"
                       placeholder="e.g., My Fleet"
-                      className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 focus:outline-none bg-background text-foreground border-border"
                       value={newGroupName}
                       onChange={e => setNewGroupName(e.target.value)}
+                      className="mt-2"
                       autoFocus
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 text-center">Icon</label>
+                    <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 text-center">Icon</Label>
                     <div className="grid grid-cols-4 gap-2 pb-2">
                       {(showAllIcons ? EMOJI_OPTIONS : EMOJI_OPTIONS.slice(0, 7)).map(icon => (
-                        <button
+                        <Button
                           key={icon}
+                          variant={selectedEmoji === icon ? "default" : "ghost"}
+                          size="icon"
                           onClick={() => setSelectedEmoji(icon)}
-                          className={`aspect-square flex items-center justify-center rounded-lg hover:bg-muted/50 transition-all ${selectedEmoji === icon
-                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-background'
-                            : 'text-muted-foreground bg-muted/30'
-                            }`}
+                          className="aspect-square h-auto w-auto"
                           type="button"
                         >
-                          <span className="material-symbols-outlined text-3xl">{icon}</span>
-                        </button>
+                          <span className="material-symbols-outlined text-2xl">{icon}</span>
+                        </Button>
                       ))}
                       {!showAllIcons && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => setShowAllIcons(true)}
-                          className="aspect-square flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground bg-muted/30 transition-all"
+                          className="aspect-square h-auto w-auto"
                           type="button"
                         >
-                          <span className="material-symbols-outlined text-3xl">more_horiz</span>
-                        </button>
+                          <MoreHorizontal className="h-6 w-6" />
+                        </Button>
                       )}
                     </div>
                   </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-4 min-h-0">
-                  <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 bg-background z-10 py-1">Select Devices ({selectedCreateDevices.length})</label>
+                  <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 bg-background z-10 py-1">Select Devices ({selectedCreateDevices.length})</Label>
                   <div className="border rounded divide-y bg-muted/10 border-border">
                     {allDevices.length === 0 ? (
                       <div className="p-3 text-center text-muted-foreground text-sm">No devices available</div>
                     ) : (
                       allDevices.map(d => (
-                        <label key={d.id} className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors">
-                          <input
-                            type="checkbox"
-                            className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                        <div key={d.id} className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors">
+                          <Checkbox
                             checked={selectedCreateDevices.includes(d.id)}
-                            onChange={e => {
-                              if (e.target.checked) setSelectedCreateDevices(prev => [...prev, d.id]);
+                            onCheckedChange={(checked) => {
+                              if (checked) setSelectedCreateDevices(prev => [...prev, d.id]);
                               else setSelectedCreateDevices(prev => prev.filter(id => id !== d.id));
                             }}
                           />
-                          <span className="text-sm font-medium text-foreground">{d.name}</span>
-                        </label>
+                          <Label className="text-sm font-medium text-foreground cursor-pointer flex-1">
+                            {d.name}
+                          </Label>
+                        </div>
                       ))
                     )}
                   </div>
                 </div>
 
                 <div className="p-4 border-t mt-auto flex-shrink-0 bg-background border-border">
-                  <button
-                    className="w-full py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  <Button
+                    className="w-full"
                     disabled={!newGroupName.trim() || selectedCreateDevices.length === 0 || isCreating}
                     onClick={handleCreateSubmit}
                   >
                     {isCreating ? "Creating..." : "Create Group"}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -349,27 +362,29 @@ const DeviceListSidePanel: React.FC<{
               style={{ top: contextMenu.y, left: contextMenu.x }}
               onClick={e => e.stopPropagation()}
             >
-              <button
-                className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-muted/50 flex items-center gap-2"
+              <Button
+                variant="ghost"
+                className="w-full justify-start px-4 py-2 text-sm"
                 onClick={() => {
                   onEditGroup(contextMenu.groupId);
                   setContextMenu(null);
                 }}
               >
-                <span className="material-symbols-outlined text-lg text-muted-foreground">settings</span>
+                <Settings className="h-4 w-4 mr-2 text-muted-foreground" />
                 Settings
-              </button>
+              </Button>
 
               <div className="relative group/add">
-                <button
-                  className="w-full text-left px-4 py-2 text-sm text-foreground hover:bg-muted/50 flex items-center justify-between"
+                <Button
+                  variant="ghost"
+                  className="w-full justify-between px-4 py-2 text-sm"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-muted-foreground">person_add</span>
+                    <UserPlus className="h-4 w-4 text-muted-foreground" />
                     Add Device
                   </div>
-                  <span className="material-symbols-outlined text-lg text-muted-foreground">chevron_right</span>
-                </button>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                </Button>
 
                 {/* Submenu */}
                 <div className="absolute left-full top-0 ml-1 bg-background rounded-lg shadow-xl border border-border py-1 hidden group-hover/add:block min-w-[200px] max-h-[300px] overflow-y-auto">
@@ -383,32 +398,34 @@ const DeviceListSidePanel: React.FC<{
                     }
 
                     return availableDevices.map(d => (
-                      <button
+                      <Button
                         key={d.id}
-                        className="w-full text-left px-4 py-2 text-sm hover:bg-muted/50 truncate flex items-center gap-2 text-foreground"
+                        variant="ghost"
+                        className="w-full justify-start px-4 py-2 text-sm truncate"
                         onClick={() => {
                           void onAddDeviceToGroup(contextMenu.groupId, d.id).then(() => {
                             setContextMenu(null);
                           });
                         }}
                       >
-                        <span className="w-6 inline-flex items-center justify-center flex-shrink-0">
+                        <span className="w-6 inline-flex items-center justify-center flex-shrink-0 text-muted-foreground">
                           {d.emoji?.length > 1 ? (
-                            <span className="material-symbols-outlined text-lg text-muted-foreground select-none">{d.emoji}</span>
+                            <span className="material-symbols-outlined text-lg select-none">{d.emoji}</span>
                           ) : (
-                            <span className="text-muted-foreground select-none" style={{ fontSize: "16px", fontWeight: "600" }}>{d.emoji || d.name?.charAt(0)}</span>
+                            <span className="select-none text-sm font-semibold">{d.emoji || d.name?.charAt(0)}</span>
                           )}
                         </span>
                         {d.name}
-                      </button>
+                      </Button>
                     ));
                   })()}
                 </div>
               </div>
 
-              <div className="h-px bg-border dark:bg-white/10 my-1" />
-              <button
-                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
+              <Separator className="my-1" />
+              <Button
+                variant="ghost"
+                className="w-full justify-start px-4 py-2 text-sm text-destructive hover:text-destructive hover:bg-destructive/10"
                 onClick={() => {
                   const groupName = devices.find(d => d.id === contextMenu.groupId)?.name;
                   if (window.confirm(`Delete group "${groupName}"?`)) {
@@ -418,9 +435,9 @@ const DeviceListSidePanel: React.FC<{
                   }
                 }}
               >
-                <span className="material-symbols-outlined text-lg">delete</span>
+                <Trash2 className="h-4 w-4 mr-2" />
                 Delete Group
-              </button>
+              </Button>
             </div>
           </>
         )}

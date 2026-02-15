@@ -19,6 +19,7 @@
     "color-hash": "^2.0.2",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.564.0",
+    "radix-ui": "^1.4.3",
     "react": "^19.2.4",
     "react-colorful": "^5.6.1",
     "react-dom": "^19.2.4",
