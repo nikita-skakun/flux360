@@ -248,8 +248,8 @@ const DeviceListSidePanel: React.FC<{
                 </Button>
               </>
             ) : (
-              <div className="flex items-center justify-between w-full">
-                <div><h2 className="text-lg font-semibold text-foreground">Create Group</h2><p className="text-sm text-transparent select-none">Spacer</p></div>
+              <div className="flex items-center w-full">
+                <h2 className="text-lg font-semibold text-foreground">Create Group</h2>
               </div>
             )}
           </div>
