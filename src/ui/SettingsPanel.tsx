@@ -1,3 +1,11 @@
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Sun, Moon, Monitor, ChevronDown, ChevronRight } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import React, { useState } from "react";
+
 type Props = {
   baseUrlInput: string;
   setBaseUrlInput: (value: string) => void;
@@ -17,8 +25,6 @@ type Props = {
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
 };
-
-import React, { useState } from "react";
 
 export const SettingsPanel = React.memo(function SettingsPanel({
   baseUrlInput,
@@ -52,112 +58,131 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   };
 
   // Get the appropriate icon and label
-  const getThemeInfo = () => {
+  const getThemeIcon = () => {
     switch (darkModeInput) {
       case 'dark':
-        return { icon: 'dark_mode', label: 'Dark' };
+        return <Moon className="h-4 w-4" />;
       case 'light':
-        return { icon: 'light_mode', label: 'Light' };
+        return <Sun className="h-4 w-4" />;
       case 'system':
       default:
-        return { icon: 'brightness_auto', label: 'Auto' };
+        return <Monitor className="h-4 w-4" />;
     }
   };
 
-  const themeInfo = getThemeInfo();
+  const getThemeLabel = () => {
+    switch (darkModeInput) {
+      case 'dark':
+        return 'Dark';
+      case 'light':
+        return 'Light';
+      case 'system':
+      default:
+        return 'Auto';
+    }
+  };
 
   return (
     <div className="w-full">
-      <div className="p-2 rounded bg-muted/30">
+      <div className="p-2 rounded-lg bg-muted/30 border border-border transition-colors duration-300">
         {/* Header: Spoiler Toggle + Debug + Status + Theme */}
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setIsExpanded(!isExpanded)}
             className="flex items-center gap-1 text-sm font-medium hover:opacity-80 transition-opacity"
           >
-            <span className="w-4 text-center text-muted-foreground">{isExpanded ? "▼" : "▶"}</span>
+            {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
             Connection Settings
-          </button>
+          </Button>
 
           <div className="flex items-center gap-4">
             <div className="text-xs flex items-center gap-2">
               <span>
-                Status: <strong>{wsStatus}</strong>
+                Status: <strong className="text-foreground">{wsStatus}</strong>
               </span>
-              {wsError ? <span className="text-red-500 font-semibold">Error: {wsError}</span> : null}
+              {wsError ? <span className="text-destructive font-semibold">Error: {wsError}</span> : null}
             </div>
 
-            {/* Vertical divider */}
-            <div className="w-px h-4 bg-border" />
+            <Separator orientation="vertical" className="h-4" />
 
-            <label className="flex items-center gap-1 cursor-pointer">
-              <input
-                type="checkbox"
+            <div className="flex items-center gap-2">
+              <Switch
+                id="debug-mode"
                 checked={debugMode}
-                onChange={(e) => setDebugMode(e.target.checked)}
+                onCheckedChange={setDebugMode}
               />
-              <span className="text-xs font-medium">Debug</span>
-            </label>
+              <Label htmlFor="debug-mode" className="text-xs font-medium cursor-pointer">
+                Debug
+              </Label>
+            </div>
 
-            {/* Vertical divider */}
-            <div className="w-px h-4 bg-border" />
+            <Separator orientation="vertical" className="h-4" />
 
             {/* Theme Toggle Button */}
-            <button
+            <Button
+              variant="outline"
+              size="icon"
               onClick={cycleTheme}
-              className="flex items-center justify-center w-8 h-8 rounded-full border bg-background hover:bg-muted transition-colors border-border"
-              title={`Theme: ${themeInfo.label} (click to cycle)`}
+              className="h-8 w-8 rounded-full"
+              title={`Theme: ${getThemeLabel()} (click to cycle)`}
             >
-              <span className="material-icons text-lg">{themeInfo.icon}</span>
-            </button>
+              {getThemeIcon()}
+            </Button>
           </div>
         </div>
 
         {/* Spoiler Body */}
         {isExpanded && (
-          <div className="mt-3 flex flex-col gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
-            <input
+          <div className="mt-3 flex flex-col gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
+            <Input
               type="text"
-              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border"
               placeholder="Traccar Base URL (e.g. localhost:8082)"
               value={baseUrlInput}
               onChange={(e) => setBaseUrlInput(e.target.value)}
             />
-            <label className="flex items-center gap-1 text-sm cursor-pointer select-none">
-              <input
-                type="checkbox"
+            
+            <div className="flex items-center gap-2">
+              <Switch
+                id="secure-connection"
                 checked={secureInput}
-                onChange={(e) => setSecureInput(e.target.checked)}
+                onCheckedChange={setSecureInput}
               />
-              Secure (HTTPS/WSS)
-            </label>
-            <input
+              <Label htmlFor="secure-connection" className="text-sm cursor-pointer">
+                Secure (HTTPS/WSS)
+              </Label>
+            </div>
+            
+            <Input
               type="password"
-              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border"
               placeholder="API Token"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
             />
-            <input
+            
+            <Input
               type="password"
-              className="border rounded px-2 py-1 w-full text-sm bg-background text-foreground border-border"
               placeholder="MapTiler API Key"
               value={maptilerApiKeyInput}
               onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
             />
+            
             <div className="flex flex-wrap items-center gap-2 ml-auto">
-              <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border"
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={onApplySettings}
               >
                 Save
-              </button>
-              <button
-                className="px-3 py-1 rounded border bg-background text-sm hover:bg-muted transition-colors border-border"
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={onReconnect}
               >
                 Reconnect
-              </button>
+              </Button>
             </div>
           </div>
         )}
