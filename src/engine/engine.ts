@@ -24,7 +24,7 @@ const DECAY_RATE_ACTIVE = 0.001;
 const GAIN_RATE = 2.0;
 const MIN_USABLE_CONFIDENCE = 0.05;
 
-export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'candidate-updated' | 'candidate-created' | 'promoted' | 'active-ended' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
+export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'active-ended' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
 export type DebugFrame = {
   timestamp: number;
   sourceDeviceId: number | undefined;
