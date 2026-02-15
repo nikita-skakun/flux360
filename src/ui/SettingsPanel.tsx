@@ -84,7 +84,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
 
   return (
     <div className="w-full">
-      <div className="p-2 rounded-lg bg-muted/30 border border-border">
+      <div className="p-2 rounded-lg bg-muted/30 border border-border transition-colors duration-300">
         {/* Header: Spoiler Toggle + Debug + Status + Theme */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Button
