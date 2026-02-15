@@ -265,7 +265,7 @@ const DeviceListSidePanel: React.FC<{
                 )}
               </div>
             ) : (
-              <div className="flex flex-col h-full bg-background">
+              <div className="flex flex-col h-full bg-background transition-colors duration-300">
                 <div className="p-4 space-y-4 flex-shrink-0">
                   <div>
                     <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Group Name</Label>
@@ -310,13 +310,24 @@ const DeviceListSidePanel: React.FC<{
                 </div>
 
                 <div className="flex-1 overflow-y-auto px-4 min-h-0">
-                  <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 bg-background z-10 py-1">Select Devices ({selectedCreateDevices.length})</Label>
+                  <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 sticky top-0 z-10 py-1">Select Devices ({selectedCreateDevices.length})</Label>
                   <div className="border rounded divide-y bg-muted/10 border-border">
                     {allDevices.length === 0 ? (
                       <div className="p-3 text-center text-muted-foreground text-sm">No devices available</div>
                     ) : (
                       allDevices.map(d => (
-                        <div key={d.id} className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors">
+                        <div
+                          key={d.id}
+                          className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors"
+                          onClick={() => {
+                            const isSelected = selectedCreateDevices.includes(d.id);
+                            if (isSelected) {
+                              setSelectedCreateDevices(prev => prev.filter(id => id !== d.id));
+                            } else {
+                              setSelectedCreateDevices(prev => [...prev, d.id]);
+                            }
+                          }}
+                        >
                           <Checkbox
                             checked={selectedCreateDevices.includes(d.id)}
                             onCheckedChange={(checked) => {
@@ -333,7 +344,7 @@ const DeviceListSidePanel: React.FC<{
                   </div>
                 </div>
 
-                <div className="p-4 border-t mt-auto flex-shrink-0 bg-background border-border">
+                <div className="p-4 border-t mt-auto flex-shrink-0 bg-background border-border transition-colors duration-300">
                   <Button
                     className="w-full"
                     disabled={!newGroupName.trim() || selectedCreateDevices.length === 0 || isCreating}
