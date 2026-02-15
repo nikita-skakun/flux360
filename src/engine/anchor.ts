@@ -10,7 +10,7 @@ export class Anchor {
   endTimestamp: number | null;
   confidence: number;
   lastUpdateTimestamp: number;
-  constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.1, lastUpdateTimestamp?: number) {
+  constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.25, lastUpdateTimestamp?: number) {
     this.mean = mean;
     this.variance = variance;
     this.startTimestamp = startTimestamp;

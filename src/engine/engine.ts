@@ -23,7 +23,7 @@ export type EngineState = {
 
 const DECAY_RATE_ACTIVE = 0.001;
 const GAIN_RATE = 2.0;
-const MIN_USABLE_CONFIDENCE = 0.1;
+const MIN_USABLE_CONFIDENCE = 0.05;
 
 export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'candidate-updated' | 'candidate-created' | 'promoted' | 'active-ended' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
 export type DebugFrame = {
@@ -47,8 +47,6 @@ export type DebugFrame = {
   decision: DebugDecision;
   trendSeparation: number | null;
 };
-
-const DEBUG_BUFFER_SIZE = 200;
 
 export class Engine {
   activeAnchor: Anchor | null = null;
@@ -148,9 +146,6 @@ export class Engine {
     if (this.seenDebugKeys.has(key)) return;
     this.seenDebugKeys.add(key);
     this.debugFrames.push(frame);
-    if (this.debugFrames.length > DEBUG_BUFFER_SIZE) {
-      this.debugFrames = this.debugFrames.slice(-DEBUG_BUFFER_SIZE);
-    }
   }
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     const snapshots: EngineSnapshot[] = [];
