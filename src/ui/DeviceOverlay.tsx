@@ -151,9 +151,8 @@ function DeviceOverlayComponent({
               <div>Motion active: {chosenFrame.motionActive ? 'yes' : 'no'}</div>
               {chosenFrame.motionStartTimestamp != null ? <div>Motion start: {new Date(chosenFrame.motionStartTimestamp).toLocaleString()}</div> : null}
               {chosenFrame.motionDistance != null ? <div>Motion distance: {Math.round(chosenFrame.motionDistance)} m</div> : null}
+              {chosenFrame.motionScore != null || chosenFrame.motionScoreSum != null ? <div>Motion score: {chosenFrame.motionScoreSum?.toFixed(2)} (+{chosenFrame.motionScore?.toFixed(2)})</div> : null}
               {chosenFrame.motionTimeFactor != null ? <div>Time factor: {chosenFrame.motionTimeFactor.toFixed(2)}</div> : null}
-              {chosenFrame.motionScore != null ? <div>Motion score: {chosenFrame.motionScore.toFixed(2)}</div> : null}
-              {chosenFrame.motionScoreSum != null ? <div>Score sum: {chosenFrame.motionScoreSum.toFixed(2)}</div> : null}
               {chosenFrame.motionCoherent != null ? <div>Coherent: {chosenFrame.motionCoherent ? 'yes' : 'no'}</div> : null}
               {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
               <div>Outliers: {chosenFrame.outlierCount}</div>
