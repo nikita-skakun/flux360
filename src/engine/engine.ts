@@ -22,9 +22,8 @@ export type EngineState = {
 
 const DECAY_RATE_ACTIVE = 0.001;
 const GAIN_RATE = 2.0;
-const MIN_USABLE_CONFIDENCE = 0.05;
 
-export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'active-ended' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
+export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
 export type DebugFrame = {
   timestamp: number;
   sourceDeviceId: number | undefined;
@@ -263,13 +262,6 @@ export class Engine {
             }
           }
         }
-      }
-
-      if (!this.motionActive && this.activeAnchor && this.activeAnchor.getConfidence(m.timestamp, DECAY_RATE_ACTIVE) < MIN_USABLE_CONFIDENCE) {
-        this.activeAnchor.endTimestamp = m.timestamp;
-        this.closedAnchors.push(this.activeAnchor);
-        this.activeAnchor = null;
-        decision = 'active-ended';
       }
 
       // capture state after
