@@ -28,7 +28,6 @@ export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'active-end
 export type DebugFrame = {
   timestamp: number;
   sourceDeviceId: number | undefined;
-  motionActiveBefore: boolean;
   motionActive: boolean;
   motionStartTimestamp: number | null;
   outlierCount: number;
@@ -40,8 +39,7 @@ export type DebugFrame = {
   motionSinglePointOverride: boolean | null;
   anchorVarianceScale: number | null;
   measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; variance: number; };
-  before: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
-  after: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  anchor: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
   trendSeparation: number | null;
@@ -149,7 +147,6 @@ export class Engine {
     const snapshots: EngineSnapshot[] = [];
     for (const m of ms) {
       const profile = this.getProfile(this.motionProfile);
-      const motionActiveBefore = this.motionActive;
       let motionScore: number | null = null;
       let motionScoreSum: number | null = null;
       let motionCoherent: boolean | null = null;
@@ -157,8 +154,6 @@ export class Engine {
       let motionTimeFactor: number | null = null;
       let motionSinglePointOverride: boolean | null = null;
       let anchorVarianceScale: number | null = null;
-      // capture state before
-      const beforeAnchor = this.activeAnchor ? this.activeAnchor.clone() : null;
       let mahalanobis2: number | null = null;
       let trendSeparation: number | null = null;
       let decision: DebugDecision = 'none';
@@ -284,7 +279,6 @@ export class Engine {
       this.pushDebugFrame({
         timestamp: m.timestamp,
         sourceDeviceId: m.sourceDeviceId,
-        motionActiveBefore,
         motionActive: this.motionActive,
         motionStartTimestamp: this.motionStartTimestamp,
         outlierCount: this.outliers.length,
@@ -296,8 +290,7 @@ export class Engine {
         motionSinglePointOverride,
         anchorVarianceScale,
         measurement: { lat: m.lat, lon: m.lon, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], variance: m.variance },
-        before: beforeAnchor ? { mean: [beforeAnchor.mean[0], beforeAnchor.mean[1]], variance: beforeAnchor.variance, confidence: beforeAnchor.confidence, startTimestamp: beforeAnchor.startTimestamp, lastUpdateTimestamp: beforeAnchor.lastUpdateTimestamp } : null,
-        after: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], variance: afterAnchor.variance, confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
+        anchor: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], variance: afterAnchor.variance, confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
         mahalanobis2,
         decision,
         trendSeparation,

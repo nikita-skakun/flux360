@@ -39,8 +39,7 @@ type DebugAnchor = {
 
 type DebugFrame = {
   measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; variance: number; };
-  before: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
-  after: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  anchor: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   timestamp: number;
 };
 
@@ -379,7 +378,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       if (debugFrame) {
         try {
           const df = debugFrame;
-          const mean = df.after?.mean ?? df.before?.mean ?? df.measurement.mean;
+          const mean = df.anchor?.mean ?? df.measurement.mean;
           const meas = df.measurement.mean;
 
           const ax = width / 2 + (mean[0] - anchorX) * localZoom;
@@ -389,7 +388,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           const my = height / 2 - (meas[1] - anchorY) * localZoom;
 
           // approximate anchor ellipse using diagonal variances
-          const anchorVariance = df.after?.variance ?? df.before?.variance ?? 100;
+          const anchorVariance = df.anchor?.variance ?? 100;
           const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, anchorVariance));
           const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
           debugAnchorsRef.current.push({
@@ -397,10 +396,10 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
               mean: [mean[0], mean[1]],
               variance: anchorVariance,
               type: "frame",
-              startTimestamp: df.after?.startTimestamp ?? df.before?.startTimestamp ?? df.timestamp,
-              endTimestamp: df.after ? null : df.before?.startTimestamp ?? null,
-              confidence: df.after?.confidence ?? df.before?.confidence ?? 0,
-              lastUpdateTimestamp: df.after?.lastUpdateTimestamp ?? df.before?.lastUpdateTimestamp ?? df.timestamp,
+              startTimestamp: df.anchor?.startTimestamp ?? df.timestamp,
+              endTimestamp: df.anchor ? null : null,
+              confidence: df.anchor?.confidence ?? 0,
+              lastUpdateTimestamp: df.anchor?.lastUpdateTimestamp ?? df.timestamp,
             },
             x: ax,
             y: ay,

@@ -147,10 +147,9 @@ function DeviceOverlayComponent({
             <div className="mt-2 text-xs bg-muted/50 p-2 rounded-lg">
               <div>Accuracy: {Math.round(chosenFrame.measurement.accuracy)} m</div>
               <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
-              <div>Motion active (before): {chosenFrame.motionActiveBefore ? 'yes' : 'no'}</div>
+              {chosenFrame.trendSeparation != null ? <div>Trend separation: {chosenFrame.trendSeparation.toFixed(1)} m</div> : null}
               <div>Motion active: {chosenFrame.motionActive ? 'yes' : 'no'}</div>
               {chosenFrame.motionStartTimestamp != null ? <div>Motion start: {new Date(chosenFrame.motionStartTimestamp).toLocaleString()}</div> : null}
-
               {chosenFrame.motionDistance != null ? <div>Motion distance: {Math.round(chosenFrame.motionDistance)} m</div> : null}
               {chosenFrame.motionTimeFactor != null ? <div>Time factor: {chosenFrame.motionTimeFactor.toFixed(2)}</div> : null}
               {chosenFrame.motionScore != null ? <div>Motion score: {chosenFrame.motionScore.toFixed(2)}</div> : null}
@@ -159,12 +158,12 @@ function DeviceOverlayComponent({
               {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
               <div>Outliers: {chosenFrame.outlierCount}</div>
               {chosenFrame.anchorVarianceScale != null ? <div>Anchor var inflate: ×{chosenFrame.anchorVarianceScale.toFixed(2)}</div> : null}
-              <div>Confidence: {chosenFrame.before ? chosenFrame.before.confidence.toFixed(2) : '—'} → {chosenFrame.after ? chosenFrame.after.confidence.toFixed(2) : '—'}</div>
+              <div>Confidence: {chosenFrame.anchor ? chosenFrame.anchor.confidence.toFixed(2) : '—'}</div>
               <div>Decision: <strong>{chosenFrame.decision}</strong></div>
               {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
-              <div>Anchor start: {(chosenFrame.after?.startTimestamp ?? chosenFrame.before?.startTimestamp) != null ? humanDurationSince((chosenFrame.after?.startTimestamp ?? chosenFrame.before?.startTimestamp) as number) : '—'}</div>
+              <div>Anchor start: {chosenFrame.anchor?.startTimestamp != null ? humanDurationSince(chosenFrame.anchor.startTimestamp) : '—'}</div>
               <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
-              <div>Anchor lat/lon: {(() => { if (chosenFrame.after?.mean == null) return '—'; const d = metersToDegrees(chosenFrame.after.mean[0], chosenFrame.after.mean[1], refLat ?? 0, refLon ?? 0); return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`; })()}</div>
+              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const d = metersToDegrees(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1], refLat ?? 0, refLon ?? 0); return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`; })()}</div>
               <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
             </div>
           ) : null}
