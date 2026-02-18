@@ -10,6 +10,7 @@ export class Anchor {
   endTimestamp: number | null;
   confidence: number;
   lastUpdateTimestamp: number;
+
   constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.25, lastUpdateTimestamp?: number) {
     this.mean = mean;
     this.variance = variance;
@@ -18,21 +19,25 @@ export class Anchor {
     this.confidence = confidence;
     this.lastUpdateTimestamp = lastUpdateTimestamp ?? startTimestamp;
   }
+
   clone(): Anchor {
     const cloned = new Anchor([this.mean[0], this.mean[1]], this.variance, this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
     cloned.endTimestamp = this.endTimestamp;
     return cloned;
   }
+
   getConfidence(timestamp: number, decayRate: number): number {
     const timeDiffMinutes = (timestamp - this.lastUpdateTimestamp) / 60000;
     return Math.max(0, Math.min(1, this.confidence * Math.exp(-decayRate * timeDiffMinutes)));
   }
+
   getConfidenceLevel(timestamp: number, decayRate: number): "high" | "medium" | "low" {
     const conf = this.getConfidence(timestamp, decayRate);
     if (conf >= CONFIDENCE_HIGH_THRESHOLD) return "high";
     if (conf >= CONFIDENCE_MEDIUM_THRESHOLD) return "medium";
     return "low";
   }
+
   mahalanobis2(m: DevicePoint): number {
     const dx = m.mean[0] - this.mean[0];
     const dy = m.mean[1] - this.mean[1];
@@ -40,6 +45,7 @@ export class Anchor {
     const totalVariance = Math.max(this.variance + m.variance, 1e-6); // prevent division by zero
     return distanceSq / totalVariance;
   }
+
   kalmanUpdate(m: DevicePoint, gainRate: number): void {
     // Compute gain based on accuracy
     const accuracy = 1 / (1 + m.accuracy);

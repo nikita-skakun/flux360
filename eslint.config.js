@@ -20,6 +20,8 @@ export default [
         btoa: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
         console: 'readonly',
         process: 'readonly',
         React: 'readonly',
@@ -40,7 +42,7 @@ export default [
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
       'no-multiple-empty-lines': ['error', { max: 1, maxBOF: 0, maxEOF: 0 }],
-      'lines-between-class-members': ['error', 'never', { exceptAfterSingleLine: true }],
+      'lines-between-class-members': ['error', 'always', { exceptAfterSingleLine: true }],
       'padded-blocks': ['error', 'never']
     }
   }

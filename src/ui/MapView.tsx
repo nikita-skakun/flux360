@@ -50,6 +50,13 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const CLUSTER_ANIM_MS = 150;
   const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
   const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment } | null>(null);
+  const [timeTick, setTimeTick] = useState(0);
+
+  useEffect(() => {
+    if (!motionHover || motionHover.segment.endTime) return;
+    const id = setInterval(() => setTimeTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [motionHover]);
 
   const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
@@ -493,7 +500,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     if (!motionHover) return null;
     const { segment } = motionHover;
     const started = new Date(segment.startTime).toLocaleString();
-    const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "In progress";
+    const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "-";
     
     // Calculate total distance and duration
     let distance = 0;
@@ -527,7 +534,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     const durationStr = `${minutes}m ${seconds}s`;
 
     return { started, ended, distance: Math.round(distance), duration: durationStr, speed: speedKmph.toFixed(1) };
-  }, [motionHover]);
+  }, [motionHover, timeTick]);
 
   const pulsingMarkers = useMemo(() => {
     if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !mapRef.current || refLat == null || refLon == null) return null;
@@ -605,7 +612,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
             <div>Distance: {motionHoverLabel.distance}m</div>
             <div>Avg Speed: {motionHoverLabel.speed} km/h</div>
             <div>Started: {motionHoverLabel.started}</div>
-            <div>Ended: {motionHoverLabel.ended}</div>
+            <div>End: {motionHoverLabel.ended}</div>
           </div>
         </div>
       ) : null}

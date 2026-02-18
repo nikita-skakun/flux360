@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useTimeAgo } from "@/hooks/useTimeAgo";
 
 type Device = {
   id: number | string;
@@ -19,16 +20,9 @@ type Device = {
   color?: string | null;
 };
 
-const formatLastSeen = (ts: number | null): string => {
-  if (!ts) return "Never";
-  const sec = Math.round((Date.now() - ts) / 1000);
-  if (sec < 5) return "Just now";
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hrs = Math.round(min / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.round(hrs / 24)}d ago`;
+const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
+  const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
+  return <>{timeAgo}</>;
 };
 
 const DeviceListSidePanel: React.FC<{
@@ -209,7 +203,7 @@ const DeviceListSidePanel: React.FC<{
                     {displayName}
                   </span>
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">Last seen: {formatLastSeen(device.lastSeen)}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">Last seen: <LastSeenDisplay timestamp={device.lastSeen} /></div>
               </div>
             </div>
           </li>

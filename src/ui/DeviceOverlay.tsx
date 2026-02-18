@@ -6,6 +6,7 @@ import { Pencil, X } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import React from "react";
 import type { DevicePoint } from "@/types";
+import { useTimeAgo } from "@/hooks/useTimeAgo";
 
 type Props = {
   selectedDeviceId: number | null;
@@ -34,6 +35,11 @@ function humanDurationSince(ts: number, now: number = Date.now()): string {
   const d = Math.round(h / 24);
   return `${d}d`;
 }
+
+const DurationDisplay: React.FC<{ timestamp: number }> = ({ timestamp }) => {
+  const timeAgo = useTimeAgo(timestamp);
+  return <>{timeAgo}</>;
+};
 
 function DeviceOverlayComponent({
   selectedDeviceId,
@@ -99,7 +105,7 @@ function DeviceOverlayComponent({
             </div>
           )}
           <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
-          <div className="text-xs text-muted-foreground">At location for: {humanDurationSince(Date.now() - chosen.anchorAgeMs)}</div>
+          <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={Date.now() - chosen.anchorAgeMs} /></div>
         </div>
         <div className="flex items-center gap-1">
           <Button
@@ -124,7 +130,7 @@ function DeviceOverlayComponent({
           </Button>
         </div>
       </div>
-      <div className="text-xs text-muted-foreground">Last updated: {humanDurationSince(deviceLastSeen[chosen.device] ?? chosen.timestamp)}</div>
+      <div className="text-xs text-muted-foreground">Last updated: <DurationDisplay timestamp={deviceLastSeen[chosen.device] ?? chosen.timestamp} /></div>
 
       {debugMode ? (
         <div className="mt-2 text-xs">

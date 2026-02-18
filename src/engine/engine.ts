@@ -65,29 +65,37 @@ export class Engine {
   // Reference coordinates for distance calculations
   private refLat: number | null = null;
   private refLon: number | null = null;
+
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
+
   clearDebugFrames(): void {
     this.debugFrames = [];
     this.seenDebugKeys.clear();
   }
+
   setMotionProfile(profile: MotionProfileName) {
     this.motionProfile = profile;
   }
+
   private normalizeProfileName(profile?: MotionProfileName | null): MotionProfileName {
     return profile === "car" ? "car" : "person";
   }
+
   private getProfile(profile?: MotionProfileName | null): MotionProfileConfig {
     return MOTION_PROFILES[this.normalizeProfileName(profile)];
   }
+
   private insertOutlier(sample: OutlierSample) {
     this.outliers.push(sample);
     this.outliers.sort((a, b) => a.point.timestamp - b.point.timestamp);
   }
+
   private computeAverageVariance(points: DevicePoint[]): number {
     let sum = 0;
     for (const p of points) sum += p.variance;
     return sum / points.length;
   }
+
   private computePathLength(path: Vec2[]): number {
     if (path.length < 2) return 0;
     if (this.refLat === null || this.refLon === null) {
@@ -109,7 +117,7 @@ export class Engine {
     }
     return total;
   }
-  
+
   private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371000; // Earth's radius in meters
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -120,6 +128,7 @@ export class Engine {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
+
   private arePointsConsistent(points: DevicePoint[], threshold: number): boolean {
     for (let i = 0; i < points.length; i++) {
       for (let j = i + 1; j < points.length; j++) {
@@ -134,6 +143,7 @@ export class Engine {
     }
     return true;
   }
+
   private areDirectionsRandom(points: DevicePoint[], threshold: number): boolean {
     // Evaluates if directions between consecutive points are random (low correlation via dot product).
     // Random directions suggest stationary/noisy movement rather than coherent travel, qualifying for settling.
@@ -162,6 +172,7 @@ export class Engine {
     }
     return true; // all pairs have low dot, directions are random
   }
+
   private isCentroidCentered(points: DevicePoint[], maxRadius: number): boolean {
     const centroid = computeCentroid(points.map(p => p.mean));
     for (const p of points) {
@@ -169,6 +180,7 @@ export class Engine {
     }
     return true;
   }
+
   private shouldSettle(profile: MotionProfileConfig): boolean {
     if (this.recentMotionPoints.length < profile.motionSettleWindowSize) return false;
     const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
@@ -177,12 +189,14 @@ export class Engine {
     const centered = this.isCentroidCentered(points, profile.maxCentroidRadiusMeters);
     return consistent && randomDir && centered;
   }
+
   private pushDebugFrame(frame: DebugFrame) {
     const key = `${frame.timestamp}:${frame.measurement.lat}:${frame.measurement.lon}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''}`;
     if (this.seenDebugKeys.has(key)) return;
     this.seenDebugKeys.add(key);
     this.debugFrames.push(frame);
   }
+
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     const snapshots: EngineSnapshot[] = [];
     for (const m of ms) {
@@ -281,9 +295,9 @@ export class Engine {
                 decision = 'motion-start';
                 // Start a new motion segment - clone the anchor to preserve its state
                 this.currentMotionSegment = {
-                  startAnchor: this.activeAnchor!.clone(),
+                  startAnchor: this.activeAnchor.clone(),
                   endAnchor: null,
-                  path: [this.activeAnchor!.mean],
+                  path: [this.activeAnchor.mean],
                   startTime: this.motionStartTimestamp ?? m.timestamp,
                   endTime: null
                 };
@@ -378,9 +392,11 @@ export class Engine {
     }
     return snapshots;
   }
+
   getCurrentSnapshot(): EngineSnapshot {
     return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
   }
+
   getDominantAnchorAt(timestamp: number): Anchor | null {
     const candidates: Anchor[] = [];
     if (this.activeAnchor && this.activeAnchor.startTimestamp <= timestamp) {
@@ -403,6 +419,7 @@ export class Engine {
     }
     return best;
   }
+
   createSnapshot(): EngineState {
     return {
       activeAnchor: this.activeAnchor ? this.activeAnchor.clone() : null,
@@ -433,7 +450,7 @@ export class Engine {
       refLon: this.refLon,
     };
   }
-  
+
   pruneHistory(olderThan: number) {
     // Remove completed segments that ended before the cutoff time
     this.motionSegments = this.motionSegments.filter(s => {
