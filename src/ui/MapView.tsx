@@ -53,6 +53,12 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const [timeTick, setTimeTick] = useState(0);
 
   useEffect(() => {
+    if (!debugAnchors?.length && anchorHover) {
+      setAnchorHover(null);
+    }
+  }, [debugAnchors, anchorHover]);
+
+  useEffect(() => {
     if (!motionHover || motionHover.segment.endTime) return;
     const id = setInterval(() => setTimeTick(t => t + 1), 1000);
     return () => clearInterval(id);
