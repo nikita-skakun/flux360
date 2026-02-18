@@ -492,19 +492,19 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const motionHoverLabel = useMemo(() => {
     if (!motionHover) return null;
     const { segment } = motionHover;
-    const started = new Date(segment.startAnchor.startTimestamp).toLocaleString();
-    const ended = segment.endAnchor ? new Date(segment.endAnchor.startTimestamp).toLocaleString() : "In progress";
+    const started = new Date(segment.startTime).toLocaleString();
+    const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "In progress";
     
     // Calculate total distance and duration
     let distance = 0;
     let durationMs = 0;
     
-    if (segment.endAnchor) {
-      durationMs = segment.endAnchor.startTimestamp - segment.startAnchor.startTimestamp;
+    if (segment.endTime) {
+      durationMs = segment.endTime - segment.startTime;
     } else if (segment.path.length > 0) {
        // For in-progress, we don't have an easy "current time" reference here without passing it down, 
        // but we can approximate or just show "In progress"
-       durationMs = Date.now() - segment.startAnchor.startTimestamp;
+      durationMs = Date.now() - segment.startTime;
     }
 
     // Calculate distance along path

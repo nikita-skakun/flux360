@@ -283,7 +283,9 @@ export class Engine {
                 this.currentMotionSegment = {
                   startAnchor: this.activeAnchor!.clone(),
                   endAnchor: null,
-                  path: [this.activeAnchor!.mean]
+                  path: [this.activeAnchor!.mean],
+                  startTime: this.motionStartTimestamp ?? m.timestamp,
+                  endTime: null
                 };
               }
             }
@@ -301,6 +303,7 @@ export class Engine {
               // Clone the anchor to preserve its state at motion end
               this.currentMotionSegment.endAnchor = this.activeAnchor.clone();
               this.currentMotionSegment.path.push(this.activeAnchor.mean);
+              this.currentMotionSegment.endTime = m.timestamp;
               // Only keep segments with meaningful path length (> 1 meter)
               const pathLength = this.computePathLength(this.currentMotionSegment.path);
               if (pathLength > 1.0) {
@@ -333,6 +336,7 @@ export class Engine {
                 // newAnchor is freshly created, no need to clone
                 this.currentMotionSegment.endAnchor = newAnchor;
                 this.currentMotionSegment.path.push(newAnchor.mean);
+                this.currentMotionSegment.endTime = m.timestamp;
                 // Only keep segments with meaningful path length (> 1 meter)
                 const pathLength = this.computePathLength(this.currentMotionSegment.path);
                 if (pathLength > 1.0) {
@@ -415,11 +419,15 @@ export class Engine {
         startAnchor: s.startAnchor.clone(),
         endAnchor: s.endAnchor ? s.endAnchor.clone() : null,
         path: structuredClone(s.path),
+        startTime: s.startTime,
+        endTime: s.endTime,
       })),
       currentMotionSegment: this.currentMotionSegment ? {
         startAnchor: this.currentMotionSegment.startAnchor.clone(),
         endAnchor: this.currentMotionSegment.endAnchor ? this.currentMotionSegment.endAnchor.clone() : null,
         path: structuredClone(this.currentMotionSegment.path),
+        startTime: this.currentMotionSegment.startTime,
+        endTime: this.currentMotionSegment.endTime,
       } : null,
       refLat: this.refLat,
       refLon: this.refLon,
@@ -452,11 +460,15 @@ export class Engine {
       startAnchor: s.startAnchor.clone(),
       endAnchor: s.endAnchor ? s.endAnchor.clone() : null,
       path: structuredClone(s.path),
+      startTime: s.startTime,
+      endTime: s.endTime,
     }));
     this.currentMotionSegment = state.currentMotionSegment ? {
       startAnchor: state.currentMotionSegment.startAnchor.clone(),
       endAnchor: state.currentMotionSegment.endAnchor ? state.currentMotionSegment.endAnchor.clone() : null,
       path: structuredClone(state.currentMotionSegment.path),
+      startTime: state.currentMotionSegment.startTime,
+      endTime: state.currentMotionSegment.endTime,
     } : null;
     this.refLat = state.refLat ?? null;
     this.refLon = state.refLon ?? null;

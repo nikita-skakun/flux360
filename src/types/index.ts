@@ -40,4 +40,6 @@ export type MotionSegment = {
   startAnchor: Anchor;
   endAnchor: Anchor | null;
   path: Vec2[];
+  startTime: number;
+  endTime: number | null;
 };
