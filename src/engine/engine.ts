@@ -1,7 +1,7 @@
 import { Anchor } from "./anchor";
-import { distanceMeters, directionFromPoints, computeCentroid } from "@/util/geo";
+import { distanceMeters, directionFromPoints, computeCentroid, metersToDegrees } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import type { DevicePoint, MotionProfileName, MotionSegment } from "@/types";
+import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
 export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: number | null; activeConfidence: number };
@@ -20,6 +20,8 @@ export type EngineState = {
   seenDebugKeys: Set<string>;
   motionSegments: MotionSegment[];
   currentMotionSegment: MotionSegment | null;
+  refLat: number | null;
+  refLon: number | null;
 };
 
 const DECAY_RATE_ACTIVE = 0.001;
@@ -60,6 +62,9 @@ export class Engine {
   private seenDebugKeys = new Set<string>();
   motionSegments: MotionSegment[] = [];
   private currentMotionSegment: MotionSegment | null = null;
+  // Reference coordinates for distance calculations
+  private refLat: number | null = null;
+  private refLon: number | null = null;
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
   clearDebugFrames(): void {
     this.debugFrames = [];
@@ -82,6 +87,38 @@ export class Engine {
     let sum = 0;
     for (const p of points) sum += p.variance;
     return sum / points.length;
+  }
+  private computePathLength(path: Vec2[]): number {
+    if (path.length < 2) return 0;
+    if (this.refLat === null || this.refLon === null) {
+      // Fall back to Euclidean if no reference available
+      let total = 0;
+      for (let i = 1; i < path.length; i++) {
+        total += distanceMeters(path[i - 1]!, path[i]!);
+      }
+      return total;
+    }
+    let total = 0;
+    for (let i = 1; i < path.length; i++) {
+      const p1 = path[i - 1]!;
+      const p2 = path[i]!;
+      // Convert back to lat/lon and use haversine for accurate distance
+      const geo1 = metersToDegrees(p1[0], p1[1], this.refLat, this.refLon);
+      const geo2 = metersToDegrees(p2[0], p2[1], this.refLat, this.refLon);
+      total += this.haversineDistance(geo1.lat, geo1.lon, geo2.lat, geo2.lon);
+    }
+    return total;
+  }
+  
+  private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
   }
   private arePointsConsistent(points: DevicePoint[], threshold: number): boolean {
     for (let i = 0; i < points.length; i++) {
@@ -149,6 +186,11 @@ export class Engine {
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     const snapshots: EngineSnapshot[] = [];
     for (const m of ms) {
+      // Capture reference coordinates from first measurement
+      if (this.refLat === null || this.refLon === null) {
+        this.refLat = m.lat;
+        this.refLon = m.lon;
+      }
       const profile = this.getProfile(this.motionProfile);
       let motionScore: number | null = null;
       let motionScoreSum: number | null = null;
@@ -237,9 +279,9 @@ export class Engine {
                 this.recentMotionPoints.push(m);
                 this.outliers = [];
                 decision = 'motion-start';
-                // Start a new motion segment
+                // Start a new motion segment - clone the anchor to preserve its state
                 this.currentMotionSegment = {
-                  startAnchor: this.activeAnchor!,
+                  startAnchor: this.activeAnchor!.clone(),
                   endAnchor: null,
                   path: [this.activeAnchor!.mean]
                 };
@@ -256,9 +298,14 @@ export class Engine {
             decision = 'motion-end';
             // Finalize motion segment
             if (this.currentMotionSegment) {
-              this.currentMotionSegment.endAnchor = this.activeAnchor;
+              // Clone the anchor to preserve its state at motion end
+              this.currentMotionSegment.endAnchor = this.activeAnchor.clone();
               this.currentMotionSegment.path.push(this.activeAnchor.mean);
-              this.motionSegments.push(this.currentMotionSegment);
+              // Only keep segments with meaningful path length (> 1 meter)
+              const pathLength = this.computePathLength(this.currentMotionSegment.path);
+              if (pathLength > 1.0) {
+                this.motionSegments.push(this.currentMotionSegment);
+              }
               this.currentMotionSegment = null;
             }
           } else {
@@ -283,9 +330,14 @@ export class Engine {
               decision = 'motion-end';
               // Finalize motion segment
               if (this.currentMotionSegment) {
+                // newAnchor is freshly created, no need to clone
                 this.currentMotionSegment.endAnchor = newAnchor;
                 this.currentMotionSegment.path.push(newAnchor.mean);
-                this.motionSegments.push(this.currentMotionSegment);
+                // Only keep segments with meaningful path length (> 1 meter)
+                const pathLength = this.computePathLength(this.currentMotionSegment.path);
+                if (pathLength > 1.0) {
+                  this.motionSegments.push(this.currentMotionSegment);
+                }
                 this.currentMotionSegment = null;
               }
             }
@@ -369,8 +421,22 @@ export class Engine {
         endAnchor: this.currentMotionSegment.endAnchor ? this.currentMotionSegment.endAnchor.clone() : null,
         path: structuredClone(this.currentMotionSegment.path),
       } : null,
+      refLat: this.refLat,
+      refLon: this.refLon,
     };
   }
+  
+  pruneHistory(olderThan: number) {
+    // Remove completed segments that ended before the cutoff time
+    this.motionSegments = this.motionSegments.filter(s => {
+      // Keep active segments
+      if (!s.endAnchor) return true;
+      // Keep segments that ended within the valid window
+      // We use lastUpdateTimestamp as the effective "end time" of the anchor
+      return s.endAnchor.lastUpdateTimestamp >= olderThan;
+    });
+  }
+
   restoreSnapshot(state: EngineState): void {
     this.activeAnchor = state.activeAnchor ? state.activeAnchor.clone() : null;
     this.closedAnchors = state.closedAnchors.map(a => a.clone());
@@ -392,5 +458,7 @@ export class Engine {
       endAnchor: state.currentMotionSegment.endAnchor ? state.currentMotionSegment.endAnchor.clone() : null,
       path: structuredClone(state.currentMotionSegment.path),
     } : null;
+    this.refLat = state.refLat ?? null;
+    this.refLon = state.refLon ?? null;
   }
 }

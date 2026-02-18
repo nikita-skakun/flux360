@@ -271,6 +271,21 @@ export function computeProcessedPositions(
 
     const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, refLat, refLon, positionsAll);
 
+    // Prune old motion segments from engines based on the current data window
+    if (positionsAll.length > 0) {
+        // Find the oldest timestamp in the current dataset
+        let minTimestamp = Infinity;
+        for (const p of positionsAll) {
+            if (p.timestamp < minTimestamp) minTimestamp = p.timestamp;
+        }
+
+        if (minTimestamp !== Infinity) {
+             for (const engine of engines.values()) {
+                 engine.pruneHistory(minTimestamp);
+             }
+        }
+    }
+
     // Update checkpoints
     for (const [key, points] of Object.entries(rawByDevice)) {
         if (points.length === 0) continue;

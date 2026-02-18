@@ -45,6 +45,13 @@ type DebugFrame = {
   timestamp: number;
 };
 
+function interpolateColor(c1: [number, number, number], c2: [number, number, number], t: number): string {
+  const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
+  const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
+  const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
@@ -522,20 +529,42 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
 
           // Draw the path
           if (screenPoints.length >= 2) {
-            ctx.save();
-            // Different style for completed vs in-progress
             const isCompleted = segment.endAnchor !== null;
-            ctx.strokeStyle = isCompleted ? 'rgba(0, 200, 100, 0.8)' : 'rgba(255, 165, 0, 0.8)';
-            ctx.lineWidth = isCompleted ? 2 : 3;
-            ctx.setLineDash(isCompleted ? [] : [5, 5]);
-            ctx.beginPath();
-            const [firstX, firstY] = screenPoints[0]!;
-            ctx.moveTo(firstX, firstY);
-            for (let i = 1; i < screenPoints.length; i++) {
-              const [x, y] = screenPoints[i]!;
-              ctx.lineTo(x, y);
+            
+            // Start: Red (255,0,0)
+            const startColor: [number, number, number] = [255, 0, 0];
+            // End: Green (0,255,0) if completed, else Blue (0,0,255)
+            const endColor: [number, number, number] = isCompleted ? [0, 200, 100] : [0, 100, 255]; // adjusted green/blue slightly for visibility
+
+            ctx.save();
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Draw segment by segment with interpolated color gradient
+            const totalSegments = Math.max(1, screenPoints.length - 1);
+            
+            for (let i = 0; i < screenPoints.length - 1; i++) {
+              const [x1, y1] = screenPoints[i]!;
+              const [x2, y2] = screenPoints[i+1]!;
+              
+              const t1 = i / totalSegments;
+              const t2 = (i + 1) / totalSegments;
+              
+              const c1 = interpolateColor(startColor, endColor, t1);
+              const c2 = interpolateColor(startColor, endColor, t2);
+              
+              const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+              gradient.addColorStop(0, c1);
+              gradient.addColorStop(1, c2);
+              
+              ctx.beginPath();
+              ctx.strokeStyle = gradient;
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
             }
-            ctx.stroke();
+            
             ctx.restore();
           }
         }
