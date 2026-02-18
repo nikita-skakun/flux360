@@ -1,17 +1,16 @@
-import * as React from "react"
-import { Switch as SwitchPrimitive } from "radix-ui"
-
 import { cn } from "@/lib/utils"
+import { Root, Thumb } from "@radix-ui/react-switch"
+import * as React from "react"
 
 function Switch({
   className,
   size = "default",
   ...props
-}: React.ComponentProps<typeof SwitchPrimitive.Root> & {
+}: React.ComponentProps<typeof Root> & {
   size?: "sm" | "default"
 }) {
   return (
-    <SwitchPrimitive.Root
+    <Root
       data-slot="switch"
       data-size={size}
       className={cn(
@@ -20,13 +19,13 @@ function Switch({
       )}
       {...props}
     >
-      <SwitchPrimitive.Thumb
+      <Thumb
         data-slot="switch-thumb"
         className={cn(
           "bg-background dark:data-[state=unchecked]:bg-foreground dark:data-[state=checked]:bg-primary-foreground pointer-events-none block rounded-full ring-0 transition-transform group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=unchecked]:translate-x-0"
         )}
       />
-    </SwitchPrimitive.Root>
+    </Root>
   )
 }
 
