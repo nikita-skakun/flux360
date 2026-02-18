@@ -5,7 +5,7 @@ import { PulsingMarker } from "./map/PulsingMarker";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
-import type { DevicePoint, MotionSegment } from "@/types";
+import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment } from "@/types";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -26,13 +26,63 @@ type Props = {
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   motionSegments?: MotionSegment[];
+  retrospectiveMotionSegments?: RetrospectiveMotionSegment[];
+  useRetrospective?: boolean;
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
   darkMode: boolean;
   memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], useRetrospective = false, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+  // Use retrospective segments when enabled and available, otherwise fall back to real-time
+  const effectiveMotionSegments = useMemo(() => {
+    if (useRetrospective && retrospectiveMotionSegments.length > 0) {
+      // Convert RetrospectiveMotionSegment to MotionSegment format
+      // Retrospective segments don't have anchor objects, so we create minimal anchors
+      return retrospectiveMotionSegments.map((rs): MotionSegment => {
+        // Create minimal anchor-like objects for compatibility
+        // These will be used for rendering only
+        const startAnchor = {
+          mean: rs.startPosition,
+          variance: 1,
+          startTimestamp: rs.startTime,
+          endTimestamp: null,
+          confidence: rs.confidence,
+          lastUpdateTimestamp: rs.startTime,
+          clone() { return { ...this }; },
+          getConfidence() { return rs.confidence; },
+          getConfidenceLevel() { return "medium" as const; },
+          mahalanobis2() { return 0; },
+          kalmanUpdate() {},
+        };
+
+        const endAnchor = rs.endTime ? {
+          mean: rs.endPosition,
+          variance: 1,
+          startTimestamp: rs.endTime,
+          endTimestamp: rs.endTime,
+          confidence: rs.confidence,
+          lastUpdateTimestamp: rs.endTime,
+          clone() { return { ...this }; },
+          getConfidence() { return rs.confidence; },
+          getConfidenceLevel() { return "medium" as const; },
+          mahalanobis2() { return 0; },
+          kalmanUpdate() {},
+        } : null;
+
+        return {
+          startAnchor: startAnchor as MotionSegment["startAnchor"],
+          endAnchor: endAnchor as MotionSegment["endAnchor"],
+          path: rs.path,
+          startTime: rs.startTime,
+          endTime: rs.endTime,
+        };
+      });
+    }
+    return motionSegments;
+  }, [motionSegments, retrospectiveMotionSegments, useRetrospective]);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -49,7 +99,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const clusterAnimationTimerRef = useRef<number | null>(null);
   const CLUSTER_ANIM_MS = 150;
   const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
-  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment } | null>(null);
+  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment | RetrospectiveMotionSegment } | null>(null);
   const [timeTick, setTimeTick] = useState(0);
 
   useEffect(() => {
@@ -587,7 +637,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           openClusterPoint={clusterPoint}
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
-          motionSegments={motionSegments}
+          motionSegments={effectiveMotionSegments}
           darkMode={darkMode}
           memberDeviceIds={memberDeviceIds}
         />

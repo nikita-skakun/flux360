@@ -50,6 +50,11 @@ const initialState: StoreState = {
   engineSnapshotsByDevice: {},
   dominantAnchors: new Map() as Map<number, Anchor | null>,
   motionSegments: {},
+  retrospective: {
+    byDevice: new Map(),
+    lastUpdate: 0,
+    isAnalyzing: false,
+  },
 };
 
 export const useStore = create<Store>()(
@@ -631,6 +636,75 @@ export const useStore = create<Store>()(
       setMotionSegments: (segments) => {
         set(() => ({
           motionSegments: segments,
+        }));
+      },
+
+      runRetrospectiveAnalysis: () => {
+        const state = get();
+
+        // Get all device IDs
+        const deviceIds = Object.keys(state.devices).map(id => Number(id));
+        if (deviceIds.length === 0) return;
+
+        const refLat = state.ui.refLat ?? state.refs.firstPosition?.lat ?? null;
+        const refLon = state.ui.refLon ?? state.refs.firstPosition?.lon ?? null;
+        if (refLat === null || refLon === null) return;
+
+        set(prevState => ({
+          retrospective: {
+            ...prevState.retrospective,
+            isAnalyzing: true,
+          }
+        }));
+
+        // Use dynamic import to avoid circular dependencies
+        void (async () => {
+          try {
+            const { analyzeAllDevices } = await import('@/engine/retrospective');
+            const results = analyzeAllDevices(
+              state.refs.positionsAll,
+              deviceIds,
+              refLat,
+              refLon,
+              state.motionProfiles
+            );
+
+            set(() => ({
+              retrospective: {
+                byDevice: results,
+                lastUpdate: Date.now(),
+                isAnalyzing: false,
+              }
+            }));
+          } catch {
+            set(prevState => ({
+              retrospective: {
+                ...prevState.retrospective,
+                isAnalyzing: false,
+              }
+            }));
+          }
+        })();
+      },
+
+      setRetrospectiveResults: (results) => {
+        set(prevState => ({
+          retrospective: {
+            ...prevState.retrospective,
+            byDevice: results,
+            lastUpdate: Date.now(),
+            isAnalyzing: false,
+          }
+        }));
+      },
+
+      clearRetrospectiveResults: () => {
+        set(prevState => ({
+          retrospective: {
+            byDevice: new Map(),
+            lastUpdate: 0,
+            isAnalyzing: prevState.retrospective.isAnalyzing,
+          }
         }));
       },
     }),

@@ -141,6 +141,8 @@ export function App() {
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
   const motionSegments = useStore(state => state.motionSegments);
+  const retrospectiveByDevice = useStore(state => state.retrospective.byDevice);
+  const runRetrospectiveAnalysis = useStore(state => state.runRetrospectiveAnalysis);
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -152,8 +154,12 @@ export function App() {
       if (firstPos && refLat == null) setRefLat(firstPos.lat);
       if (firstPos && refLon == null) setRefLon(firstPos.lon);
       if (firstPos && firstPositionRef == null) setFirstPosition({ lat: firstPos.lat, lon: firstPos.lon });
+      
+      // Run retrospective analysis after positions are processed
+      // This corrects motion detection lag by analyzing position history
+      runRetrospectiveAnalysis();
     }
-  }, [updateCounter, positions, setPositionsAll, refLat, refLon, firstPositionRef, setRefLat, setRefLon, setFirstPosition, processPositions]);
+  }, [updateCounter, positions, setPositionsAll, refLat, refLon, firstPositionRef, setRefLat, setRefLon, setFirstPosition, processPositions, runRetrospectiveAnalysis]);
 
   // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
   useEffect(() => {
@@ -379,6 +385,8 @@ export function App() {
         debugFrame={currentDebugFrame}
         debugAnchors={currentDebugAnchors}
         motionSegments={selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
+        retrospectiveMotionSegments={selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
+        useRetrospective={true}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}

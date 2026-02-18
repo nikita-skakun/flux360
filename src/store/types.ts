@@ -1,6 +1,6 @@
 import type { Anchor } from '@/engine/anchor';
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName, MotionSegment } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName, MotionSegment, RetrospectiveResult } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -72,6 +72,13 @@ export type StoreState = {
 
   // Motion segments
   motionSegments: Record<number, MotionSegment[]>;
+
+  // Retrospective analysis state
+  retrospective: {
+    byDevice: Map<number, RetrospectiveResult>;
+    lastUpdate: number;
+    isAnalyzing: boolean;
+  };
 };
 
 export type StoreActions = {
@@ -118,6 +125,11 @@ export type StoreActions = {
 
   // Motion segments
   setMotionSegments: (segments: Record<number, MotionSegment[]>) => void;
+
+  // Retrospective analysis actions
+  runRetrospectiveAnalysis: () => void;
+  setRetrospectiveResults: (results: Map<number, RetrospectiveResult>) => void;
+  clearRetrospectiveResults: () => void;
 };
 
 export type Store = StoreState & StoreActions;
