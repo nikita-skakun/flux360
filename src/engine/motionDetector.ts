@@ -83,7 +83,7 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
 export type OutlierSample = {
   point: DevicePoint;
   score: number;
-  direction: Vec2 | null;
+  direction: Vec2;
 };
 
 /**
@@ -97,17 +97,16 @@ export function computeCoherence(outliers: OutlierSample[], threshold: number): 
   let sx = 0;
   let sy = 0;
   for (const o of outliers) {
-    if (!o.direction) continue;
     sx += o.direction[0];
     sy += o.direction[1];
   }
   const mag = Math.hypot(sx, sy);
   if (mag === 0) return false;
-  const avg: Vec2 = [sx / mag, sy / mag];
+  const avgX = sx / mag;
+  const avgY = sy / mag;
   for (const o of outliers) {
-    if (!o.direction) return false;
-    // Inline dot product: a[0] * b[0] + a[1] * b[1]
-    if (o.direction[0] * avg[0] + o.direction[1] * avg[1] < threshold) return false;
+    if (o.direction[0] * avgX + o.direction[1] * avgY < threshold)
+      return false;
   }
   return true;
 }

@@ -45,11 +45,11 @@ export function distanceMeters(a: [number, number], b: [number, number]): number
 /**
  * Calculate unit vector direction from source point to target point.
  */
-export function directionFromPoints(from: [number, number], to: [number, number]): [number, number] | null {
+export function directionFromPoints(from: [number, number], to: [number, number]): [number, number] {
   const dx = to[0] - from[0];
   const dy = to[1] - from[1];
   const mag = Math.hypot(dx, dy);
-  if (mag === 0) return null;
+  if (mag === 0) return [0, 0];
   return [dx / mag, dy / mag];
 }
 
