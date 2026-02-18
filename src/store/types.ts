@@ -1,6 +1,6 @@
 import type { Anchor } from '@/engine/anchor';
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName, MotionSegment } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -69,6 +69,9 @@ export type StoreState = {
   // Engine snapshots and anchors
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
   dominantAnchors: Map<number, Anchor | null>;
+
+  // Motion segments
+  motionSegments: Record<number, MotionSegment[]>;
 };
 
 export type StoreActions = {
@@ -112,6 +115,9 @@ export type StoreActions = {
   setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
   setDominantAnchors: (anchors: Map<number, Anchor | null>) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
+
+  // Motion segments
+  setMotionSegments: (segments: Record<number, MotionSegment[]>) => void;
 };
 
 export type Store = StoreState & StoreActions;

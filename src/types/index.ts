@@ -1,3 +1,5 @@
+import type { Anchor } from "@/engine/anchor";
+
 export type Vec2 = [number, number];
 
 export type DevicePoint = {
@@ -32,4 +34,10 @@ export type GroupDevice = {
   color: string;
   memberDeviceIds: number[];
   motionProfile: MotionProfileName | null;
+};
+
+export type MotionSegment = {
+  startAnchor: Anchor;
+  endAnchor: Anchor | null;
+  path: Vec2[];
 };

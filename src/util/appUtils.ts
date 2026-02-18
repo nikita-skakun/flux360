@@ -1,7 +1,7 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
 import { metersToDegrees } from "./geo";
 import type { Anchor } from "@/engine/anchor";
-import type { DevicePoint, NormalizedPosition, MotionProfileName } from "@/types";
+import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment } from "@/types";
 
 export function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -26,7 +26,7 @@ export function buildEngineSnapshotsFromByDevice(
   refLat: number | null,
   refLon: number | null,
   positionsAll: NormalizedPosition[]
-): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null> } {
+): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null>; motionSegments: Record<number, MotionSegment[]> } {
   try {
     const measurementsByDevice: Record<number, DevicePoint[]> = {};
 
@@ -49,6 +49,7 @@ export function buildEngineSnapshotsFromByDevice(
     const currentSnapshots: Record<number, DevicePoint[]> = {};
     const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
     const dominantAnchors = new Map<number, Anchor | null>();
+    const motionSegments: Record<number, MotionSegment[]> = {};
     for (const deviceId of enginesRef.keys()) {
       try {
         const engine = enginesRef.get(deviceId);
@@ -56,6 +57,7 @@ export function buildEngineSnapshotsFromByDevice(
         const snapshot = engine.getCurrentSnapshot();
         snapshotsByDevice.set(Number(deviceId), [snapshot]);
         dominantAnchors.set(Number(deviceId), engine.getDominantAnchorAt(Date.now()));
+        motionSegments[deviceId] = engine.motionSegments;
         if (snapshot.activeAnchor) {
           // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
           const dId = Number(deviceId);
@@ -89,9 +91,9 @@ export function buildEngineSnapshotsFromByDevice(
         // Continue to next device, don't crash everything
       }
     }
-    return { positionsByDevice: currentSnapshots, snapshotsByDevice, dominantAnchors };
+    return { positionsByDevice: currentSnapshots, snapshotsByDevice, dominantAnchors, motionSegments };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
-    return { positionsByDevice: {}, snapshotsByDevice: new Map(), dominantAnchors: new Map() };
+    return { positionsByDevice: {}, snapshotsByDevice: new Map(), dominantAnchors: new Map(), motionSegments: {} };
   }
 }

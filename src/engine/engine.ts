@@ -1,7 +1,7 @@
 import { Anchor } from "./anchor";
 import { distanceMeters, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import type { DevicePoint, MotionProfileName } from "@/types";
+import type { DevicePoint, MotionProfileName, MotionSegment } from "@/types";
 
 // Snapshot for UI/Historical view
 export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: number | null; activeConfidence: number };
@@ -18,6 +18,8 @@ export type EngineState = {
   recentMotionPoints: DevicePoint[];
   debugFrames: DebugFrame[];
   seenDebugKeys: Set<string>;
+  motionSegments: MotionSegment[];
+  currentMotionSegment: MotionSegment | null;
 };
 
 const DECAY_RATE_ACTIVE = 0.001;
@@ -56,6 +58,8 @@ export class Engine {
   // debug buffer (per-engine)
   private debugFrames: DebugFrame[] = [];
   private seenDebugKeys = new Set<string>();
+  motionSegments: MotionSegment[] = [];
+  private currentMotionSegment: MotionSegment | null = null;
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
   clearDebugFrames(): void {
     this.debugFrames = [];
@@ -233,6 +237,12 @@ export class Engine {
                 this.recentMotionPoints.push(m);
                 this.outliers = [];
                 decision = 'motion-start';
+                // Start a new motion segment
+                this.currentMotionSegment = {
+                  startAnchor: this.activeAnchor!,
+                  endAnchor: null,
+                  path: [this.activeAnchor!.mean]
+                };
               }
             }
           }
@@ -244,8 +254,19 @@ export class Engine {
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
 
             decision = 'motion-end';
+            // Finalize motion segment
+            if (this.currentMotionSegment) {
+              this.currentMotionSegment.endAnchor = this.activeAnchor;
+              this.currentMotionSegment.path.push(this.activeAnchor.mean);
+              this.motionSegments.push(this.currentMotionSegment);
+              this.currentMotionSegment = null;
+            }
           } else {
             this.recentMotionPoints.push(m);
+            // Add motion point to current segment
+            if (this.currentMotionSegment) {
+              this.currentMotionSegment.path.push(m.mean);
+            }
             if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
             if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
               const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
@@ -253,12 +274,20 @@ export class Engine {
               const newVariance = this.computeAverageVariance(points);
               this.activeAnchor.endTimestamp = m.timestamp;
               this.closedAnchors.push(this.activeAnchor);
-              this.activeAnchor = new Anchor(newMean, newVariance, m.timestamp);
+              const newAnchor = new Anchor(newMean, newVariance, m.timestamp);
+              this.activeAnchor = newAnchor;
               this.motionActive = false;
               this.motionStartTimestamp = null;
               this.outliers = [];
               this.recentMotionPoints = [];
               decision = 'motion-end';
+              // Finalize motion segment
+              if (this.currentMotionSegment) {
+                this.currentMotionSegment.endAnchor = newAnchor;
+                this.currentMotionSegment.path.push(newAnchor.mean);
+                this.motionSegments.push(this.currentMotionSegment);
+                this.currentMotionSegment = null;
+              }
             }
           }
         }
@@ -327,9 +356,19 @@ export class Engine {
       motionActive: this.motionActive,
       motionStartTimestamp: this.motionStartTimestamp,
       outliers: structuredClone(this.outliers), // Use structuredClone for deep copy
-      recentMotionPoints: structuredClone(this.recentMotionPoints), // Use structuredClone for deep copy
-      debugFrames: [...this.debugFrames], // Shallow copy array of frames (frames themselves are immutable-ish once created)
+      recentMotionPoints: structuredClone(this.recentMotionPoints),
+      debugFrames: [...this.debugFrames],
       seenDebugKeys: new Set(this.seenDebugKeys),
+      motionSegments: this.motionSegments.map(s => ({
+        startAnchor: s.startAnchor.clone(),
+        endAnchor: s.endAnchor ? s.endAnchor.clone() : null,
+        path: structuredClone(s.path),
+      })),
+      currentMotionSegment: this.currentMotionSegment ? {
+        startAnchor: this.currentMotionSegment.startAnchor.clone(),
+        endAnchor: this.currentMotionSegment.endAnchor ? this.currentMotionSegment.endAnchor.clone() : null,
+        path: structuredClone(this.currentMotionSegment.path),
+      } : null,
     };
   }
   restoreSnapshot(state: EngineState): void {
@@ -343,5 +382,15 @@ export class Engine {
     this.recentMotionPoints = structuredClone(state.recentMotionPoints);
     this.debugFrames = [...state.debugFrames];
     this.seenDebugKeys = new Set(state.seenDebugKeys);
+    this.motionSegments = state.motionSegments.map(s => ({
+      startAnchor: s.startAnchor.clone(),
+      endAnchor: s.endAnchor ? s.endAnchor.clone() : null,
+      path: structuredClone(s.path),
+    }));
+    this.currentMotionSegment = state.currentMotionSegment ? {
+      startAnchor: state.currentMotionSegment.startAnchor.clone(),
+      endAnchor: state.currentMotionSegment.endAnchor ? state.currentMotionSegment.endAnchor.clone() : null,
+      path: structuredClone(state.currentMotionSegment.path),
+    } : null;
   }
 }

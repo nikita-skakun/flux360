@@ -5,7 +5,7 @@ import { PulsingMarker } from "./map/PulsingMarker";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
-import type { DevicePoint } from "@/types";
+import type { DevicePoint, MotionSegment } from "@/types";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -25,13 +25,14 @@ type Props = {
   onSelectDevice: (id: number) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
+  motionSegments?: MotionSegment[];
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
   darkMode: boolean;
   memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -48,6 +49,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const clusterAnimationTimerRef = useRef<number | null>(null);
   const CLUSTER_ANIM_MS = 150;
   const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
+  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment } | null>(null);
 
   const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
@@ -282,6 +284,14 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       } else {
         setAnchorHover(null);
       }
+
+      const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
+      if (motionHit) {
+        setMotionHover({ x: motionHit.x, y: motionHit.y, segment: motionHit.segment });
+      } else {
+        setMotionHover(null);
+      }
+      
       const container = map.getContainer();
       if (hit?.items?.length) {
         container.style.cursor = "pointer";
@@ -303,6 +313,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       container.style.cursor = "";
       container.title = "";
       setAnchorHover(null);
+      setMotionHover(null);
     };
 
     map.on("click", onMapClick);
@@ -478,6 +489,46 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     return { typeLabel, started, ended, updated, confidence: anchor.confidence };
   }, [anchorHover]);
 
+  const motionHoverLabel = useMemo(() => {
+    if (!motionHover) return null;
+    const { segment } = motionHover;
+    const started = new Date(segment.startAnchor.startTimestamp).toLocaleString();
+    const ended = segment.endAnchor ? new Date(segment.endAnchor.startTimestamp).toLocaleString() : "In progress";
+    
+    // Calculate total distance and duration
+    let distance = 0;
+    let durationMs = 0;
+    
+    if (segment.endAnchor) {
+      durationMs = segment.endAnchor.startTimestamp - segment.startAnchor.startTimestamp;
+    } else if (segment.path.length > 0) {
+       // For in-progress, we don't have an easy "current time" reference here without passing it down, 
+       // but we can approximate or just show "In progress"
+       durationMs = Date.now() - segment.startAnchor.startTimestamp;
+    }
+
+    // Calculate distance along path
+    for (let i = 0; i < segment.path.length - 1; i++) {
+        const p1 = segment.path[i]!;
+        const p2 = segment.path[i+1]!;
+        // Approximate distance in meters (since we have meters in Vec2)
+        const dx = p1[0] - p2[0];
+        const dy = p1[1] - p2[1];
+        distance += Math.sqrt(dx*dx + dy*dy);
+    }
+    
+    // Speed (m/s) -> km/h
+    const speedMps = durationMs > 0 ? (distance / (durationMs / 1000)) : 0;
+    const speedKmph = speedMps * 3.6;
+
+    // Format duration
+    const minutes = Math.floor(durationMs / 60000);
+    const seconds = Math.floor((durationMs % 60000) / 1000);
+    const durationStr = `${minutes}m ${seconds}s`;
+
+    return { started, ended, distance: Math.round(distance), duration: durationStr, speed: speedKmph.toFixed(1) };
+  }, [motionHover]);
+
   const pulsingMarkers = useMemo(() => {
     if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !mapRef.current || refLat == null || refLon == null) return null;
 
@@ -523,6 +574,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           openClusterPoint={clusterPoint}
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
+          motionSegments={motionSegments}
           darkMode={darkMode}
           memberDeviceIds={memberDeviceIds}
         />
@@ -538,6 +590,22 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
             <div>Started: {anchorHoverLabel.started}</div>
             {anchorHoverLabel.ended ? <div>Ended: {anchorHoverLabel.ended}</div> : null}
             <div>Updated: {anchorHoverLabel.updated}</div>
+          </div>
+        </div>
+      ) : null}
+
+      {motionHover && motionHoverLabel ? (
+        <div
+          className="absolute z-[1003] pointer-events-none"
+          style={{ left: motionHover.x + 12, top: motionHover.y + 12 }}
+        >
+          <div className="text-xs bg-background/90 border shadow rounded px-2 py-1 text-foreground backdrop-blur-sm border-border">
+            <div className="font-medium text-emerald-500">Motion Segment</div>
+            <div>Duration: {motionHoverLabel.duration}</div>
+            <div>Distance: {motionHoverLabel.distance}m</div>
+            <div>Avg Speed: {motionHoverLabel.speed} km/h</div>
+            <div>Started: {motionHoverLabel.started}</div>
+            <div>Ended: {motionHoverLabel.ended}</div>
           </div>
         </div>
       ) : null}

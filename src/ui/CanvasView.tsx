@@ -1,12 +1,13 @@
 import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters, type DrawItem, type Cluster } from "@/util/clustering";
 import { getColorForDevice, rgbaString, type Color } from "./color";
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint } from "@/types";
+import type { DevicePoint, MotionSegment } from "@/types";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
   getClusters: () => { items: DevicePoint[]; x: number; y: number }[];
   hitTestAnchor: (x: number, y: number) => { anchor: DebugAnchor; x: number; y: number } | null;
+  hitTestMotionSegment: (x: number, y: number) => { segment: MotionSegment; x: number; y: number } | null;
 };
 
 export type CanvasViewProps = {
@@ -21,6 +22,7 @@ export type CanvasViewProps = {
   openClusterPoint: { x: number; y: number } | null;
   debugFrame: DebugFrame | null;
   debugAnchors: DebugAnchor[];
+  motionSegments: MotionSegment[];
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
   darkMode: boolean;
@@ -43,12 +45,13 @@ type DebugFrame = {
   timestamp: number;
 };
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
   const debugAnchorsRef = useRef<Array<{ anchor: DebugAnchor; x: number; y: number; r: number }>>([]);
   const processedComponentsRef = useRef<DevicePoint[]>([]);
+  const motionSegmentsRef = useRef<Array<{ segment: MotionSegment; screenPoints: [number, number][] }>>([]);
 
   const [pinOpacity, setPinOpacity] = useState(1);
 
@@ -120,6 +123,61 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         }
       }
       return best ? { anchor: best.anchor, x: best.x, y: best.y } : null;
+    },
+    hitTestMotionSegment: (px: number, py: number) => {
+      if (!motionSegmentsRef.current.length) return null;
+      
+      const HIT_THRESHOLD = 8;
+      let best: { segment: MotionSegment; dist: number; x: number; y: number } | null = null;
+      
+      for (const { segment, screenPoints } of motionSegmentsRef.current) {
+        if (screenPoints.length < 2) continue;
+        
+        // Simple point-to-segment distance for polyline
+        for (let i = 0; i < screenPoints.length - 1; i++) {
+          const p1 = screenPoints[i];
+          const p2 = screenPoints[i+1];
+          if (!p1 || !p2) continue;
+          
+          const x1 = p1[0], y1 = p1[1];
+          const x2 = p2[0], y2 = p2[1];
+          
+          // distance from point (px,py) to line segment (x1,y1)-(x2,y2)
+          const A = px - x1;
+          const B = py - y1;
+          const C = x2 - x1;
+          const D = y2 - y1;
+          
+          const dot = A * C + B * D;
+          const len_sq = C * C + D * D;
+          let param = -1;
+          if (len_sq !== 0) param = dot / len_sq;
+          
+          let xx, yy;
+          
+          if (param < 0) {
+            xx = x1;
+            yy = y1;
+          } else if (param > 1) {
+            xx = x2;
+            yy = y2;
+          } else {
+            xx = x1 + param * C;
+            yy = y1 + param * D;
+          }
+          
+          const dx = px - xx;
+          const dy = py - yy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          
+          if (dist < HIT_THRESHOLD) {
+            if (!best || dist < best.dist) {
+              best = { segment, dist: dist, x: xx, y: yy };
+            }
+          }
+        }
+      }
+      return best ? { segment: best.segment, x: best.x, y: best.y } : null;
     },
   }), []);
 
@@ -449,12 +507,45 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           // swallow debug drawing errors
         }
       }
+
+      // Draw motion segments
+      motionSegmentsRef.current = [];
+      if (motionSegments.length > 0) {
+        for (const segment of motionSegments) {
+          const screenPoints: [number, number][] = [];
+          for (const point of segment.path) {
+            const sx = width / 2 + (point[0] - anchorX) * localZoom;
+            const sy = height / 2 - (point[1] - anchorY) * localZoom;
+            screenPoints.push([sx, sy]);
+          }
+          motionSegmentsRef.current.push({ segment, screenPoints });
+
+          // Draw the path
+          if (screenPoints.length >= 2) {
+            ctx.save();
+            // Different style for completed vs in-progress
+            const isCompleted = segment.endAnchor !== null;
+            ctx.strokeStyle = isCompleted ? 'rgba(0, 200, 100, 0.8)' : 'rgba(255, 165, 0, 0.8)';
+            ctx.lineWidth = isCompleted ? 2 : 3;
+            ctx.setLineDash(isCompleted ? [] : [5, 5]);
+            ctx.beginPath();
+            const [firstX, firstY] = screenPoints[0]!;
+            ctx.moveTo(firstX, firstY);
+            for (let i = 1; i < screenPoints.length; i++) {
+              const [x, y] = screenPoints[i]!;
+              ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
     }
 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, darkMode, memberDeviceIds]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, darkMode, memberDeviceIds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 });

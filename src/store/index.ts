@@ -49,6 +49,7 @@ const initialState: StoreState = {
   },
   engineSnapshotsByDevice: {},
   dominantAnchors: new Map() as Map<number, Anchor | null>,
+  motionSegments: {},
 };
 
 export const useStore = create<Store>()(
@@ -416,11 +417,12 @@ export const useStore = create<Store>()(
 
         if (!result) return null;
 
-        const { engineSnapshotsByDevice, dominantAnchors, firstPos } = result;
+        const { engineSnapshotsByDevice, dominantAnchors, motionSegments, firstPos } = result;
 
         set(state => ({
           engineSnapshotsByDevice,
           dominantAnchors,
+          motionSegments,
           refs: {
             ...state.refs,
             firstPosition: firstPos ?? state.refs.firstPosition,
@@ -623,6 +625,12 @@ export const useStore = create<Store>()(
             ...state.ui,
             editingTarget: target,
           }
+        }));
+      },
+
+      setMotionSegments: (segments) => {
+        set(() => ({
+          motionSegments: segments,
         }));
       },
     }),

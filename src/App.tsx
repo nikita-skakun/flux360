@@ -140,6 +140,7 @@ export function App() {
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
+  const motionSegments = useStore(state => state.motionSegments);
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -377,6 +378,7 @@ export function App() {
         ref={mapViewRef}
         debugFrame={currentDebugFrame}
         debugAnchors={currentDebugAnchors}
+        motionSegments={selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
