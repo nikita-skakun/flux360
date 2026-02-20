@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronLeft, ChevronUp, ChevronDown, Smartphone, Plus,  Settings, UserPlus, ChevronRight, Trash2, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronUp, ChevronDown, Smartphone, Plus, Settings, UserPlus, ChevronRight, Trash2, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { colorForDevice } from "./color";

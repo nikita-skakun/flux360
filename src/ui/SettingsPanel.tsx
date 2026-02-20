@@ -103,11 +103,11 @@ export const SettingsPanel = React.memo(function SettingsPanel({
                 <strong className="text-foreground">{wsStatus}</strong>
               </span>
               {wsError ? <span className="text-destructive font-semibold">Error: {wsError}</span> : null}
-             </div>
- 
-             <Separator orientation="vertical" />
- 
-             <div className="flex items-center gap-2">
+            </div>
+
+            <Separator orientation="vertical" />
+
+            <div className="flex items-center gap-2">
               <Switch
                 id="debug-mode"
                 checked={debugMode}
@@ -116,11 +116,11 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               <Label htmlFor="debug-mode" className="text-xs font-medium cursor-pointer">
                 Debug
               </Label>
-             </div>
- 
-             <Separator orientation="vertical" />
- 
-             {/* Theme Toggle Button */}
+            </div>
+
+            <Separator orientation="vertical" />
+
+            {/* Theme Toggle Button */}
             <Button
               variant="outline"
               size="icon"
