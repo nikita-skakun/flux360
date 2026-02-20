@@ -101,9 +101,15 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const CLUSTER_ANIM_MS = 150;
   const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
   const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment | RetrospectiveMotionSegment } | null>(null);
-  const [timeTick, setTimeTick] = useState(0);
+   const [timeTick, setTimeTick] = useState(0);
 
-  useEffect(() => {
+   // Animation tracking refs for smooth marker updates during animations
+   const animFrameRef = useRef<number | null>(null);
+   const animationInProgressRef = useRef(false);
+   const lastCenterRef = useRef<L.LatLng | null>(null);
+   const lastZoomRef = useRef<number | null>(null);
+
+   useEffect(() => {
     if (!debugAnchors?.length && anchorHover) {
       setAnchorHover(null);
     }
@@ -268,27 +274,70 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     prevSelectedRef.current = selectedDeviceId;
   }, [selectedDeviceId]);
 
-  const updateTransform = () => {
-    const map = mapRef.current;
-    if (!map) return;
-    try {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
-      const ppm = 1 / mpp;
-      setPixelsPerMeter(ppm);
-      if (refLatRef.current != null && refLonRef.current != null) {
-        const cm = degreesToMeters(center.lat, center.lng, refLatRef.current, refLonRef.current);
-        setCenterMeters(cm);
-      } else {
-        setCenterMeters({ x: 0, y: 0 });
-      }
-    } catch {
-      // ignore transform update errors
-    }
-  };
+   const updateTransform = () => {
+     const map = mapRef.current;
+     if (!map) return;
+     try {
+       const center = map.getCenter();
+       const zoom = map.getZoom();
+       const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
+       const ppm = 1 / mpp;
+       setPixelsPerMeter(ppm);
+       if (refLatRef.current != null && refLonRef.current != null) {
+         const cm = degreesToMeters(center.lat, center.lng, refLatRef.current, refLonRef.current);
+         setCenterMeters(cm);
+       } else {
+         setCenterMeters({ x: 0, y: 0 });
+       }
+       // Update refs with current values for animation loop comparison
+       lastCenterRef.current = center;
+       lastZoomRef.current = zoom;
+     } catch {
+       // ignore transform update errors
+     }
+   };
 
-  useEffect(() => {
+   const startAnimationLoop = () => {
+     if (animationInProgressRef.current) return;
+     animationInProgressRef.current = true;
+
+     const animate = () => {
+       const map = mapRef.current;
+       if (!map) {
+         animationInProgressRef.current = false;
+         return;
+       }
+
+       const currentCenter = map.getCenter();
+       const currentZoom = map.getZoom();
+
+       // Check if anything changed since last update
+       const centerChanged = !lastCenterRef.current ||
+         Math.abs(currentCenter.lat - lastCenterRef.current.lat) > 0.0000001 ||
+         Math.abs(currentCenter.lng - lastCenterRef.current.lng) > 0.0000001;
+       const zoomChanged = lastZoomRef.current === null || currentZoom !== lastZoomRef.current;
+
+       if (centerChanged || zoomChanged) {
+         updateTransform();
+       }
+
+       if (animationInProgressRef.current) {
+         animFrameRef.current = window.requestAnimationFrame(animate);
+       }
+     };
+
+     animFrameRef.current = window.requestAnimationFrame(animate);
+   };
+
+   const stopAnimationLoop = () => {
+     animationInProgressRef.current = false;
+     if (animFrameRef.current !== null) {
+       window.cancelAnimationFrame(animFrameRef.current);
+       animFrameRef.current = null;
+     }
+   };
+
+   useEffect(() => {
     const mapContainer = mapDivRef.current;
     if (!mapContainer) return;
 
@@ -312,10 +361,14 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
 
     updateTransform();
 
-    map.on("move", updateTransform);
-    map.on("zoom", updateTransform);
+     map.on("move", updateTransform);
+     map.on("zoom", updateTransform);
+     map.on("movestart", startAnimationLoop);
+     map.on("zoomstart", startAnimationLoop);
+     map.on("moveend", stopAnimationLoop);
+     map.on("zoomend", stopAnimationLoop);
 
-    const onMapClick = (ev: L.LeafletMouseEvent) => {
+     const onMapClick = (ev: L.LeafletMouseEvent) => {
       const pt = map.latLngToContainerPoint(ev.latlng);
       const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
       if (hit?.items?.length) {
@@ -395,14 +448,19 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
 
     mapRef.current = map;
 
-    return () => {
-      map.off("move", updateTransform);
-      map.off("zoom", updateTransform);
-      map.off("click", onMapClick);
-      map.off("mousemove", onMapMove);
-      container.removeEventListener("mouseleave", onMouseLeave);
-      // Stop any ongoing animations before removing the map to prevent errors
-      if (map.stop) map.stop();
+     return () => {
+       map.off("move", updateTransform);
+       map.off("zoom", updateTransform);
+       map.off("movestart", startAnimationLoop);
+       map.off("zoomstart", startAnimationLoop);
+       map.off("moveend", stopAnimationLoop);
+       map.off("zoomend", stopAnimationLoop);
+       map.off("click", onMapClick);
+       map.off("mousemove", onMapMove);
+       container.removeEventListener("mouseleave", onMouseLeave);
+       // Stop any ongoing animations before removing the map to prevent errors
+       if (map.stop) map.stop();
+       stopAnimationLoop();
 
       // Explicitly remove tile layer first to prevent "el is undefined" errors
       if (tileLayerRef.current) {
