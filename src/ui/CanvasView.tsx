@@ -531,9 +531,8 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           // Draw the path
           if (screenPoints.length >= 2) {
             const isCompleted = segment.endAnchor !== null;
-            const isSelected = selectedMotionSegment && 
-              segment.startTime === selectedMotionSegment.startTime && 
-              segment.path.length === selectedMotionSegment.path.length;
+            const isSelected = selectedMotionSegment?.startTime === segment.startTime && 
+              selectedMotionSegment?.path.length === segment.path.length;
             const opacity = selectedMotionSegment ? (isSelected ? 1.0 : 0.1) : 0.7;
             
             // Start: Red (255,0,0)

@@ -1,9 +1,5 @@
 import { performGet, performPost, performPut, performDelete, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
 
-export function buildJsonHeaders(opts: TraccarClientOptions): Record<string, string> {
-  return buildJsonHeaders(opts);
-}
-
 export type TraccarDevice = {
   id: number;
   name: string;
@@ -25,6 +21,25 @@ function buildBaseUrl(opts: TraccarClientOptions): string {
   return `${protocol}://${opts.baseUrl}/api`;
 }
 
+function parseTraccarDevice(d: unknown): TraccarDevice | null {
+  if (!d || typeof d !== "object") return null;
+  const o = d as Record<string, unknown>;
+
+  const id = o["id"];
+  if (typeof id !== "number") return null;
+
+  const name = (typeof o["name"] === "string" ? o["name"] : null) ??
+    (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ??
+    String(id);
+  const attrs = typeof o["attributes"] === "object" ? (o["attributes"] as Record<string, unknown>) : {};
+  const emoji = typeof attrs["emoji"] === "string" ? attrs["emoji"] : name.toUpperCase().charAt(0);
+
+  const lastUpdate = o["lastUpdate"];
+  const lastSeen = typeof lastUpdate === "string" ? Date.parse(lastUpdate) : null;
+
+  return { id, name, emoji, lastSeen, attributes: attrs };
+}
+
 export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarDevice[]> {
   const fetcher = opts.fetchImpl ?? fetch;
   const base = buildBaseUrl(opts);
@@ -39,22 +54,7 @@ export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarD
     if (Array.isArray(obj["data"])) arr = obj["data"];
   }
 
-  return arr.flatMap((d) => {
-    if (!d || typeof d !== "object") return [];
-    const o = d as Record<string, unknown>;
-
-    const id = o["id"];
-    if (typeof id !== "number") return [];
-
-    const name = (typeof o["name"] === "string" ? o["name"] : null) ?? (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ?? String(id);
-    const attrs = typeof o["attributes"] === "object" ? (o["attributes"] as Record<string, unknown>) : {};
-    const emoji = typeof attrs["emoji"] === "string" ? attrs["emoji"] : name.toUpperCase().charAt(0);
-
-    const lastUpdate = o["lastUpdate"];
-    const lastSeen = typeof lastUpdate === "string" ? Date.parse(lastUpdate) : null;
-
-    return [{ id, name, emoji, lastSeen, attributes: attrs }];
-  });
+  return arr.flatMap(d => parseTraccarDevice(d) ?? []);
 }
 
 export async function createGroupDevice(
@@ -66,7 +66,7 @@ export async function createGroupDevice(
   const fetcher = opts.fetchImpl ?? fetch;
   const base = buildBaseUrl(opts);
   const url = `${base}/devices`;
-  const headers = buildJsonHeaders(opts);
+  const headers = buildHeaders(opts, true);
 
   const payload = {
     name,
@@ -99,16 +99,16 @@ type DeviceUpdates = {
   memberDeviceIds?: number[];
 };
 
-async function updateDeviceBase(
+async function fetchAndMergeAttributes(
   opts: TraccarClientOptions,
   deviceId: number,
   updates: DeviceUpdates,
   notFoundError: string
-): Promise<void> {
+): Promise<{ obj: Record<string, unknown>; attributes: Record<string, unknown> }> {
   const fetcher = opts.fetchImpl ?? fetch;
   const base = buildBaseUrl(opts);
   const url = `${base}/devices/${deviceId}`;
-  const headers = buildJsonHeaders(opts);
+  const headers = buildHeaders(opts, true);
 
   const existing = await performGet(fetcher, url, headers);
   if (!existing || typeof existing !== "object") throw new Error(notFoundError);
@@ -126,8 +126,24 @@ async function updateDeviceBase(
     attributes["memberDeviceIds"] = JSON.stringify(updates.memberDeviceIds);
   }
 
+  return { obj, attributes };
+}
+
+async function updateDeviceBase(
+  opts: TraccarClientOptions,
+  deviceId: number,
+  updates: DeviceUpdates,
+  notFoundError: string
+): Promise<void> {
+  const { obj, attributes } = await fetchAndMergeAttributes(opts, deviceId, updates, notFoundError);
+
   const payload: Record<string, unknown> = { ...obj, attributes };
   if (updates.name !== undefined) payload["name"] = updates.name;
+
+  const fetcher = opts.fetchImpl ?? fetch;
+  const base = buildBaseUrl(opts);
+  const url = `${base}/devices/${deviceId}`;
+  const headers = buildHeaders(opts, true);
 
   await performPut(fetcher, url, headers, payload);
 }
@@ -138,27 +154,6 @@ export async function updateGroupDevice(
   updates: DeviceUpdates
 ): Promise<void> {
   await updateDeviceBase(opts, deviceId, updates, "Group not found");
-}
-
-export async function updateDeviceAttributes(
-  opts: TraccarClientOptions,
-  deviceId: number,
-  updates: Record<string, unknown>
-): Promise<unknown> {
-  const fetcher = opts.fetchImpl ?? fetch;
-  const base = buildBaseUrl(opts);
-  const url = `${base}/devices/${deviceId}`;
-  const headers = buildJsonHeaders(opts);
-
-  const existing = await performGet(fetcher, url, headers);
-  const device = (existing && typeof existing === "object") ? (existing as Record<string, unknown>) : {};
-  const existingAttributes = (device["attributes"] && typeof device["attributes"] === "object")
-    ? (device["attributes"] as Record<string, unknown>)
-    : {};
-  const attributes: Record<string, unknown> = { ...existingAttributes, ...updates };
-
-  const payload: Record<string, unknown> = { ...device, attributes };
-  return await performPut(fetcher, url, headers, payload);
 }
 
 export async function updateDevice(

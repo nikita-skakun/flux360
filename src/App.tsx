@@ -395,7 +395,7 @@ export function App() {
         ref={mapViewRef}
         debugFrame={currentDebugFrame}
         debugAnchors={currentDebugAnchors}
-        motionSegments={selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
+        motionSegments={debugMode && selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
         retrospectiveMotionSegments={selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
         useRetrospective={useRetrospective}
         components={frame.components}

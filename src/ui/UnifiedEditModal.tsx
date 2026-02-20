@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { colorForDevice } from "./color";
 import { createPortal } from "react-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { EMOJI_OPTIONS } from "./constants";
 import { HexColorPicker } from "react-colorful";
 import { Input } from "@/components/ui/input";
@@ -22,6 +23,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     const group = useStore((state) => state.groups.find((g) => g.id === id));
     const updateDevice = useStore((state) => state.updateDevice);
     const updateGroup = useStore((state) => state.updateGroup);
+    const deleteGroup = useStore((state) => state.deleteGroup);
 
     const target = type === "device" ? device : group;
 
@@ -32,6 +34,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
 
     const [isLoading, setIsLoading] = useState(false);
     const [showColorPicker, setShowColorPicker] = useState(false);
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const triggerRef = useRef<HTMLButtonElement>(null);
     const [popoverPos, setPopoverPos] = useState<{ top?: number; bottom?: number; left: number }>({ left: 0 });
 
@@ -77,6 +80,19 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
             console.error("Failed to update", e);
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        setIsLoading(true);
+        try {
+            await deleteGroup(id);
+            onClose();
+        } catch (e) {
+            console.error("Failed to delete group", e);
+        } finally {
+            setIsLoading(false);
+            setShowDeleteConfirm(false);
         }
     };
 
@@ -194,6 +210,16 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                 </div>
 
                 <DialogFooter>
+                    {type === "group" && (
+                        <Button
+                            variant="destructive"
+                            onClick={() => setShowDeleteConfirm(true)}
+                            disabled={isLoading}
+                            className="mr-auto dark:bg-red-700 dark:hover:bg-red-800"
+                        >
+                            Delete
+                        </Button>
+                    )}
                     <Button
                         variant="ghost"
                         onClick={onClose}
@@ -208,6 +234,23 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                         {isLoading ? "Saving..." : "Save Changes"}
                     </Button>
                 </DialogFooter>
+
+                <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+                    <AlertDialogContent className="z-[3001]">
+                        <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Group</AlertDialogTitle>
+                            <AlertDialogDescription>
+                                Are you sure you want to delete this group? This action cannot be undone.
+                            </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                            <AlertDialogAction variant="destructive" onClick={() => void handleDelete()} disabled={isLoading} className="dark:bg-red-700 dark:hover:bg-red-800">
+                                Delete
+                            </AlertDialogAction>
+                            <AlertDialogCancel disabled={isLoading}>Cancel</AlertDialogCancel>
+                        </AlertDialogFooter>
+                    </AlertDialogContent>
+                </AlertDialog>
             </DialogContent>
         </Dialog>
     );
