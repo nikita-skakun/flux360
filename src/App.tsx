@@ -6,6 +6,8 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
+import MotionSegmentPanel from "./ui/MotionSegmentPanel";
+import type { MotionSegment, RetrospectiveMotionSegment } from "./types";
 
 export function App() {
   const setRefLat = useStore(state => state.setRefLat);
@@ -131,6 +133,8 @@ export function App() {
   const setDebugFrameIndex = useStore(state => state.setDebugFrameIndex);
   const editingTarget = useStore(state => state.ui.editingTarget);
   const setEditingTarget = useStore(state => state.setEditingTarget);
+
+  const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | RetrospectiveMotionSegment | null>(null);
 
   const { wsStatus, wsError, updateCounter, reconnect, positions } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
@@ -402,6 +406,9 @@ export function App() {
           }
           setSelectedDeviceId(id);
         }}
+        onSelectMotionSegment={(segment) => {
+          if (debugMode) setSelectedMotionSegment(segment);
+        }}
         memberDeviceIds={memberDeviceIds}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
@@ -447,6 +454,16 @@ export function App() {
               enginesRef={enginesRef}
               setEditingTarget={setEditingTarget}
             />
+
+            {debugMode && selectedMotionSegment && selectedDeviceId != null && (
+              <MotionSegmentPanel
+                segment={selectedMotionSegment}
+                debugFrames={[...(enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [])]}
+                refLat={refLat}
+                refLon={refLon}
+                onClose={() => setSelectedMotionSegment(null)}
+              />
+            )}
 
           </div>
         }

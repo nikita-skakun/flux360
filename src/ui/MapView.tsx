@@ -23,6 +23,7 @@ type Props = {
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
+  onSelectMotionSegment?: (segment: MotionSegment | RetrospectiveMotionSegment) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   motionSegments?: MotionSegment[];
@@ -34,7 +35,7 @@ type Props = {
   memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], useRetrospective = false, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], useRetrospective = false, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
   // Use retrospective segments when enabled and available, otherwise fall back to real-time
   const effectiveMotionSegments = useMemo(() => {
     if (useRetrospective && retrospectiveMotionSegments.length > 0) {
@@ -118,6 +119,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
   const prevMaptilerApiKeyRef = useRef<string | undefined>(undefined);
   const onSelectDeviceRef = useRef(onSelectDevice);
+  const onSelectMotionSegmentRef = useRef(onSelectMotionSegment);
 
   useEffect(() => {
     clusterPopupRef.current = clusterPopup;
@@ -131,6 +133,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
+
+  useEffect(() => {
+    onSelectMotionSegmentRef.current = onSelectMotionSegment;
+  }, [onSelectMotionSegment]);
 
   const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
     if (clusterAnimationTimerRef.current) {
@@ -334,6 +340,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items });
         }
       } else {
+        const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
+        if (motionHit && onSelectMotionSegmentRef.current) {
+          onSelectMotionSegmentRef.current(motionHit.segment);
+        }
         closeClusterPopupAnimated();
       }
     };
