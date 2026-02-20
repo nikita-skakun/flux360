@@ -346,15 +346,27 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       if (motionSegments.length > 0) {
         for (const segment of motionSegments) {
           const screenPoints: [number, number][] = [];
+          // Compute bounds while converting points (single pass)
+          let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
           for (const point of segment.path) {
             const sx = width / 2 + (point[0] - anchorX) * localZoom;
             const sy = height / 2 - (point[1] - anchorY) * localZoom;
             screenPoints.push([sx, sy]);
+            minX = Math.min(minX, sx);
+            maxX = Math.max(maxX, sx);
+            minY = Math.min(minY, sy);
+            maxY = Math.max(maxY, sy);
           }
           motionSegmentsRef.current.push({ segment, screenPoints });
 
           // Draw the path
           if (screenPoints.length >= 2) {
+            // Viewport culling: skip if segment's bounding box is entirely outside viewport
+            const margin = 5;
+            if (maxX < -margin || minX > width + margin || maxY < -margin || minY > height + margin) {
+              continue;
+            }
+
             const isCompleted = segment.endAnchor !== null;
             const isSelected = selectedMotionSegment?.startTime === segment.startTime &&
               selectedMotionSegment?.path.length === segment.path.length;
