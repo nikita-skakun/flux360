@@ -58,7 +58,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
   });
 
   return (
-    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0">
+    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0 min-h-0">
       <div className="flex items-start justify-between mb-2">
         <div className="text-sm font-medium">
           {isRetro ? 'Retrospective Segment' : 'Motion Segment'}
@@ -75,7 +75,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
         </Button>
       </div>
       
-      <div className="text-xs space-y-1 mb-3">
+      <div className="text-xs space-y-1 mb-3 shrink-0">
         <div><strong>Duration:</strong> {formatDuration(duration)}</div>
         <div><strong>Distance:</strong> {Math.round(distance)}m</div>
         <div><strong>Avg Speed:</strong> {avgSpeedKmh.toFixed(1)} km/h</div>
@@ -86,7 +86,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
       </div>
 
       {refLat != null && refLon != null && (
-        <div className="text-xs space-y-1 mb-3">
+        <div className="text-xs space-y-1 mb-3 shrink-0">
           <div><strong>Start:</strong> {(() => {
             const d = metersToDegrees(segment.path[0]![0], segment.path[0]![1], refLat, refLon);
             return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`;
@@ -99,11 +99,11 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
         </div>
       )}
 
-      <div className="text-xs font-medium mb-1">
+      <div className="text-xs font-medium mb-1 shrink-0">
         Debug frames ({relevantFrames.length}):
       </div>
       
-      <div className="max-h-48 overflow-y-auto text-xs bg-muted/50 rounded p-2 space-y-2">
+      <div className="max-h-32 overflow-y-auto text-xs bg-muted/50 rounded p-2 space-y-2 min-h-0">
         {relevantFrames.length === 0 ? (
           <div className="text-muted-foreground">No debug frames in this time range</div>
         ) : (

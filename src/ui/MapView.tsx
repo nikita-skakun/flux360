@@ -22,6 +22,7 @@ type Props = {
   height: number | string;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
+  selectedMotionSegment?: MotionSegment | RetrospectiveMotionSegment | null;
   onSelectDevice: (id: number) => void;
   onSelectMotionSegment?: (segment: MotionSegment | RetrospectiveMotionSegment) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
@@ -35,7 +36,7 @@ type Props = {
   memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], useRetrospective = false, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, selectedMotionSegment, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], useRetrospective = false, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
   // Use retrospective segments when enabled and available, otherwise fall back to real-time
   const effectiveMotionSegments = useMemo(() => {
     if (useRetrospective && retrospectiveMotionSegments.length > 0) {
@@ -648,6 +649,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
           motionSegments={effectiveMotionSegments}
+          selectedMotionSegment={selectedMotionSegment ?? null}
           darkMode={darkMode}
           memberDeviceIds={memberDeviceIds}
         />

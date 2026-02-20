@@ -51,6 +51,12 @@ function toMeterPoint(
   return { mean: [x, y], timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
+function getDynamicRadius(accuracy: number, maxStationaryRadius: number): number {
+  // Use a combination of the fixed radius and accuracy-based radius
+  // 1.5x accuracy is a common threshold for GPS noise significance
+  return Math.max(maxStationaryRadius, accuracy * 0.8);
+}
+
 export function analyzeMotion(
   positions: NormalizedPosition[],
   refLat: number,
@@ -75,6 +81,7 @@ export function analyzeMotion(
     center: Vec2;
     startTime: number;
     endTime: number;
+    avgAccuracy: number;
   };
   
   const stableIntervals: StableInterval[] = [];
@@ -85,14 +92,34 @@ export function analyzeMotion(
     let j = i + 1;
     let centroidX = startPoint.mean[0];
     let centroidY = startPoint.mean[1];
+    let sumAcc = startPoint.accuracy;
     let count = 1;
     
     while (j < len) {
       const nextPoint = meterPoints[j]!;
-      const dist = distanceMeters([centroidX / count, centroidY / count], nextPoint.mean);
-      if (dist > maxStationaryRadius) break;
+      const currentCentroid: Vec2 = [centroidX / count, centroidY / count];
+      const dist = distanceMeters(currentCentroid, nextPoint.mean);
+      
+      const dynamicRadius = getDynamicRadius(nextPoint.accuracy, maxStationaryRadius);
+      
+      if (dist > dynamicRadius) {
+        // Outlier tolerance: check if subsequent points return to this cluster
+        let returned = false;
+        if (j + 1 < len) {
+          const pNext = meterPoints[j + 1]!;
+          const dNext = distanceMeters(currentCentroid, pNext.mean);
+          if (dNext <= getDynamicRadius(pNext.accuracy, maxStationaryRadius)) {
+            returned = true;
+          }
+        }
+        
+        if (!returned) break;
+        // If it returned, we treat 'nextPoint' as a noisy point in the stop
+      }
+      
       centroidX += nextPoint.mean[0];
       centroidY += nextPoint.mean[1];
+      sumAcc += nextPoint.accuracy;
       count++;
       j++;
     }
@@ -109,7 +136,8 @@ export function analyzeMotion(
         endIndex: j - 1,
         center: [centroidX / count, centroidY / count],
         startTime,
-        endTime
+        endTime,
+        avgAccuracy: sumAcc / count
       });
       i = j;
     } else {
@@ -123,9 +151,17 @@ export function analyzeMotion(
     for (let k = 1; k < stableIntervals.length; k++) {
       const next = stableIntervals[k]!;
       const dist = distanceMeters(current.center, next.center);
-      const timeGap = next.startTime - current.endTime;
       
-      if (dist < maxStationaryRadius && timeGap < 30000) {
+      const pathPointsBetween: Vec2[] = [];
+      for (let idx = current.endIndex + 1; idx < next.startIndex; idx++) {
+        pathPointsBetween.push(meterPoints[idx]!.mean);
+      }
+      const midExtent = computePathExtent(pathPointsBetween);
+      
+      // Merge if spatially close AND the path between didn't wander too far
+      const mergeRadius = Math.max(maxStationaryRadius, (current.avgAccuracy + next.avgAccuracy) * 0.6);
+      
+      if (dist < mergeRadius && midExtent < mergeRadius) {
         const newCount = (current.endIndex - current.startIndex + 1) + (next.endIndex - next.startIndex + 1);
         const currentSumX = current.center[0] * (current.endIndex - current.startIndex + 1);
         const currentSumY = current.center[1] * (current.endIndex - current.startIndex + 1);
@@ -137,7 +173,8 @@ export function analyzeMotion(
           endIndex: next.endIndex,
           center: [(currentSumX + nextSumX) / newCount, (currentSumY + nextSumY) / newCount],
           startTime: current.startTime,
-          endTime: next.endTime
+          endTime: next.endTime,
+          avgAccuracy: (current.avgAccuracy + next.avgAccuracy) / 2
         };
       } else {
         mergedIntervals.push(current);
@@ -159,12 +196,19 @@ export function analyzeMotion(
     if (segmentEndIdx <= segmentStartIdx) continue;
     
     const pathPoints: Vec2[] = [];
+    let sumAcc = 0;
     for (let idx = segmentStartIdx; idx <= segmentEndIdx; idx++) {
-      pathPoints.push(meterPoints[idx]!.mean);
+      const mp = meterPoints[idx]!;
+      pathPoints.push(mp.mean);
+      sumAcc += mp.accuracy;
     }
     
+    const avgAcc = sumAcc / pathPoints.length;
     const extent = computePathExtent(pathPoints);
-    if (extent < maxStationaryRadius) continue;
+    
+    // Significance check: extent must exceed both fixed radius and accuracy-weighted threshold
+    const minExtent = Math.max(maxStationaryRadius, avgAcc * 1.5);
+    if (extent < minExtent) continue;
     
     motionSegments.push({
       startTime: from.endTime,
@@ -180,12 +224,18 @@ export function analyzeMotion(
     const lastInterval = mergedIntervals[mergedIntervals.length - 1]!;
     if (lastInterval.endIndex < len - 1) {
       const pathPoints: Vec2[] = [];
+      let sumAcc = 0;
       for (let idx = lastInterval.endIndex; idx < len; idx++) {
-        pathPoints.push(meterPoints[idx]!.mean);
+        const mp = meterPoints[idx]!;
+        pathPoints.push(mp.mean);
+        sumAcc += mp.accuracy;
       }
       
+      const avgAcc = sumAcc / pathPoints.length;
       const extent = computePathExtent(pathPoints);
-      if (extent >= maxStationaryRadius) {
+      const minExtent = Math.max(maxStationaryRadius, avgAcc * 1.5);
+      
+      if (extent >= minExtent) {
         motionSegments.push({
           startTime: lastInterval.endTime,
           endTime: meterPoints[len - 1]!.timestamp,
@@ -198,8 +248,14 @@ export function analyzeMotion(
     }
   } else if (len > 1) {
     const pathPoints = meterPoints.map(p => p.mean);
+    let sumAcc = 0;
+    for (const mp of meterPoints) sumAcc += mp.accuracy;
+    
+    const avgAcc = sumAcc / len;
     const extent = computePathExtent(pathPoints);
-    if (extent >= maxStationaryRadius) {
+    const minExtent = Math.max(maxStationaryRadius, avgAcc * 1.5);
+    
+    if (extent >= minExtent) {
       motionSegments.push({
         startTime: meterPoints[0]!.timestamp,
         endTime: meterPoints[len - 1]!.timestamp,

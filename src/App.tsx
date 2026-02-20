@@ -404,6 +404,7 @@ export function App() {
         worldBounds={worldBounds}
         height="100vh"
         selectedDeviceId={selectedDeviceId}
+        selectedMotionSegment={selectedMotionSegment}
         pulsingDeviceIds={pulsingDeviceIds}
         onSelectDevice={(id) => {
           if (selectedDeviceId === id) {
