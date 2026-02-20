@@ -17,7 +17,7 @@ type Props = {
   setMaptilerApiKeyInput: (value: string) => void;
   darkModeInput: 'light' | 'dark' | 'system';
   setDarkModeInput: (value: 'light' | 'dark' | 'system') => void;
-  wsStatus: "unknown" | "connecting" | "connected" | "disconnected" | "error";
+  wsStatus: "Unknown" | "Connecting" | "Connected" | "Disconnected" | "Error";
   wsError: string | null;
   onApplySettings: () => void;
   onApplyTheme: (theme: 'light' | 'dark' | 'system') => void;
@@ -100,14 +100,14 @@ export const SettingsPanel = React.memo(function SettingsPanel({
           <div className="flex items-center gap-4">
             <div className="text-xs flex items-center gap-2">
               <span>
-                Status: <strong className="text-foreground">{wsStatus}</strong>
+                <strong className="text-foreground">{wsStatus}</strong>
               </span>
               {wsError ? <span className="text-destructive font-semibold">Error: {wsError}</span> : null}
-            </div>
-
-            <Separator orientation="vertical" className="h-4" />
-
-            <div className="flex items-center gap-2">
+             </div>
+ 
+             <Separator orientation="vertical" />
+ 
+             <div className="flex items-center gap-2">
               <Switch
                 id="debug-mode"
                 checked={debugMode}
@@ -116,11 +116,11 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               <Label htmlFor="debug-mode" className="text-xs font-medium cursor-pointer">
                 Debug
               </Label>
-            </div>
-
-            <Separator orientation="vertical" className="h-4" />
-
-            {/* Theme Toggle Button */}
+             </div>
+ 
+             <Separator orientation="vertical" />
+ 
+             {/* Theme Toggle Button */}
             <Button
               variant="outline"
               size="icon"
