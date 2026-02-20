@@ -5,7 +5,7 @@ import { PulsingMarker } from "./map/PulsingMarker";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
-import type { DevicePoint, MotionSegment } from "@/types";
+import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment } from "@/types";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -22,17 +22,68 @@ type Props = {
   height: number | string;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
+  selectedMotionSegment?: MotionSegment | RetrospectiveMotionSegment | null;
   onSelectDevice: (id: number) => void;
+  onSelectMotionSegment?: (segment: MotionSegment | RetrospectiveMotionSegment) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   motionSegments?: MotionSegment[];
+  retrospectiveMotionSegments?: RetrospectiveMotionSegment[];
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
   darkMode: boolean;
   memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, selectedDeviceId, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, selectedMotionSegment, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+  // Always use retrospective segments when available, fall back to real-time
+  const effectiveMotionSegments = useMemo(() => {
+    if (retrospectiveMotionSegments.length > 0) {
+      // Convert RetrospectiveMotionSegment to MotionSegment format
+      // Retrospective segments don't have anchor objects, so we create minimal anchors
+      return retrospectiveMotionSegments.map((rs): MotionSegment => {
+        // Create minimal anchor-like objects for compatibility
+        // These will be used for rendering only
+        const startAnchor = {
+          mean: rs.startPosition,
+          variance: 1,
+          startTimestamp: rs.startTime,
+          endTimestamp: null,
+          confidence: rs.confidence,
+          lastUpdateTimestamp: rs.startTime,
+          clone() { return { ...this }; },
+          getConfidence() { return rs.confidence; },
+          getConfidenceLevel() { return "medium" as const; },
+          mahalanobis2() { return 0; },
+          kalmanUpdate() { },
+        };
+
+        const endAnchor = rs.endTime ? {
+          mean: rs.endPosition,
+          variance: 1,
+          startTimestamp: rs.endTime,
+          endTimestamp: rs.endTime,
+          confidence: rs.confidence,
+          lastUpdateTimestamp: rs.endTime,
+          clone() { return { ...this }; },
+          getConfidence() { return rs.confidence; },
+          getConfidenceLevel() { return "medium" as const; },
+          mahalanobis2() { return 0; },
+          kalmanUpdate() { },
+        } : null;
+
+        return {
+          startAnchor: startAnchor as MotionSegment["startAnchor"],
+          endAnchor: endAnchor as MotionSegment["endAnchor"],
+          path: rs.path,
+          startTime: rs.startTime,
+          endTime: rs.endTime,
+        };
+      });
+    }
+    return motionSegments;
+  }, [motionSegments, retrospectiveMotionSegments]);
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -49,7 +100,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const clusterAnimationTimerRef = useRef<number | null>(null);
   const CLUSTER_ANIM_MS = 150;
   const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
-  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment } | null>(null);
+  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment | RetrospectiveMotionSegment } | null>(null);
   const [timeTick, setTimeTick] = useState(0);
 
   useEffect(() => {
@@ -68,6 +119,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
   const prevMaptilerApiKeyRef = useRef<string | undefined>(undefined);
   const onSelectDeviceRef = useRef(onSelectDevice);
+  const onSelectMotionSegmentRef = useRef(onSelectMotionSegment);
 
   useEffect(() => {
     clusterPopupRef.current = clusterPopup;
@@ -81,6 +133,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
+
+  useEffect(() => {
+    onSelectMotionSegmentRef.current = onSelectMotionSegment;
+  }, [onSelectMotionSegment]);
 
   const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
     if (clusterAnimationTimerRef.current) {
@@ -284,6 +340,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items });
         }
       } else {
+        const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
+        if (motionHit && onSelectMotionSegmentRef.current) {
+          onSelectMotionSegmentRef.current(motionHit.segment);
+        }
         closeClusterPopupAnimated();
       }
     };
@@ -304,7 +364,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       } else {
         setMotionHover(null);
       }
-      
+
       const container = map.getContainer();
       if (hit?.items?.length) {
         container.style.cursor = "pointer";
@@ -507,29 +567,29 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     const { segment } = motionHover;
     const started = new Date(segment.startTime).toLocaleString();
     const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "-";
-    
+
     // Calculate total distance and duration
     let distance = 0;
     let durationMs = 0;
-    
+
     if (segment.endTime) {
       durationMs = segment.endTime - segment.startTime;
     } else if (segment.path.length > 0) {
-       // For in-progress, we don't have an easy "current time" reference here without passing it down, 
-       // but we can approximate or just show "In progress"
+      // For in-progress, we don't have an easy "current time" reference here without passing it down, 
+      // but we can approximate or just show "In progress"
       durationMs = Date.now() - segment.startTime;
     }
 
     // Calculate distance along path
     for (let i = 0; i < segment.path.length - 1; i++) {
-        const p1 = segment.path[i]!;
-        const p2 = segment.path[i+1]!;
-        // Approximate distance in meters (since we have meters in Vec2)
-        const dx = p1[0] - p2[0];
-        const dy = p1[1] - p2[1];
-        distance += Math.sqrt(dx*dx + dy*dy);
+      const p1 = segment.path[i]!;
+      const p2 = segment.path[i + 1]!;
+      // Approximate distance in meters (since we have meters in Vec2)
+      const dx = p1[0] - p2[0];
+      const dy = p1[1] - p2[1];
+      distance += Math.sqrt(dx * dx + dy * dy);
     }
-    
+
     // Speed (m/s) -> km/h
     const speedMps = durationMs > 0 ? (distance / (durationMs / 1000)) : 0;
     const speedKmph = speedMps * 3.6;
@@ -587,7 +647,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           openClusterPoint={clusterPoint}
           debugFrame={debugFrame ?? null}
           debugAnchors={debugAnchors ?? []}
-          motionSegments={motionSegments}
+          motionSegments={effectiveMotionSegments}
+          selectedMotionSegment={selectedMotionSegment ?? null}
           darkMode={darkMode}
           memberDeviceIds={memberDeviceIds}
         />

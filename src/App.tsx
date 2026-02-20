@@ -6,6 +6,8 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
+import MotionSegmentPanel from "./ui/MotionSegmentPanel";
+import type { MotionSegment, RetrospectiveMotionSegment } from "./types";
 
 export function App() {
   const setRefLat = useStore(state => state.setRefLat);
@@ -105,7 +107,7 @@ export function App() {
   // Listen for system theme changes when in system mode
   useEffect(() => {
     if (darkMode !== 'system') return;
-    
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
       if (e.matches) {
@@ -114,7 +116,7 @@ export function App() {
         document.documentElement.classList.remove('dark');
       }
     };
-    
+
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [darkMode]);
@@ -130,6 +132,8 @@ export function App() {
   const editingTarget = useStore(state => state.ui.editingTarget);
   const setEditingTarget = useStore(state => state.setEditingTarget);
 
+  const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | RetrospectiveMotionSegment | null>(null);
+
   const { wsStatus, wsError, updateCounter, reconnect, positions } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
@@ -141,6 +145,8 @@ export function App() {
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
   const motionSegments = useStore(state => state.motionSegments);
+  const retrospectiveByDevice = useStore(state => state.retrospective.byDevice);
+  const runRetrospectiveAnalysis = useStore(state => state.runRetrospectiveAnalysis);
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -152,8 +158,12 @@ export function App() {
       if (firstPos && refLat == null) setRefLat(firstPos.lat);
       if (firstPos && refLon == null) setRefLon(firstPos.lon);
       if (firstPos && firstPositionRef == null) setFirstPosition({ lat: firstPos.lat, lon: firstPos.lon });
+
+      // Run retrospective analysis after positions are processed
+      // This corrects motion detection lag by analyzing position history
+      runRetrospectiveAnalysis();
     }
-  }, [updateCounter, positions, setPositionsAll, refLat, refLon, firstPositionRef, setRefLat, setRefLon, setFirstPosition, processPositions]);
+  }, [updateCounter, positions, setPositionsAll, refLat, refLon, firstPositionRef, setRefLat, setRefLon, setFirstPosition, processPositions, runRetrospectiveAnalysis]);
 
   // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
   useEffect(() => {
@@ -250,6 +260,11 @@ export function App() {
     else setDebugFrameIndex(Math.max(0, frames.length - 1));
   }, [selectedDeviceId, debugMode]);
 
+  // Clear selected motion segment when device changes
+  useEffect(() => {
+    setSelectedMotionSegment(null);
+  }, [selectedDeviceId]);
+
   // current debug frame to render on the map (if any)
   const currentDebugFrame = useMemo(() => {
     if (selectedDeviceId == null || !debugMode) return null;
@@ -297,7 +312,7 @@ export function App() {
     // Add individual devices (skip if they're members of a group or if they're group devices themselves)
     for (const [id, name] of Object.entries(deviceNames)) {
       const numId = Number(id);
-      
+
       if (groupIds.has(numId)) {
         continue; // Skip if it's a group device
       }
@@ -378,19 +393,26 @@ export function App() {
         ref={mapViewRef}
         debugFrame={currentDebugFrame}
         debugAnchors={currentDebugAnchors}
-        motionSegments={selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
+        motionSegments={debugMode && selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
+        retrospectiveMotionSegments={selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
         worldBounds={worldBounds}
         height="100vh"
         selectedDeviceId={selectedDeviceId}
+        selectedMotionSegment={selectedMotionSegment}
         pulsingDeviceIds={pulsingDeviceIds}
         onSelectDevice={(id) => {
           if (selectedDeviceId === id) {
             mapViewRef.current?.flyToDevice(id);
           }
           setSelectedDeviceId(id);
+        }}
+        onSelectMotionSegment={(segment) => {
+          if (debugMode) {
+            setSelectedMotionSegment(segment);
+          }
         }}
         memberDeviceIds={memberDeviceIds}
         deviceNames={deviceNames}
@@ -435,6 +457,16 @@ export function App() {
               enginesRef={enginesRef}
               setEditingTarget={setEditingTarget}
             />
+
+            {debugMode && selectedMotionSegment && selectedDeviceId != null && (
+              <MotionSegmentPanel
+                segment={selectedMotionSegment}
+                debugFrames={[...(enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [])]}
+                refLat={refLat}
+                refLon={refLon}
+                onClose={() => setSelectedMotionSegment(null)}
+              />
+            )}
 
           </div>
         }

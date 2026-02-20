@@ -1,7 +1,7 @@
 import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters, type DrawItem, type Cluster } from "@/util/clustering";
 import { getColorForDevice, rgbaString, type Color } from "./color";
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint, MotionSegment } from "@/types";
+import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment } from "@/types";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
@@ -23,6 +23,7 @@ export type CanvasViewProps = {
   debugFrame: DebugFrame | null;
   debugAnchors: DebugAnchor[];
   motionSegments: MotionSegment[];
+  selectedMotionSegment: MotionSegment | RetrospectiveMotionSegment | null;
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
   darkMode: boolean;
@@ -52,7 +53,7 @@ function interpolateColor(c1: [number, number, number], c2: [number, number, num
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], selectedMotionSegment, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -530,14 +531,18 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           // Draw the path
           if (screenPoints.length >= 2) {
             const isCompleted = segment.endAnchor !== null;
+            const isSelected = selectedMotionSegment?.startTime === segment.startTime && 
+              selectedMotionSegment?.path.length === segment.path.length;
+            const opacity = selectedMotionSegment ? (isSelected ? 1.0 : 0.1) : 0.7;
             
             // Start: Red (255,0,0)
             const startColor: [number, number, number] = [255, 0, 0];
             // End: Green (0,255,0) if completed, else Blue (0,0,255)
-            const endColor: [number, number, number] = isCompleted ? [0, 200, 100] : [0, 100, 255]; // adjusted green/blue slightly for visibility
+            const endColor: [number, number, number] = isCompleted ? [0, 200, 100] : [0, 100, 255];
 
             ctx.save();
-            ctx.lineWidth = 3;
+            ctx.globalAlpha = opacity;
+            ctx.lineWidth = isSelected ? 5 : 3;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             
@@ -574,7 +579,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, darkMode, memberDeviceIds]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
 });

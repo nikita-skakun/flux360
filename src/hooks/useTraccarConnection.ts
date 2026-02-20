@@ -19,7 +19,7 @@ type TraccarConnectionOptions = {
 export function useTraccarConnection(options: TraccarConnectionOptions) {
   const { baseUrl, secure, token, onDevices } = options;
 
-  const [wsStatus, setWsStatus] = useState<"unknown" | "connecting" | "connected" | "disconnected" | "error">("unknown");
+  const [wsStatus, setWsStatus] = useState<"Unknown" | "Connecting" | "Connected" | "Disconnected" | "Error">("Unknown");
   const [wsError, setWsError] = useState<string | null>(null);
   const [wsApplyCounter, setWsApplyCounter] = useState(0);
 
@@ -36,12 +36,12 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
   useEffect(() => {
     if (!baseUrl) {
       clientCloseRef.current?.();
-      setWsStatus("disconnected");
+      setWsStatus("Disconnected");
       setWsError((prev) => (prev?.includes("No Base URL") ? prev : null));
       return;
     }
 
-    setWsStatus("connecting");
+    setWsStatus("Connecting");
     setWsError(null);
 
     function insertSortedByTimestamp(arr: NormalizedPosition[], item: NormalizedPosition) {
@@ -78,7 +78,7 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
             setUpdateCounter(c => c + 1);
           },
           onOpen: async (): Promise<void> => {
-            setWsStatus("connected");
+            setWsStatus("Connected");
             setWsError(null);
             const derivedBase = baseUrl ? { baseUrl, secure } : null;
 
@@ -123,13 +123,13 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
             const code = ev?.code;
             const reason = ev?.reason;
             const detail = code != null ? (reason ? `code=${code} reason=${reason}` : `code=${code}`) : "closed";
-            setWsStatus((prev) => (prev === "error" ? "error" : "disconnected"));
+            setWsStatus((prev) => (prev === "Error" ? "Error" : "Disconnected"));
             setWsError((prev) => prev ?? `WebSocket closed: ${detail}`);
             console.warn("Traccar WS closed:", ev);
           },
           onError: (err) => {
             const message = err instanceof Event ? "WebSocket connection error (check URL/token and server)" : (err instanceof Error ? err.message : String(err));
-            setWsStatus("error");
+            setWsStatus("Error");
             setWsError(message);
             console.warn("Traccar WS error:", err);
           },
@@ -140,7 +140,7 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
         };
       } catch (e) {
         console.warn("Could not initialize realtime traccar client:", e);
-        setWsStatus("error");
+        setWsStatus("Error");
         setWsError(String(e));
       }
     })();
@@ -152,10 +152,10 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
 
   const reconnect = () => {
     if (!baseUrl) {
-      setWsStatus("disconnected");
+      setWsStatus("Disconnected");
       setWsError("No Base URL configured");
     } else {
-      setWsStatus("connecting");
+      setWsStatus("Connecting");
       setWsError(null);
       setWsApplyCounter((c) => c + 1);
     }
@@ -163,7 +163,7 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
 
   const disconnect = () => {
     clientCloseRef.current?.();
-    setWsStatus("disconnected");
+    setWsStatus("Disconnected");
   };
 
   return {

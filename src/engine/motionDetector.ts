@@ -29,6 +29,10 @@ export type MotionProfileConfig = {
   maxCentroidRadiusMeters: number; // Max radius for centroid centering in settling
   trendVarianceInflation: number; // Scale factor for variance inflation when reports fall outside anchor circle
   stationaryMahalanobisThreshold: number; // Mahalanobis² threshold: below = stationary update, above = resisted/motion
+  
+  // Retrospective Analysis Tuning
+  retrospectiveMinStationaryDuration: number; // Duration in ms to consider a stop "stable"
+  retrospectiveMaxStationaryRadius: number; // Radius in meters to cluster stable points
 };
 
 /**
@@ -55,6 +59,8 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     maxCentroidRadiusMeters: 10,
     trendVarianceInflation: 20.0,
     stationaryMahalanobisThreshold: 0.2,
+    retrospectiveMinStationaryDuration: 45 * 1000,
+    retrospectiveMaxStationaryRadius: 15,
   },
   car: {
     motionScoreThreshold: 4.0,
@@ -74,6 +80,8 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     maxCentroidRadiusMeters: 15,
     trendVarianceInflation: 20.0,
     stationaryMahalanobisThreshold: 25.0,
+    retrospectiveMinStationaryDuration: 30 * 1000, // Cars stop for shorter times (traffic lights)
+    retrospectiveMaxStationaryRadius: 25, // Cars have larger GPS drift when stationary
   },
 };
 

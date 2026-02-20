@@ -50,6 +50,11 @@ const initialState: StoreState = {
   engineSnapshotsByDevice: {},
   dominantAnchors: new Map() as Map<number, Anchor | null>,
   motionSegments: {},
+  retrospective: {
+    byDevice: new Map(),
+    lastUpdate: 0,
+    isAnalyzing: false,
+  },
 };
 
 export const useStore = create<Store>()(
@@ -60,7 +65,7 @@ export const useStore = create<Store>()(
       // Device/Group Management
       setDevicesFromApi: async (devices: TraccarDevice[]) => {
         const { colorForDevice } = await import("@/ui/color");
-        
+
         const {
           nameMap,
           iconMap,
@@ -400,7 +405,7 @@ export const useStore = create<Store>()(
         const { refs } = state;
         const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition, engineCheckpoints } = refs;
         const { refLat, refLon } = state.ui;
-        
+
         const result = computeProcessedPositions(
           positionsAll,
           processedKeys,
@@ -631,6 +636,85 @@ export const useStore = create<Store>()(
       setMotionSegments: (segments) => {
         set(() => ({
           motionSegments: segments,
+        }));
+      },
+
+      runRetrospectiveAnalysis: () => {
+        const state = get();
+
+        // 1. Debounce: If already analyzing or recently analyzed, skip
+        if (state.retrospective.isAnalyzing) return;
+
+        // Simple debounce: don't run if last update was < 2 seconds ago
+        // This prevents rapid-fire executions during initial data load
+        if (Date.now() - state.retrospective.lastUpdate < 2000) return;
+
+        // Get all device IDs
+        const deviceIds = Object.keys(state.devices).map(id => Number(id));
+        if (deviceIds.length === 0) return;
+
+        const refLat = state.ui.refLat ?? state.refs.firstPosition?.lat ?? null;
+        const refLon = state.ui.refLon ?? state.refs.firstPosition?.lon ?? null;
+        if (refLat === null || refLon === null) return;
+
+        set(prevState => ({
+          retrospective: {
+            ...prevState.retrospective,
+            isAnalyzing: true,
+          }
+        }));
+
+        // Use dynamic import to avoid circular dependencies
+        void (async () => {
+          try {
+            // Add a small delay to let UI render first (yield to main thread)
+            await new Promise(resolve => setTimeout(resolve, 50));
+
+            const { analyzeAllDevices } = await import('@/engine/retrospective');
+            const results = analyzeAllDevices(
+              state.refs.positionsAll,
+              deviceIds,
+              refLat,
+              refLon,
+              state.motionProfiles
+            );
+
+            set(() => ({
+              retrospective: {
+                byDevice: results,
+                lastUpdate: Date.now(),
+                isAnalyzing: false,
+              }
+            }));
+          } catch {
+            set(prevState => ({
+              retrospective: {
+                ...prevState.retrospective,
+                isAnalyzing: false,
+              }
+            }));
+          }
+        })();
+      },
+
+      setRetrospectiveResults: (results) => {
+        set(prevState => ({
+          retrospective: {
+            ...prevState.retrospective,
+            byDevice: results,
+            lastUpdate: Date.now(),
+            isAnalyzing: false,
+          }
+        }));
+      },
+
+      clearRetrospectiveResults: () => {
+        set(prevState => ({
+          retrospective: {
+            byDevice: new Map(),
+            lastUpdate: 0,
+            isAnalyzing: prevState.retrospective.isAnalyzing,
+          }
         }));
       },
     }),
