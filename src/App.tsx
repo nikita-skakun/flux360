@@ -394,7 +394,7 @@ export function App() {
         debugFrame={currentDebugFrame}
         debugAnchors={currentDebugAnchors}
         motionSegments={debugMode && selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
-        retrospectiveMotionSegments={selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
+        retrospectiveMotionSegments={debugMode && selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}

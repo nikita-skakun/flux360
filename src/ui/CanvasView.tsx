@@ -134,35 +134,35 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     },
     hitTestMotionSegment: (px: number, py: number) => {
       if (!motionSegmentsRef.current.length) return null;
-      
+
       const HIT_THRESHOLD = 8;
       let best: { segment: MotionSegment; dist: number; x: number; y: number } | null = null;
-      
+
       for (const { segment, screenPoints } of motionSegmentsRef.current) {
         if (screenPoints.length < 2) continue;
-        
+
         // Simple point-to-segment distance for polyline
         for (let i = 0; i < screenPoints.length - 1; i++) {
           const p1 = screenPoints[i];
-          const p2 = screenPoints[i+1];
+          const p2 = screenPoints[i + 1];
           if (!p1 || !p2) continue;
-          
+
           const x1 = p1[0], y1 = p1[1];
           const x2 = p2[0], y2 = p2[1];
-          
+
           // distance from point (px,py) to line segment (x1,y1)-(x2,y2)
           const A = px - x1;
           const B = py - y1;
           const C = x2 - x1;
           const D = y2 - y1;
-          
+
           const dot = A * C + B * D;
           const len_sq = C * C + D * D;
           let param = -1;
           if (len_sq !== 0) param = dot / len_sq;
-          
+
           let xx, yy;
-          
+
           if (param < 0) {
             xx = x1;
             yy = y1;
@@ -173,11 +173,11 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
             xx = x1 + param * C;
             yy = y1 + param * D;
           }
-          
+
           const dx = px - xx;
           const dy = py - yy;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          
+
           if (dist < HIT_THRESHOLD) {
             if (!best || dist < best.dist) {
               best = { segment, dist: dist, x: xx, y: yy };
@@ -216,7 +216,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         const variance = typeof c.variance === 'number' ? c.variance : 100;
         return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: getColorForDevice(c.device, deviceColors[c.device]) };
       });
-    
+
     // Store processed components for hit testing (indices in drawItems refer to this array)
     processedComponentsRef.current = components.filter(c => !memberDeviceIds?.has(c.device));
 
@@ -341,6 +341,65 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     function render() {
       ctx.clearRect(0, 0, width, height);
 
+      // Draw motion segments FIRST (as background/below markers)
+      motionSegmentsRef.current = [];
+      if (motionSegments.length > 0) {
+        for (const segment of motionSegments) {
+          const screenPoints: [number, number][] = [];
+          for (const point of segment.path) {
+            const sx = width / 2 + (point[0] - anchorX) * localZoom;
+            const sy = height / 2 - (point[1] - anchorY) * localZoom;
+            screenPoints.push([sx, sy]);
+          }
+          motionSegmentsRef.current.push({ segment, screenPoints });
+
+          // Draw the path
+          if (screenPoints.length >= 2) {
+            const isCompleted = segment.endAnchor !== null;
+            const isSelected = selectedMotionSegment?.startTime === segment.startTime &&
+              selectedMotionSegment?.path.length === segment.path.length;
+            const opacity = selectedMotionSegment ? (isSelected ? 1.0 : 0.1) : 0.7;
+
+            // Start: Red (255,0,0)
+            const startColor: [number, number, number] = [255, 0, 0];
+            // End: Green (0,255,0) if completed, else Blue (0,0,255)
+            const endColor: [number, number, number] = isCompleted ? [0, 200, 100] : [0, 100, 255];
+
+            ctx.save();
+            ctx.globalAlpha = opacity;
+            ctx.lineWidth = isSelected ? 5 : 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // Draw segment by segment with interpolated color gradient
+            const totalSegments = Math.max(1, screenPoints.length - 1);
+
+            for (let i = 0; i < screenPoints.length - 1; i++) {
+              const [x1, y1] = screenPoints[i]!;
+              const [x2, y2] = screenPoints[i + 1]!;
+
+              const t1 = i / totalSegments;
+              const t2 = (i + 1) / totalSegments;
+
+              const c1 = interpolateColor(startColor, endColor, t1);
+              const c2 = interpolateColor(startColor, endColor, t2);
+
+              const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
+              gradient.addColorStop(0, c1);
+              gradient.addColorStop(1, c2);
+
+              ctx.beginPath();
+              ctx.strokeStyle = gradient;
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+
+            ctx.restore();
+          }
+        }
+      }
+
       // Draw circle highlight for the selected device (if any)
       for (const item of drawItems) {
         const { x, y, r, color } = item;
@@ -386,25 +445,6 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           } else {
             drawPin(ctx, x, y, item.iconText, color, selectedDeviceId != null && item.device === selectedDeviceId, undefined);
           }
-        }
-      }
-
-      // draw cluster markers (pin with icon and count badge)
-      for (const cl of clustersRef.current) {
-        if (cl.size <= 1) continue;
-        // hide cluster marker if the open chooser overlaps it
-        const { x, y, size, items } = cl;
-        const rep = (selectedDeviceId != null ? items.find(it => it.device === selectedDeviceId) : undefined) ?? items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-        if (shouldHideAt(cl.x, cl.y)) {
-          ctx.save();
-          ctx.globalAlpha = pinOpacity;
-          ctx.fillStyle = rgbaString(rep.color, 1);
-          ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.restore();
-        } else {
-          drawPin(ctx, x, y, rep.iconText, rep.color, selectedDeviceId != null && rep.device === selectedDeviceId, String(size));
         }
       }
 
@@ -516,62 +556,22 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         }
       }
 
-      // Draw motion segments
-      motionSegmentsRef.current = [];
-      if (motionSegments.length > 0) {
-        for (const segment of motionSegments) {
-          const screenPoints: [number, number][] = [];
-          for (const point of segment.path) {
-            const sx = width / 2 + (point[0] - anchorX) * localZoom;
-            const sy = height / 2 - (point[1] - anchorY) * localZoom;
-            screenPoints.push([sx, sy]);
-          }
-          motionSegmentsRef.current.push({ segment, screenPoints });
-
-          // Draw the path
-          if (screenPoints.length >= 2) {
-            const isCompleted = segment.endAnchor !== null;
-            const isSelected = selectedMotionSegment?.startTime === segment.startTime && 
-              selectedMotionSegment?.path.length === segment.path.length;
-            const opacity = selectedMotionSegment ? (isSelected ? 1.0 : 0.1) : 0.7;
-            
-            // Start: Red (255,0,0)
-            const startColor: [number, number, number] = [255, 0, 0];
-            // End: Green (0,255,0) if completed, else Blue (0,0,255)
-            const endColor: [number, number, number] = isCompleted ? [0, 200, 100] : [0, 100, 255];
-
-            ctx.save();
-            ctx.globalAlpha = opacity;
-            ctx.lineWidth = isSelected ? 5 : 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            
-            // Draw segment by segment with interpolated color gradient
-            const totalSegments = Math.max(1, screenPoints.length - 1);
-            
-            for (let i = 0; i < screenPoints.length - 1; i++) {
-              const [x1, y1] = screenPoints[i]!;
-              const [x2, y2] = screenPoints[i+1]!;
-              
-              const t1 = i / totalSegments;
-              const t2 = (i + 1) / totalSegments;
-              
-              const c1 = interpolateColor(startColor, endColor, t1);
-              const c2 = interpolateColor(startColor, endColor, t2);
-              
-              const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-              gradient.addColorStop(0, c1);
-              gradient.addColorStop(1, c2);
-              
-              ctx.beginPath();
-              ctx.strokeStyle = gradient;
-              ctx.moveTo(x1, y1);
-              ctx.lineTo(x2, y2);
-              ctx.stroke();
-            }
-            
-            ctx.restore();
-          }
+      // draw cluster markers (pin with icon and count badge)
+      for (const cl of clustersRef.current) {
+        if (cl.size <= 1) continue;
+        // hide cluster marker if the open chooser overlaps it
+        const { x, y, size, items } = cl;
+        const rep = (selectedDeviceId != null ? items.find(it => it.device === selectedDeviceId) : undefined) ?? items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        if (shouldHideAt(cl.x, cl.y)) {
+          ctx.save();
+          ctx.globalAlpha = pinOpacity;
+          ctx.fillStyle = rgbaString(rep.color, 1);
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else {
+          drawPin(ctx, x, y, rep.iconText, rep.color, selectedDeviceId != null && rep.device === selectedDeviceId, String(size));
         }
       }
     }
