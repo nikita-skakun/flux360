@@ -58,7 +58,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
   });
 
   return (
-    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 mt-2">
+    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0">
       <div className="flex items-start justify-between mb-2">
         <div className="text-sm font-medium">
           {isRetro ? 'Retrospective Segment' : 'Motion Segment'}

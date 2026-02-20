@@ -262,6 +262,11 @@ export function App() {
     else setDebugFrameIndex(Math.max(0, frames.length - 1));
   }, [selectedDeviceId, debugMode]);
 
+  // Clear selected motion segment when device changes
+  useEffect(() => {
+    setSelectedMotionSegment(null);
+  }, [selectedDeviceId]);
+
   // current debug frame to render on the map (if any)
   const currentDebugFrame = useMemo(() => {
     if (selectedDeviceId == null || !debugMode) return null;
@@ -407,7 +412,9 @@ export function App() {
           setSelectedDeviceId(id);
         }}
         onSelectMotionSegment={(segment) => {
-          if (debugMode) setSelectedMotionSegment(segment);
+          if (debugMode) {
+            setSelectedMotionSegment(segment);
+          }
         }}
         memberDeviceIds={memberDeviceIds}
         deviceNames={deviceNames}
