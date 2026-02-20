@@ -125,6 +125,8 @@ export function App() {
   const setIsSidePanelOpen = useStore(state => state.setIsSidePanelOpen);
   const debugMode = useStore(state => state.ui.debugMode);
   const setDebugMode = useStore(state => state.setDebugMode);
+  const useRetrospective = useStore(state => state.ui.useRetrospective);
+  const setUseRetrospective = useStore(state => state.setUseRetrospective);
   const debugFrameIndex = useStore(state => state.ui.debugFrameIndex);
   const setDebugFrameIndex = useStore(state => state.setDebugFrameIndex);
   const editingTarget = useStore(state => state.ui.editingTarget);
@@ -386,7 +388,7 @@ export function App() {
         debugAnchors={currentDebugAnchors}
         motionSegments={selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
         retrospectiveMotionSegments={selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
-        useRetrospective={true}
+        useRetrospective={useRetrospective}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
@@ -426,6 +428,8 @@ export function App() {
               onReconnect={reconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
+              useRetrospective={useRetrospective}
+              setUseRetrospective={setUseRetrospective}
             />
 
             <DeviceOverlay

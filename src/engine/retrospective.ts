@@ -2,13 +2,6 @@ import { degreesToMeters } from "@/util/geo";
 import type { NormalizedPosition, Vec2, MotionProfileName } from "@/types";
 import { MOTION_PROFILES } from "./motionDetector";
 
-export type RetrospectiveAnchor = {
-  timestamp: number;
-  mean: Vec2;
-  variance: number;
-  type: "stable" | "moving" | "settling";
-};
-
 export type RetrospectiveMotionSegment = {
   startTime: number;
   endTime: number;
@@ -19,7 +12,6 @@ export type RetrospectiveMotionSegment = {
 };
 
 export type RetrospectiveResult = {
-  anchorTimeline: RetrospectiveAnchor[];
   motionSegments: RetrospectiveMotionSegment[];
 };
 
@@ -44,19 +36,12 @@ function toMeterPoint(
 /**
  * Analyze motion retrospectively to detect TRUE motion boundaries.
  * 
- * PROBLEM: Real-time engine detects motion reactively - it needs evidence before 
- * declaring motion. This creates lag. The motion segment shows the settling period 
- * (B→D) instead of the actual transition (A→B).
- * 
- * SOLUTION: Look at position history and identify when device ACTUALLY moved.
- * - Find the last stable point before the jump (point A)
- * - Find the first point at the new location (point B) 
- * - Motion = transition from A to B (not the settling after B)
- * 
- * KEY DIFFERENCE FROM REAL-TIME:
- * - Real-time: Motion starts when outlier buffer triggers (after seeing multiple outliers)
- * - Retrospective: Motion starts from last stable point BEFORE the jump
- * - This captures the actual transition, not just the settling period
+ * Strategy:
+ * 1. Identify "Stable Intervals" (stops) where the device stays within a small radius 
+ *    for a minimum duration.
+ * 2. Everything between these Stable Intervals is considered a "Motion Segment".
+ * 3. This prevents fragmentation caused by brief stops (traffic lights, waiting) 
+ *    which often break motion segments in real-time analysis.
  */
 export function analyzeMotion(
   positions: NormalizedPosition[],
@@ -65,192 +50,187 @@ export function analyzeMotion(
   motionProfile: MotionProfileName = "person"
 ): RetrospectiveResult {
   if (positions.length === 0) {
-    return { anchorTimeline: [], motionSegments: [] };
+    return { motionSegments: [] };
   }
 
   // Sort by timestamp
   const sorted = [...positions].sort((a, b) => a.timestamp - b.timestamp);
   const profile = MOTION_PROFILES[motionProfile];
   
-  // Use MORE AGGRESSIVE thresholds for retrospective detection
-  // We can afford false positives because we have full context
-  const motionThreshold = profile.stationaryMahalanobisThreshold * 0.5; // Half the threshold = more sensitive
-  const minMotionDistance = 10; // Must move at least 10 meters to count as motion
+  // Tuning parameters from profile
+  const minStationaryDuration = profile.retrospectiveMinStationaryDuration;
+  const maxStationaryRadius = profile.retrospectiveMaxStationaryRadius;
   
-  const anchorTimeline: RetrospectiveAnchor[] = [];
-  const motionSegments: RetrospectiveMotionSegment[] = [];
-  
-  // Track stable periods and transitions
-  let currentStableCenter: Vec2 | null = null;
-  let currentStableVariance = 0;
-  let currentStableIndices: number[] = [];
-  let lastStablePoint: { timestamp: number; position: Vec2; index: number } | null = null;
-  
-  // Convert all to meter points first
   const meterPoints = sorted.map((p, idx) => ({ ...toMeterPoint(p, refLat, refLon), index: idx }));
+  const len = meterPoints.length;
   
-  for (let i = 0; i < meterPoints.length; i++) {
-    const point = meterPoints[i]!;
+  // Step 1: Identify Stable Intervals
+  type StableInterval = {
+    startIndex: number;
+    endIndex: number;
+    center: Vec2;
+    startTime: number;
+    endTime: number;
+  };
+  
+  const stableIntervals: StableInterval[] = [];
+  
+  let i = 0;
+  while (i < len) {
+    // Start a potential cluster
+    const startPoint = meterPoints[i]!;
+    let j = i + 1;
+    let centroidX = startPoint.mean[0];
+    let centroidY = startPoint.mean[1];
+    let count = 1;
     
-    if (currentStableCenter === null) {
-      // First point - start first stable period
-      currentStableCenter = [point.mean[0], point.mean[1]];
-      currentStableVariance = point.variance;
-      currentStableIndices = [i];
+    // Expand cluster as long as it fits in radius
+    while (j < len) {
+      const nextPoint = meterPoints[j]!;
       
-      anchorTimeline.push({
-        timestamp: point.timestamp,
-        mean: [point.mean[0], point.mean[1]],
-        variance: point.variance,
-        type: "stable",
-      });
-      continue;
+      // Check distance to current running centroid
+      const dist = distanceMeters([centroidX / count, centroidY / count], nextPoint.mean);
+      
+      if (dist > maxStationaryRadius) {
+        break; // Cluster broken
+      }
+      
+      // Update centroid
+      centroidX += nextPoint.mean[0];
+      centroidY += nextPoint.mean[1];
+      count++;
+      j++;
     }
     
-    // Check if this point fits with current stable cluster
-    const dx = point.mean[0] - currentStableCenter[0];
-    const dy = point.mean[1] - currentStableCenter[1];
-    const distSq = dx * dx + dy * dy;
-    const mahal2 = distSq / Math.max(currentStableVariance + point.variance, 1e-6);
+    // Check if this cluster qualifies as a Stable Interval
+    const startTime = startPoint.timestamp;
+    const endTime = meterPoints[j - 1]!.timestamp;
+    const duration = endTime - startTime;
     
-    if (mahal2 < motionThreshold) {
-      // Point fits with current stable cluster - update centroid
-      const n = currentStableIndices.length;
-      currentStableCenter[0] = (currentStableCenter[0] * n + point.mean[0]) / (n + 1);
-      currentStableCenter[1] = (currentStableCenter[1] * n + point.mean[1]) / (n + 1);
-      currentStableVariance = (currentStableVariance * n + point.variance) / (n + 1);
-      currentStableIndices.push(i);
-      
-      // Update last stable point (use the last point in the cluster as the "exit" point)
-      lastStablePoint = {
-        timestamp: point.timestamp,
-        position: [point.mean[0], point.mean[1]],
-        index: i,
-      };
-      
-      anchorTimeline.push({
-        timestamp: point.timestamp,
-        mean: [currentStableCenter[0], currentStableCenter[1]],
-        variance: currentStableVariance,
-        type: "stable",
+    // Qualifies if it lasts long enough OR if it's the very first/last point (anchors)
+    const isStartOrEnd = (i === 0) || (j === len);
+    const isLongEnough = duration >= minStationaryDuration;
+    
+    if (isLongEnough || (isStartOrEnd && duration > 0)) {
+      stableIntervals.push({
+        startIndex: i,
+        endIndex: j - 1,
+        center: [centroidX / count, centroidY / count],
+        startTime,
+        endTime
       });
+      i = j; // Advance past this cluster
     } else {
-      // Point is outside current stable cluster - we're in motion or at a new location
-      
-      // Check if we've accumulated enough "outlier" points to confirm this is a new location
-      // Look ahead to see if future points cluster here
-      const lookAheadWindow = 3;
-      const futurePoints = meterPoints.slice(i, Math.min(i + lookAheadWindow, meterPoints.length));
-      
-      // Calculate centroid of future points
-      if (futurePoints.length >= 2) {
-        let futureCentroidX = 0;
-        let futureCentroidY = 0;
-        for (const fp of futurePoints) {
-          futureCentroidX += fp.mean[0];
-          futureCentroidY += fp.mean[1];
-        }
-        futureCentroidX /= futurePoints.length;
-        futureCentroidY /= futurePoints.length;
-        
-        const distFromOld = distanceMeters(currentStableCenter, [futureCentroidX, futureCentroidY]);
-        
-        // If future points are far from old location and cluster together, this is a real move
-        let futureVariance = 0;
-        for (const fp of futurePoints) {
-          const fdx = fp.mean[0] - futureCentroidX;
-          const fdy = fp.mean[1] - futureCentroidY;
-          futureVariance += fdx * fdx + fdy * fdy;
-        }
-        futureVariance /= futurePoints.length;
-        
-        const isNewLocation = distFromOld > minMotionDistance && futureVariance < 1000; // Clustered
-        
-        if (isNewLocation && lastStablePoint) {
-          // This is a real transition!
-          // Motion starts from lastStablePoint (last point at old location)
-          // NOT from when we first detected the outlier
-          
-          // Build path from last stable point through transition to new stable point
-          const path: Vec2[] = [lastStablePoint.position];
-          for (let j = lastStablePoint.index + 1; j <= i; j++) {
-            const p = meterPoints[j];
-            if (p) {
-              path.push([p.mean[0], p.mean[1]]);
-            }
-          }
-          
-          motionSegments.push({
-            startTime: lastStablePoint.timestamp,
-            endTime: point.timestamp,
-            startPosition: lastStablePoint.position,
-            endPosition: [point.mean[0], point.mean[1]],
-            path,
-            confidence: 0.9, // High confidence for retrospective
-          });
-          
-          // Start new stable period at new location
-          currentStableCenter = [futureCentroidX, futureCentroidY];
-          currentStableVariance = futureVariance;
-          currentStableIndices = [i];
-          lastStablePoint = {
-            timestamp: point.timestamp,
-            position: [point.mean[0], point.mean[1]],
-            index: i,
-          };
-          
-          anchorTimeline.push({
-            timestamp: point.timestamp,
-            mean: [futureCentroidX, futureCentroidY],
-            variance: futureVariance,
-            type: "stable",
-          });
-          
-          // Skip ahead past the points we already processed
-          i += futurePoints.length - 1;
-        } else {
-          // Not a clear transition - mark as moving
-          anchorTimeline.push({
-            timestamp: point.timestamp,
-            mean: [point.mean[0], point.mean[1]],
-            variance: point.variance,
-            type: "moving",
-          });
-        }
-      } else {
-        // Not enough future points to determine - mark as moving
-        anchorTimeline.push({
-          timestamp: point.timestamp,
-          mean: [point.mean[0], point.mean[1]],
-          variance: point.variance,
-          type: "moving",
-        });
-      }
+      i++; // This point is part of motion, try starting cluster from next point
     }
   }
   
-  return { anchorTimeline, motionSegments };
+  // Merge adjacent stable intervals if they are close (optimization)
+  // This handles cases where a cluster drifted slightly but is effectively the same stop
+  const mergedIntervals: StableInterval[] = [];
+  if (stableIntervals.length > 0) {
+    let current = stableIntervals[0]!;
+    for (let k = 1; k < stableIntervals.length; k++) {
+      const next = stableIntervals[k]!;
+      const dist = distanceMeters(current.center, next.center);
+      const timeGap = next.startTime - current.endTime;
+      
+      // Merge if spatially close AND temporally close
+      if (dist < maxStationaryRadius && timeGap < 30000) {
+        // Merge
+        const newCount = (current.endIndex - current.startIndex + 1) + (next.endIndex - next.startIndex + 1);
+        const currentSumX = current.center[0] * (current.endIndex - current.startIndex + 1);
+        const currentSumY = current.center[1] * (current.endIndex - current.startIndex + 1);
+        const nextSumX = next.center[0] * (next.endIndex - next.startIndex + 1);
+        const nextSumY = next.center[1] * (next.endIndex - next.startIndex + 1);
+        
+        current = {
+          startIndex: current.startIndex, // Keep start
+          endIndex: next.endIndex,     // Extend end
+          center: [(currentSumX + nextSumX) / newCount, (currentSumY + nextSumY) / newCount],
+          startTime: current.startTime,
+          endTime: next.endTime
+        };
+      } else {
+        mergedIntervals.push(current);
+        current = next;
+      }
+    }
+    mergedIntervals.push(current);
+  }
+  
+  // Step 2: Generate Motion Segments between Stable Intervals
+  const motionSegments: RetrospectiveMotionSegment[] = [];
+  
+  for (let k = 0; k < mergedIntervals.length - 1; k++) {
+    const from = mergedIntervals[k]!;
+    const to = mergedIntervals[k + 1]!;
+    
+    // Motion is typically between from.endIndex and to.startIndex
+    // But we include the anchor centers as start/end points for visual continuity
+    
+    const segmentStartIdx = from.endIndex;
+    const segmentEndIdx = to.startIndex;
+    
+    // Only create segment if there is actual time/distance gap
+    if (segmentEndIdx > segmentStartIdx) {
+      const path: Vec2[] = [from.center]; // Start at anchor center
+      
+      // Add all points in between
+      for (let idx = segmentStartIdx; idx <= segmentEndIdx; idx++) {
+         // Optimization: Simplify path? No, keep full fidelity for now.
+         // Maybe skip points that are essentially same as previous to save memory
+         path.push(meterPoints[idx]!.mean);
+      }
+      
+      path.push(to.center); // End at anchor center
+      
+      motionSegments.push({
+        startTime: from.endTime,
+        endTime: to.startTime,
+        startPosition: from.center,
+        endPosition: to.center,
+        path,
+        confidence: 1.0
+      });
+    }
+  }
+  
+  // Handle case: Moving at the very end (Last interval is not the last point)
+  if (mergedIntervals.length > 0) {
+    const lastInterval = mergedIntervals[mergedIntervals.length - 1]!;
+    if (lastInterval.endIndex < len - 1) {
+      // We have trailing motion
+      const path: Vec2[] = [lastInterval.center];
+      for (let idx = lastInterval.endIndex; idx < len; idx++) {
+        path.push(meterPoints[idx]!.mean);
+      }
+      
+      motionSegments.push({
+        startTime: lastInterval.endTime,
+        endTime: meterPoints[len - 1]!.timestamp,
+        startPosition: lastInterval.center,
+        endPosition: meterPoints[len - 1]!.mean,
+        path,
+        confidence: 0.8 // Incomplete
+      });
+    }
+  } else if (len > 1) {
+    // No stable intervals at all? Whole thing is one motion.
+    const path = meterPoints.map(p => p.mean);
+    motionSegments.push({
+      startTime: meterPoints[0]!.timestamp,
+      endTime: meterPoints[len - 1]!.timestamp,
+      startPosition: meterPoints[0]!.mean,
+      endPosition: meterPoints[len - 1]!.mean,
+      path,
+      confidence: 0.5
+    });
+  }
+  
+  return { motionSegments };
 }
 
-/**
- * Run retrospective analysis for a single device.
- * Wrapper around analyzeMotion with device filtering.
- */
-export function analyzeDeviceMotion(
-  deviceId: number,
-  allPositions: NormalizedPosition[],
-  refLat: number,
-  refLon: number,
-  motionProfile: MotionProfileName = "person"
-): RetrospectiveResult {
-  const devicePositions = allPositions.filter((p) => p.device === deviceId);
-  return analyzeMotion(devicePositions, refLat, refLon, motionProfile);
-}
-
-/**
- * Run retrospective analysis for all devices.
- * Returns a map of deviceId to retrospective results.
- */
 export function analyzeAllDevices(
   positions: NormalizedPosition[],
   deviceIds: number[],
@@ -259,12 +239,21 @@ export function analyzeAllDevices(
   motionProfiles: Record<number, MotionProfileName>
 ): Map<number, RetrospectiveResult> {
   const results = new Map<number, RetrospectiveResult>();
+  
+  // Pre-filter positions by device to avoid repeated filters in analyzeDeviceMotion
+  const positionsByDevice = new Map<number, NormalizedPosition[]>();
+  for (const p of positions) {
+    if (!positionsByDevice.has(p.device)) {
+      positionsByDevice.set(p.device, []);
+    }
+    positionsByDevice.get(p.device)!.push(p);
+  }
 
   for (const deviceId of deviceIds) {
     const profile = motionProfiles[deviceId] ?? "person";
-    const result = analyzeDeviceMotion(
-      deviceId,
-      positions,
+    const devicePositions = positionsByDevice.get(deviceId) ?? [];
+    const result = analyzeMotion(
+      devicePositions,
       refLat,
       refLon,
       profile

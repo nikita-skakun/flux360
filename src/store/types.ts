@@ -61,6 +61,7 @@ export type StoreState = {
     refLon: number | null;
     worldBounds: WorldBounds | null;
     editingTarget: { type: 'device' | 'group', id: number } | null;
+    useRetrospective: boolean;
   };
 
   // Refs slice (reactive)
@@ -122,6 +123,7 @@ export type StoreActions = {
   setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
   setDominantAnchors: (anchors: Map<number, Anchor | null>) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
+  setUseRetrospective: (value: boolean) => void;
 
   // Motion segments
   setMotionSegments: (segments: Record<number, MotionSegment[]>) => void;

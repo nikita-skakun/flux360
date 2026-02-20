@@ -37,6 +37,7 @@ const initialState: StoreState = {
     refLon: null,
     worldBounds: null,
     editingTarget: null,
+    useRetrospective: true,
   },
   refs: {
     deviceToGroupsMap: new Map(),
@@ -633,6 +634,15 @@ export const useStore = create<Store>()(
         }));
       },
 
+      setUseRetrospective: (value: boolean) => {
+        set(state => ({
+          ui: {
+            ...state.ui,
+            useRetrospective: value,
+          }
+        }));
+      },
+
       setMotionSegments: (segments) => {
         set(() => ({
           motionSegments: segments,
@@ -641,6 +651,13 @@ export const useStore = create<Store>()(
 
       runRetrospectiveAnalysis: () => {
         const state = get();
+
+        // 1. Debounce: If already analyzing or recently analyzed, skip
+        if (state.retrospective.isAnalyzing) return;
+        
+        // Simple debounce: don't run if last update was < 2 seconds ago
+        // This prevents rapid-fire executions during initial data load
+        if (Date.now() - state.retrospective.lastUpdate < 2000) return;
 
         // Get all device IDs
         const deviceIds = Object.keys(state.devices).map(id => Number(id));
@@ -660,6 +677,9 @@ export const useStore = create<Store>()(
         // Use dynamic import to avoid circular dependencies
         void (async () => {
           try {
+            // Add a small delay to let UI render first (yield to main thread)
+            await new Promise(resolve => setTimeout(resolve, 50));
+
             const { analyzeAllDevices } = await import('@/engine/retrospective');
             const results = analyzeAllDevices(
               state.refs.positionsAll,

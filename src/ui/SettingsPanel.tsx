@@ -24,6 +24,8 @@ type Props = {
   onReconnect: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
+  useRetrospective: boolean;
+  setUseRetrospective: (value: boolean) => void;
 };
 
 export const SettingsPanel = React.memo(function SettingsPanel({
@@ -44,6 +46,8 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   onReconnect,
   debugMode,
   setDebugMode,
+  useRetrospective,
+  setUseRetrospective,
 }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -115,6 +119,19 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               />
               <Label htmlFor="debug-mode" className="text-xs font-medium cursor-pointer">
                 Debug
+              </Label>
+            </div>
+
+            <Separator orientation="vertical" className="h-4" />
+
+            <div className="flex items-center gap-2">
+              <Switch
+                id="use-retrospective"
+                checked={useRetrospective}
+                onCheckedChange={setUseRetrospective}
+              />
+              <Label htmlFor="use-retrospective" className="text-xs font-medium cursor-pointer">
+                Smart Motion
               </Label>
             </div>
 

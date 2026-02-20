@@ -45,13 +45,6 @@ export type MotionSegment = {
 };
 
 // Retrospective analysis types
-export type RetrospectiveAnchor = {
-  timestamp: number;
-  mean: Vec2;
-  variance: number;
-  type: 'stable' | 'moving' | 'settling';
-};
-
 export type RetrospectiveMotionSegment = {
   startTime: number;
   endTime: number;
@@ -62,6 +55,5 @@ export type RetrospectiveMotionSegment = {
 };
 
 export type RetrospectiveResult = {
-  anchorTimeline: RetrospectiveAnchor[];
   motionSegments: RetrospectiveMotionSegment[];
 };
