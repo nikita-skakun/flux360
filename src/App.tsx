@@ -5,9 +5,9 @@ import { useTraccarConnection } from "./hooks/useTraccarConnection";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import UnifiedEditModal from "./ui/UnifiedEditModal";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment } from "./types";
+import type { MotionSegment, RetrospectiveMotionSegment, Vec2 } from "./types";
+import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
   const setRefLat = useStore(state => state.setRefLat);
@@ -279,11 +279,11 @@ export function App() {
     if (selectedDeviceId == null || !debugMode) return [];
     const eng = enginesRef.get(selectedDeviceId);
     if (!eng) return [];
-    type AnchorView = { mean: [number, number]; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number };
+    type AnchorView = { mean: Vec2; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number };
     const anchors: AnchorView[] = [];
     const pushAnchor = (a: typeof eng.activeAnchor, type: AnchorView["type"]) => {
       if (!a) return;
-      anchors.push({ mean: [a.mean[0], a.mean[1]], variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
+      anchors.push({ mean: a.mean, variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
     };
     pushAnchor(eng.activeAnchor, "active");
     for (const a of eng.closedAnchors) pushAnchor(a, "closed");

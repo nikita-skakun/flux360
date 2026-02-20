@@ -1,6 +1,7 @@
 import { Anchor } from "./anchor";
-import { distanceMeters, directionFromPoints, computeCentroid, metersToDegrees } from "@/util/geo";
+import { distanceMeters, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
+import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
 import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
@@ -41,8 +42,8 @@ export type DebugFrame = {
   motionTimeFactor: number | null;
   motionSinglePointOverride: boolean | null;
   anchorVarianceScale: number | null;
-  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; variance: number; };
-  anchor: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  measurement: { lat: number; lon: number; accuracy: number; mean: Vec2; variance: number; };
+  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
   trendSeparation: number | null;
@@ -111,8 +112,9 @@ export class Engine {
       const p1 = path[i - 1]!;
       const p2 = path[i]!;
       // Convert back to lat/lon and use haversine for accurate distance
-      const geo1 = metersToDegrees(p1[0], p1[1], this.refLat, this.refLon);
-      const geo2 = metersToDegrees(p2[0], p2[1], this.refLat, this.refLon);
+      const cs = new ProjectedCoordinateSystem(this.refLat, this.refLon);
+      const geo1 = cs.unproject(p1[0], p1[1]);
+      const geo2 = cs.unproject(p2[0], p2[1]);
       total += this.haversineDistance(geo1.lat, geo1.lon, geo2.lat, geo2.lon);
     }
     return total;
@@ -123,8 +125,8 @@ export class Engine {
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
@@ -149,7 +151,7 @@ export class Engine {
     // Random directions suggest stationary/noisy movement rather than coherent travel, qualifying for settling.
     // Threshold ensures pairs aren't too aligned (e.g., dot < threshold means uncorrelated).
     if (points.length < 2) return false;
-    const directions: [number, number][] = [];
+    const directions: Vec2[] = [];
     for (let i = 0; i < points.length - 1; i++) {
       const p1 = points[i];
       const p2 = points[i + 1];
@@ -175,8 +177,9 @@ export class Engine {
 
   private isCentroidCentered(points: DevicePoint[], maxRadius: number): boolean {
     const centroid = computeCentroid(points.map(p => p.mean));
+    const radiusSquared = maxRadius * maxRadius;
     for (const p of points) {
-      if (distanceMeters(centroid, p.mean) > maxRadius) return false;
+      if (distanceSquared(centroid, p.mean) > radiusSquared) return false;
     }
     return true;
   }

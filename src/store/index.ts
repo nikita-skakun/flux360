@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
+import { ProjectedCoordinateSystem } from '@/util/ProjectedCoordinateSystem';
 import { rgbToHex } from '@/ui/color';
 import type { Anchor } from '@/engine/anchor';
-import type { GroupDevice, MotionProfileName, DevicePoint, NormalizedPosition, WorldBounds } from '@/types';
+import type { GroupDevice, MotionProfileName, DevicePoint, WorldBounds, NormalizedPosition } from '@/types';
 import type { Store, StoreState } from './types';
 import type { TraccarDevice } from '@/api/devices';
 
@@ -406,6 +407,24 @@ export const useStore = create<Store>()(
         const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition, engineCheckpoints } = refs;
         const { refLat, refLon } = state.ui;
 
+        // Determine effective reference point
+        let effectiveRefLat = refLat;
+        let effectiveRefLon = refLon;
+        if (effectiveRefLat == null || effectiveRefLon == null) {
+          if (firstPosition) {
+            effectiveRefLat = firstPosition.lat;
+            effectiveRefLon = firstPosition.lon;
+          } else if (positionsAll.length > 0) {
+            effectiveRefLat = positionsAll[0]?.lat ?? 0;
+            effectiveRefLon = positionsAll[0]?.lon ?? 0;
+          } else {
+            effectiveRefLat = 0;
+            effectiveRefLon = 0;
+          }
+        }
+
+        const coordinateSystem = new ProjectedCoordinateSystem(effectiveRefLat, effectiveRefLon);
+
         const result = computeProcessedPositions(
           positionsAll,
           processedKeys,
@@ -415,8 +434,7 @@ export const useStore = create<Store>()(
           engineCheckpoints,
           groupIds,
           state.motionProfiles,
-          refLat,
-          refLon,
+          coordinateSystem,
           firstPosition
         );
 

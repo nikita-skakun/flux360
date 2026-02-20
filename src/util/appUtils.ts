@@ -1,7 +1,7 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
-import { metersToDegrees } from "./geo";
 import type { Anchor } from "@/engine/anchor";
-import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment } from "@/types";
+import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2 } from "@/types";
+import type { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
 
 export function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -11,10 +11,18 @@ export function measurementVarianceFromAccuracy(accuracyMeters: number) {
   return accuracyMeters * accuracyMeters;
 }
 
-export function createDevicePoint(mean: [number, number], variance: number, timestamp: number, deviceId: number, refLat: number | null, refLon: number | null, anchorAgeMs: number, confidence: number): DevicePoint {
+export function createDevicePoint(
+  mean: Vec2,
+  variance: number,
+  timestamp: number,
+  deviceId: number,
+  lat: number,
+  lon: number,
+  anchorAgeMs: number,
+  confidence: number
+): DevicePoint {
   const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, variance))));
-  const { lat: compLat, lon: compLon } = metersToDegrees(mean[0], mean[1], refLat ?? 0, refLon ?? 0);
-  return { mean, variance, timestamp, device: deviceId, lat: compLat, lon: compLon, accuracy: accuracyVal, anchorAgeMs, confidence };
+  return { mean, variance, timestamp, device: deviceId, lat, lon, accuracy: accuracyVal, anchorAgeMs, confidence };
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -23,8 +31,7 @@ export function buildEngineSnapshotsFromByDevice(
   groupIdsRef: Set<number>,
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
-  refLat: number | null,
-  refLon: number | null,
+  coordinateSystem: ProjectedCoordinateSystem,
   positionsAll: NormalizedPosition[]
 ): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null>; motionSegments: Record<number, MotionSegment[]> } {
   try {
@@ -81,7 +88,9 @@ export function buildEngineSnapshotsFromByDevice(
             }
           }
 
-          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, refLat ?? 0, refLon ?? 0, anchorAgeMs, snapshot.activeConfidence);
+          // Convert anchor mean to lat/lon using coordinate system
+          const { lat, lon } = coordinateSystem.unproject(snapshot.activeAnchor.mean[0], snapshot.activeAnchor.mean[1]);
+          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, lat, lon, anchorAgeMs, snapshot.activeConfidence);
           currentSnapshots[dId] = [point];
         } else {
           currentSnapshots[Number(deviceId)] = [];

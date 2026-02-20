@@ -1,12 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
-import { metersToDegrees } from "@/util/geo";
 import { Pencil, X } from "lucide-react";
+import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
 import { Slider } from "@/components/ui/slider";
+import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React from "react";
 import type { DevicePoint } from "@/types";
-import { useTimeAgo } from "@/hooks/useTimeAgo";
 
 type Props = {
   selectedDeviceId: number | null;
@@ -168,7 +168,7 @@ function DeviceOverlayComponent({
               {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
               <div>Anchor start: {chosenFrame.anchor?.startTimestamp != null ? humanDurationSince(chosenFrame.anchor.startTimestamp) : '—'}</div>
               <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
-              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const d = metersToDegrees(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1], refLat ?? 0, refLon ?? 0); return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`; })()}</div>
+              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const cs = new ProjectedCoordinateSystem(refLat ?? 0, refLon ?? 0); const { lat, lon } = cs.unproject(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1]); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
               <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
             </div>
           ) : null}

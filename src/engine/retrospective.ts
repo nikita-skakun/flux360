@@ -1,6 +1,7 @@
-import { degreesToMeters } from "@/util/geo";
-import type { NormalizedPosition, Vec2, MotionProfileName } from "@/types";
+import { distanceSquared } from "@/util/geo";
 import { MOTION_PROFILES } from "./motionDetector";
+import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import type { NormalizedPosition, Vec2, MotionProfileName } from "@/types";
 
 export type RetrospectiveMotionSegment = {
   startTime: number;
@@ -15,6 +16,7 @@ export type RetrospectiveResult = {
   motionSegments: RetrospectiveMotionSegment[];
 };
 
+// Local distanceMeters is still needed for computePathExtent and actual distance in path length
 function distanceMeters(a: Vec2, b: Vec2): number {
   const dx = a[0] - b[0];
   const dy = a[1] - b[1];
@@ -23,7 +25,7 @@ function distanceMeters(a: Vec2, b: Vec2): number {
 
 function computePathExtent(points: Vec2[]): number {
   if (points.length < 2) return 0;
-  
+
   let cx = 0;
   let cy = 0;
   for (const p of points) {
@@ -32,13 +34,13 @@ function computePathExtent(points: Vec2[]): number {
   }
   cx /= points.length;
   cy /= points.length;
-  
+
   let maxDist = 0;
   for (const p of points) {
     const d = distanceMeters([cx, cy], p);
     if (d > maxDist) maxDist = d;
   }
-  
+
   return maxDist * 2;
 }
 
@@ -47,7 +49,8 @@ function toMeterPoint(
   refLat: number,
   refLon: number
 ): { mean: Vec2; timestamp: number; accuracy: number } {
-  const { x, y } = degreesToMeters(p.lat, p.lon, refLat, refLon);
+  const cs = new ProjectedCoordinateSystem(refLat, refLon);
+  const [x, y] = cs.project(p.lat, p.lon);
   return { mean: [x, y], timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
@@ -71,10 +74,10 @@ export function analyzeMotion(
   const profile = MOTION_PROFILES[motionProfile];
   const minStationaryDuration = profile.retrospectiveMinStationaryDuration;
   const maxStationaryRadius = profile.retrospectiveMaxStationaryRadius;
-  
+
   const meterPoints = sorted.map((p, idx) => ({ ...toMeterPoint(p, refLat, refLon), index: idx }));
   const len = meterPoints.length;
-  
+
   type StableInterval = {
     startIndex: number;
     endIndex: number;
@@ -83,9 +86,9 @@ export function analyzeMotion(
     endTime: number;
     avgAccuracy: number;
   };
-  
+
   const stableIntervals: StableInterval[] = [];
-  
+
   let i = 0;
   while (i < len) {
     const startPoint = meterPoints[i]!;
@@ -94,42 +97,44 @@ export function analyzeMotion(
     let centroidY = startPoint.mean[1];
     let sumAcc = startPoint.accuracy;
     let count = 1;
-    
+
     while (j < len) {
       const nextPoint = meterPoints[j]!;
       const currentCentroid: Vec2 = [centroidX / count, centroidY / count];
-      const dist = distanceMeters(currentCentroid, nextPoint.mean);
-      
+      const dist = distanceSquared(currentCentroid, nextPoint.mean);
+
       const dynamicRadius = getDynamicRadius(nextPoint.accuracy, maxStationaryRadius);
-      
-      if (dist > dynamicRadius) {
+      const dynamicRadiusSquared = dynamicRadius * dynamicRadius;
+
+      if (dist > dynamicRadiusSquared) {
         // Outlier tolerance: check if subsequent points return to this cluster
         let returned = false;
         if (j + 1 < len) {
           const pNext = meterPoints[j + 1]!;
-          const dNext = distanceMeters(currentCentroid, pNext.mean);
-          if (dNext <= getDynamicRadius(pNext.accuracy, maxStationaryRadius)) {
+          const dNext = distanceSquared(currentCentroid, pNext.mean);
+          const nextRadius = getDynamicRadius(pNext.accuracy, maxStationaryRadius);
+          if (dNext <= nextRadius * nextRadius) {
             returned = true;
           }
         }
-        
+
         if (!returned) break;
         // If it returned, we treat 'nextPoint' as a noisy point in the stop
       }
-      
+
       centroidX += nextPoint.mean[0];
       centroidY += nextPoint.mean[1];
       sumAcc += nextPoint.accuracy;
       count++;
       j++;
     }
-    
+
     const startTime = startPoint.timestamp;
     const endTime = meterPoints[j - 1]!.timestamp;
     const duration = endTime - startTime;
     const isStartOrEnd = (i === 0) || (j === len);
     const isLongEnough = duration >= minStationaryDuration;
-    
+
     if (isLongEnough || (isStartOrEnd && duration > 0)) {
       stableIntervals.push({
         startIndex: i,
@@ -144,30 +149,31 @@ export function analyzeMotion(
       i++;
     }
   }
-  
+
   const mergedIntervals: StableInterval[] = [];
   if (stableIntervals.length > 0) {
     let current = stableIntervals[0]!;
     for (let k = 1; k < stableIntervals.length; k++) {
       const next = stableIntervals[k]!;
-      const dist = distanceMeters(current.center, next.center);
-      
+      const dist = distanceSquared(current.center, next.center);
+
       const pathPointsBetween: Vec2[] = [];
       for (let idx = current.endIndex + 1; idx < next.startIndex; idx++) {
         pathPointsBetween.push(meterPoints[idx]!.mean);
       }
       const midExtent = computePathExtent(pathPointsBetween);
-      
+
       // Merge if spatially close AND the path between didn't wander too far
       const mergeRadius = Math.max(maxStationaryRadius, (current.avgAccuracy + next.avgAccuracy) * 0.6);
-      
-      if (dist < mergeRadius && midExtent < mergeRadius) {
+      const mergeRadiusSquared = mergeRadius * mergeRadius;
+
+      if (dist < mergeRadiusSquared && midExtent * midExtent < mergeRadiusSquared) {
         const newCount = (current.endIndex - current.startIndex + 1) + (next.endIndex - next.startIndex + 1);
         const currentSumX = current.center[0] * (current.endIndex - current.startIndex + 1);
         const currentSumY = current.center[1] * (current.endIndex - current.startIndex + 1);
         const nextSumX = next.center[0] * (next.endIndex - next.startIndex + 1);
         const nextSumY = next.center[1] * (next.endIndex - next.startIndex + 1);
-        
+
         current = {
           startIndex: current.startIndex,
           endIndex: next.endIndex,
@@ -183,18 +189,18 @@ export function analyzeMotion(
     }
     mergedIntervals.push(current);
   }
-  
+
   const motionSegments: RetrospectiveMotionSegment[] = [];
-  
+
   for (let k = 0; k < mergedIntervals.length - 1; k++) {
     const from = mergedIntervals[k]!;
     const to = mergedIntervals[k + 1]!;
-    
+
     const segmentStartIdx = from.endIndex;
     const segmentEndIdx = to.startIndex;
-    
+
     if (segmentEndIdx <= segmentStartIdx) continue;
-    
+
     const pathPoints: Vec2[] = [];
     let sumAcc = 0;
     for (let idx = segmentStartIdx; idx <= segmentEndIdx; idx++) {
@@ -202,14 +208,14 @@ export function analyzeMotion(
       pathPoints.push(mp.mean);
       sumAcc += mp.accuracy;
     }
-    
+
     const avgAcc = sumAcc / pathPoints.length;
     const extent = computePathExtent(pathPoints);
-    
+
     // Significance check: extent must exceed both fixed radius and accuracy-weighted threshold
     const minExtent = Math.max(maxStationaryRadius, avgAcc * 1.5);
     if (extent < minExtent) continue;
-    
+
     motionSegments.push({
       startTime: from.endTime,
       endTime: to.startTime,
@@ -219,7 +225,7 @@ export function analyzeMotion(
       confidence: 1.0
     });
   }
-  
+
   if (mergedIntervals.length > 0) {
     const lastInterval = mergedIntervals[mergedIntervals.length - 1]!;
     if (lastInterval.endIndex < len - 1) {
@@ -230,11 +236,11 @@ export function analyzeMotion(
         pathPoints.push(mp.mean);
         sumAcc += mp.accuracy;
       }
-      
+
       const avgAcc = sumAcc / pathPoints.length;
       const extent = computePathExtent(pathPoints);
       const minExtent = Math.max(maxStationaryRadius, avgAcc * 1.5);
-      
+
       if (extent >= minExtent) {
         motionSegments.push({
           startTime: lastInterval.endTime,
@@ -250,11 +256,11 @@ export function analyzeMotion(
     const pathPoints = meterPoints.map(p => p.mean);
     let sumAcc = 0;
     for (const mp of meterPoints) sumAcc += mp.accuracy;
-    
+
     const avgAcc = sumAcc / len;
     const extent = computePathExtent(pathPoints);
     const minExtent = Math.max(maxStationaryRadius, avgAcc * 1.5);
-    
+
     if (extent >= minExtent) {
       motionSegments.push({
         startTime: meterPoints[0]!.timestamp,
@@ -266,7 +272,7 @@ export function analyzeMotion(
       });
     }
   }
-  
+
   return { motionSegments };
 }
 
@@ -279,7 +285,7 @@ export function analyzeAllDevices(
 ): Map<number, RetrospectiveResult> {
   const results = new Map<number, RetrospectiveResult>();
   const positionsByDevice = new Map<number, NormalizedPosition[]>();
-  
+
   for (const p of positions) {
     if (!positionsByDevice.has(p.device)) {
       positionsByDevice.set(p.device, []);

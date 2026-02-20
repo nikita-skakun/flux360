@@ -1,7 +1,7 @@
 import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters, type DrawItem, type Cluster } from "@/util/clustering";
 import { getColorForDevice, rgbaString, type Color } from "./color";
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment } from "@/types";
+import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
@@ -31,7 +31,7 @@ export type CanvasViewProps = {
 };
 
 type DebugAnchor = {
-  mean: [number, number];
+  mean: Vec2;
   variance: number;
   type: "active" | "candidate" | "closed" | "frame";
   startTimestamp: number;
@@ -41,8 +41,8 @@ type DebugAnchor = {
 };
 
 type DebugFrame = {
-  measurement: { lat: number; lon: number; accuracy: number; mean: [number, number]; variance: number; };
-  anchor: { mean: [number, number]; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  measurement: { lat: number; lon: number; accuracy: number; mean: Vec2; variance: number; };
+  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
   timestamp: number;
 };
 
@@ -59,7 +59,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
   const clustersRef = useRef<Cluster[]>([]);
   const debugAnchorsRef = useRef<Array<{ anchor: DebugAnchor; x: number; y: number; r: number }>>([]);
   const processedComponentsRef = useRef<DevicePoint[]>([]);
-  const motionSegmentsRef = useRef<Array<{ segment: MotionSegment; screenPoints: [number, number][] }>>([]);
+  const motionSegmentsRef = useRef<Array<{ segment: MotionSegment; screenPoints: Vec2[] }>>([]);
 
   const [pinOpacity, setPinOpacity] = useState(1);
 
@@ -212,7 +212,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     const processed = components
       .filter(c => !memberDeviceIds?.has(c.device)) // Hide member devices of groups on the map
       .map(c => {
-        const mean: [number, number] = Array.isArray(c.mean) && c.mean.length === 2 ? (c.mean as [number, number]) : [0, 0];
+        const mean: Vec2 = Array.isArray(c.mean) && c.mean.length === 2 ? c.mean : [0, 0];
         const variance = typeof c.variance === 'number' ? c.variance : 100;
         return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: getColorForDevice(c.device, deviceColors[c.device]) };
       });
@@ -345,7 +345,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       motionSegmentsRef.current = [];
       if (motionSegments.length > 0) {
         for (const segment of motionSegments) {
-          const screenPoints: [number, number][] = [];
+          const screenPoints: Vec2[] = [];
           // Compute bounds while converting points (single pass)
           let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
           for (const point of segment.path) {

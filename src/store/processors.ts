@@ -1,6 +1,6 @@
-import { degreesToMeters } from '@/util/geo';
 import { Engine, type EngineState } from '@/engine/engine';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
+import { ProjectedCoordinateSystem } from '@/util/ProjectedCoordinateSystem';
 import { rgbToHex } from '@/ui/color';
 import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
@@ -102,8 +102,7 @@ export function computeProcessedPositions(
     engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>,
     groupIds: Set<number>,
     motionProfiles: Record<number, MotionProfileName>,
-    refLat: number | null,
-    refLon: number | null,
+    coordinateSystem: ProjectedCoordinateSystem,
     firstPosition: { lat: number; lon: number } | null
 ) {
     if (!positionsAll || positionsAll.length === 0) return null;
@@ -228,8 +227,7 @@ export function computeProcessedPositions(
         const deviceId = Number(deviceKey);
         const isGroup = groupIds.has(deviceId);
         const rawArr: DevicePoint[] = arr.map((p) => {
-            const useRef = firstPosition ?? { lat: refLat ?? p.lat, lon: refLon ?? p.lon };
-            const { x, y } = degreesToMeters(p.lat, p.lon, useRef.lat, useRef.lon);
+            const [x, y] = coordinateSystem.project(p.lat, p.lon);
             const comp: DevicePoint = {
                 mean: [x, y],
                 variance: measurementVarianceFromAccuracy(p.accuracy),
@@ -269,7 +267,7 @@ export function computeProcessedPositions(
         groupMotionProfiles.set(group.id, profile);
     }
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, refLat, refLon, positionsAll);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, coordinateSystem, positionsAll);
 
     // Prune old motion segments from engines based on the current data window
     if (positionsAll.length > 0) {
@@ -280,9 +278,9 @@ export function computeProcessedPositions(
         }
 
         if (minTimestamp !== Infinity) {
-             for (const engine of engines.values()) {
-                 engine.pruneHistory(minTimestamp);
-             }
+            for (const engine of engines.values()) {
+                engine.pruneHistory(minTimestamp);
+            }
         }
     }
 

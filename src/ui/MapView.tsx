@@ -1,11 +1,11 @@
 import { ClusterPopup } from "./map/ClusterPopup";
-import { degreesToMeters, metersToDegrees } from "@/util/geo";
 import { MaptilerLayer } from "@maptiler/leaflet-maptilersdk";
+import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
 import { PulsingMarker } from "./map/PulsingMarker";
 import CanvasView, { type CanvasViewHandle } from "./CanvasView";
 import L from "leaflet";
 import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
-import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment } from "@/types";
+import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -26,7 +26,7 @@ type Props = {
   onSelectDevice: (id: number) => void;
   onSelectMotionSegment?: (segment: MotionSegment | RetrospectiveMotionSegment) => void;
   debugFrame?: import("@/engine/engine").DebugFrame | null;
-  debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
+  debugAnchors?: Array<{ mean: Vec2; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   motionSegments?: MotionSegment[];
   retrospectiveMotionSegments?: RetrospectiveMotionSegment[];
   pulsingDeviceIds?: number[];
@@ -102,6 +102,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
   const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
   const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment | RetrospectiveMotionSegment } | null>(null);
   const [timeTick, setTimeTick] = useState(0);
+
+  // Coordinate system for transforming between lat/lon and meters
+  const coordinateSystemRef = useRef<ProjectedCoordinateSystem | null>(null);
+
+  useEffect(() => {
+    if (refLat != null && refLon != null) {
+      coordinateSystemRef.current = new ProjectedCoordinateSystem(refLat, refLon);
+    } else {
+      coordinateSystemRef.current = null;
+    }
+  }, [refLat, refLon]);
 
   // Animation tracking refs for smooth marker updates during animations
   const animFrameRef = useRef<number | null>(null);
@@ -216,7 +227,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       const sel = componentsRef.current.find((c) => Number(c.device) === Number(id));
       if (!sel?.mean) return;
 
-      const deg = metersToDegrees(sel.mean[0], sel.mean[1], refLatRef.current, refLonRef.current);
+      const deg = coordinateSystemRef.current?.unproject(sel.mean[0], sel.mean[1]) ?? { lat: 0, lon: 0 };
       const ZOOM_FOR_SELECTED = 18;
 
       try {
@@ -248,7 +259,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     for (const id of pulsingDeviceIds) {
       const comp = componentsRef.current.find(c => Number(c.device) === id);
       if (comp?.mean) {
-        const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLatRef.current, refLonRef.current);
+        const deg = coordinateSystemRef.current?.unproject(comp.mean[0], comp.mean[1]) ?? { lat: 0, lon: 0 };
         points.push(L.latLng(deg.lat, deg.lon));
       }
     }
@@ -284,7 +295,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       const ppm = 1 / mpp;
       setPixelsPerMeter(ppm);
       if (refLatRef.current != null && refLonRef.current != null) {
-        const cm = degreesToMeters(center.lat, center.lng, refLatRef.current, refLonRef.current);
+        const [x, y] = coordinateSystemRef.current?.project(center.lat, center.lng) ?? [0, 0];
+        const cm = { x, y };
         setCenterMeters(cm);
       } else {
         setCenterMeters({ x: 0, y: 0 });
@@ -346,8 +358,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     const initialLat = refLatRef.current;
     const initialLon = refLonRef.current;
     if (worldBounds && initialLat != null && initialLon != null) {
-      const sw = metersToDegrees(worldBounds.minX, worldBounds.minY, initialLat, initialLon);
-      const ne = metersToDegrees(worldBounds.maxX, worldBounds.maxY, initialLat, initialLon);
+      const sw = coordinateSystemRef.current?.unproject(worldBounds.minX, worldBounds.minY) ?? { lat: 0, lon: 0 };
+      const ne = coordinateSystemRef.current?.unproject(worldBounds.maxX, worldBounds.maxY) ?? { lat: 0, lon: 0 };
       try {
         map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
       } catch {
@@ -535,8 +547,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     }
 
     if (worldBounds && refLat != null && refLon != null) {
-      const sw = metersToDegrees(worldBounds.minX, worldBounds.minY, refLat, refLon);
-      const ne = metersToDegrees(worldBounds.maxX, worldBounds.maxY, refLat, refLon);
+      const sw = coordinateSystemRef.current?.unproject(worldBounds.minX, worldBounds.minY) ?? { lat: 0, lon: 0 };
+      const ne = coordinateSystemRef.current?.unproject(worldBounds.maxX, worldBounds.maxY) ?? { lat: 0, lon: 0 };
       try {
         map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
       } catch {
@@ -560,7 +572,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     if (!sel?.mean || refLat == null || refLon == null)
       return;
 
-    const deg = metersToDegrees(sel.mean[0], sel.mean[1], refLat, refLon);
+    const deg = coordinateSystemRef.current?.unproject(sel.mean[0], sel.mean[1]) ?? { lat: 0, lon: 0 };
 
     try {
       const ZOOM_FOR_SELECTED = 18;
@@ -613,9 +625,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     const localZoom = pixelsPerMeter;
     if (refLat == null || refLon == null) return null;
 
-    const meters = degreesToMeters(clusterPopup.lat, clusterPopup.lng, refLat, refLon);
-    const x = width / 2 + (meters.x - anchorX) * localZoom;
-    const y = height / 2 - (meters.y - anchorY) * localZoom;
+    const [meterX, meterY] = coordinateSystemRef.current?.project(clusterPopup.lat, clusterPopup.lng) ?? [0, 0];
+    const x = width / 2 + (meterX - anchorX) * localZoom;
+    const y = height / 2 - (meterY - anchorY) * localZoom;
 
     return { x, y };
   }, [clusterPopup, centerMeters, pixelsPerMeter, refLat, refLon, size]);

@@ -1,9 +1,9 @@
-import type { DebugFrame } from "@/engine/engine";
-import type { MotionSegment, RetrospectiveMotionSegment } from "@/types";
-import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { X } from "lucide-react";
 import React from "react";
-import { metersToDegrees } from "@/util/geo";
+import type { DebugFrame } from "@/engine/engine";
+import type { MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
 
 type Props = {
   segment: MotionSegment | RetrospectiveMotionSegment;
@@ -28,7 +28,7 @@ function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString();
 }
 
-function pathDistance(path: [number, number][]): number {
+function pathDistance(path: Vec2[]): number {
   let dist = 0;
   for (let i = 1; i < path.length; i++) {
     const dx = path[i]![0] - path[i - 1]![0];
@@ -88,13 +88,15 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
       {refLat != null && refLon != null && (
         <div className="text-xs space-y-1 mb-3 shrink-0">
           <div><strong>Start:</strong> {(() => {
-            const d = metersToDegrees(segment.path[0]![0], segment.path[0]![1], refLat, refLon);
-            return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`;
+            const cs = new ProjectedCoordinateSystem(refLat, refLon);
+            const { lat, lon } = cs.unproject(segment.path[0]![0], segment.path[0]![1]);
+            return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
           })()}</div>
           <div><strong>End:</strong> {(() => {
             const last = segment.path[segment.path.length - 1]!;
-            const d = metersToDegrees(last[0], last[1], refLat, refLon);
-            return `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`;
+            const cs = new ProjectedCoordinateSystem(refLat, refLon);
+            const { lat, lon } = cs.unproject(last[0], last[1]);
+            return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
           })()}</div>
         </div>
       )}
