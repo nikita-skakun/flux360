@@ -48,9 +48,9 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
   const duration = endTime - startTime;
   const distance = pathDistance(segment.path);
   const avgSpeedKmh = duration > 0 ? (distance / 1000) / (duration / 3600000) : 0;
-  
+
   const isRetro = isRetrospectiveSegment(segment);
-  
+
   const relevantFrames = debugFrames.filter(f => {
     if (f.timestamp < startTime) return false;
     if (endTime && f.timestamp > endTime) return false;
@@ -74,7 +74,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
           <X className="h-3 w-3" />
         </Button>
       </div>
-      
+
       <div className="text-xs space-y-1 mb-3 shrink-0">
         <div><strong>Duration:</strong> {formatDuration(duration)}</div>
         <div><strong>Distance:</strong> {Math.round(distance)}m</div>
@@ -102,7 +102,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
       <div className="text-xs font-medium mb-1 shrink-0">
         Debug frames ({relevantFrames.length}):
       </div>
-      
+
       <div className="max-h-32 overflow-y-auto text-xs bg-muted/50 rounded p-2 space-y-2 min-h-0">
         {relevantFrames.length === 0 ? (
           <div className="text-muted-foreground">No debug frames in this time range</div>
@@ -110,10 +110,9 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
           relevantFrames.map((frame, idx) => (
             <div key={idx} className="border-b border-border/50 pb-1 last:border-0">
               <div className="font-medium">{new Date(frame.timestamp).toLocaleTimeString()}</div>
-              <div>Accuracy: {Math.round(frame.measurement.accuracy)}m | Mahal²: {frame.mahalanobis2?.toFixed(2) ?? '—'}</div>
-              <div>Decision: <strong>{frame.decision}</strong> | Motion: {frame.motionActive ? 'active' : 'inactive'}</div>
-              <div>Outliers: {frame.outlierCount} | Score: {frame.motionScoreSum?.toFixed(2) ?? '—'}</div>
-              {frame.motionDistance != null && <div>Motion dist: {Math.round(frame.motionDistance)}m</div>}
+              <div>Accuracy: {Math.round(frame.measurement.accuracy)}m</div>
+              <div>Location: {frame.measurement.lat.toFixed(5)}, {frame.measurement.lon.toFixed(5)}</div>
+              <div>Mahal²: {frame.mahalanobis2?.toFixed(2) ?? '—'}</div>
             </div>
           ))
         )}
