@@ -605,10 +605,20 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     return () => ro.disconnect();
   }, []);
 
-  const clusterPoint = clusterPopup && mapRef.current ? (() => {
-    const p = mapRef.current.latLngToContainerPoint(L.latLng(clusterPopup.lat, clusterPopup.lng));
-    return { x: p.x, y: p.y };
-  })() : null;
+  const clusterPoint = useMemo(() => {
+    if (!clusterPopup || !centerMeters || pixelsPerMeter === null) return null;
+    const width = size.width;
+    const height = size.height;
+    const { x: anchorX, y: anchorY } = centerMeters;
+    const localZoom = pixelsPerMeter;
+    if (refLat == null || refLon == null) return null;
+
+    const meters = degreesToMeters(clusterPopup.lat, clusterPopup.lng, refLat, refLon);
+    const x = width / 2 + (meters.x - anchorX) * localZoom;
+    const y = height / 2 - (meters.y - anchorY) * localZoom;
+
+    return { x, y };
+  }, [clusterPopup, centerMeters, pixelsPerMeter, refLat, refLon, size]);
 
   const anchorHoverLabel = useMemo(() => {
     if (!anchorHover) return null;
@@ -660,23 +670,28 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     return { started, ended, distance: Math.round(distance), duration: durationStr, speed: speedKmph.toFixed(1) };
   }, [motionHover, timeTick]);
 
-  const pulsingMarkers = useMemo(() => {
-    if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !mapRef.current || refLat == null || refLon == null) return null;
+  const pulsingMarkerPositions = useMemo(() => {
+    if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !centerMeters || pixelsPerMeter === null) return [];
+    const width = size.width;
+    const height = size.height;
+    const { x: anchorX, y: anchorY } = centerMeters;
+    const localZoom = pixelsPerMeter;
 
-    return pulsingDeviceIds.map(id => {
+    const positions: { id: number; x: number; y: number }[] = [];
+
+    for (const id of pulsingDeviceIds) {
       const comp = components.find(c => Number(c.device) === id);
-      if (!comp?.mean) return null;
+      if (!comp?.mean) continue;
 
-      const deg = metersToDegrees(comp.mean[0], comp.mean[1], refLat, refLon);
-      const map = mapRef.current;
-      if (!map) return null;
-      const pt = map.latLngToContainerPoint(L.latLng(deg.lat, deg.lon));
+      const [devX, devY] = comp.mean;
+      const x = width / 2 + (devX - anchorX) * localZoom;
+      const y = height / 2 - (devY - anchorY) * localZoom;
 
-      return (
-        <PulsingMarker key={`pulse-${id}`} x={pt.x} y={pt.y} />
-      );
-    });
-  }, [pulsingDeviceIds, components, refLat, refLon, size, centerMeters]);
+      positions.push({ id, x, y });
+    }
+
+    return positions;
+  }, [pulsingDeviceIds, components, centerMeters, pixelsPerMeter, size]);
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: typeof height === "number" ? `${height}px` : height }}>
@@ -741,7 +756,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           </div>
         </div>
       ) : null}
-      {pulsingMarkers}
+       {pulsingMarkerPositions.map(pos => (
+         <PulsingMarker key={`pulse-${pos.id}`} x={pos.x} y={pos.y} />
+       ))}
       {clusterPopup && clusterPoint && (
         <ClusterPopup
           x={clusterPoint.x}
