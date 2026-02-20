@@ -107,7 +107,7 @@ export function App() {
   // Listen for system theme changes when in system mode
   useEffect(() => {
     if (darkMode !== 'system') return;
-    
+
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
       if (e.matches) {
@@ -116,7 +116,7 @@ export function App() {
         document.documentElement.classList.remove('dark');
       }
     };
-    
+
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [darkMode]);
@@ -127,8 +127,6 @@ export function App() {
   const setIsSidePanelOpen = useStore(state => state.setIsSidePanelOpen);
   const debugMode = useStore(state => state.ui.debugMode);
   const setDebugMode = useStore(state => state.setDebugMode);
-  const useRetrospective = useStore(state => state.ui.useRetrospective);
-  const setUseRetrospective = useStore(state => state.setUseRetrospective);
   const debugFrameIndex = useStore(state => state.ui.debugFrameIndex);
   const setDebugFrameIndex = useStore(state => state.setDebugFrameIndex);
   const editingTarget = useStore(state => state.ui.editingTarget);
@@ -160,7 +158,7 @@ export function App() {
       if (firstPos && refLat == null) setRefLat(firstPos.lat);
       if (firstPos && refLon == null) setRefLon(firstPos.lon);
       if (firstPos && firstPositionRef == null) setFirstPosition({ lat: firstPos.lat, lon: firstPos.lon });
-      
+
       // Run retrospective analysis after positions are processed
       // This corrects motion detection lag by analyzing position history
       runRetrospectiveAnalysis();
@@ -314,7 +312,7 @@ export function App() {
     // Add individual devices (skip if they're members of a group or if they're group devices themselves)
     for (const [id, name] of Object.entries(deviceNames)) {
       const numId = Number(id);
-      
+
       if (groupIds.has(numId)) {
         continue; // Skip if it's a group device
       }
@@ -397,7 +395,6 @@ export function App() {
         debugAnchors={currentDebugAnchors}
         motionSegments={debugMode && selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
         retrospectiveMotionSegments={selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
-        useRetrospective={useRetrospective}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
@@ -443,8 +440,6 @@ export function App() {
               onReconnect={reconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
-              useRetrospective={useRetrospective}
-              setUseRetrospective={setUseRetrospective}
             />
 
             <DeviceOverlay

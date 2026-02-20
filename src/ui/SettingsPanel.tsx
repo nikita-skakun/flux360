@@ -24,8 +24,6 @@ type Props = {
   onReconnect: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
-  useRetrospective: boolean;
-  setUseRetrospective: (value: boolean) => void;
 };
 
 export const SettingsPanel = React.memo(function SettingsPanel({
@@ -46,8 +44,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   onReconnect,
   debugMode,
   setDebugMode,
-  useRetrospective,
-  setUseRetrospective,
 }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -56,7 +52,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   const cycleTheme = () => {
     const nextTheme: 'light' | 'dark' | 'system' =
       darkModeInput === 'system' ? 'dark' :
-      darkModeInput === 'dark' ? 'light' : 'dark';
+        darkModeInput === 'dark' ? 'light' : 'dark';
     setDarkModeInput(nextTheme);
     onApplyTheme(nextTheme);
   };
@@ -124,19 +120,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
 
             <Separator orientation="vertical" className="h-4" />
 
-            <div className="flex items-center gap-2">
-              <Switch
-                id="use-retrospective"
-                checked={useRetrospective}
-                onCheckedChange={setUseRetrospective}
-              />
-              <Label htmlFor="use-retrospective" className="text-xs font-medium cursor-pointer">
-                Smart Motion
-              </Label>
-            </div>
-
-            <Separator orientation="vertical" className="h-4" />
-
             {/* Theme Toggle Button */}
             <Button
               variant="outline"
@@ -159,7 +142,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               value={baseUrlInput}
               onChange={(e) => setBaseUrlInput(e.target.value)}
             />
-            
+
             <div className="flex items-center gap-2">
               <Switch
                 id="secure-connection"
@@ -170,21 +153,21 @@ export const SettingsPanel = React.memo(function SettingsPanel({
                 Secure (HTTPS/WSS)
               </Label>
             </div>
-            
+
             <Input
               type="password"
               placeholder="API Token"
               value={tokenInput}
               onChange={(e) => setTokenInput(e.target.value)}
             />
-            
+
             <Input
               type="password"
               placeholder="MapTiler API Key"
               value={maptilerApiKeyInput}
               onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
             />
-            
+
             <div className="flex flex-wrap items-center gap-2 ml-auto">
               <Button
                 variant="outline"

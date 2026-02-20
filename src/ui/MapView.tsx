@@ -29,17 +29,16 @@ type Props = {
   debugAnchors?: Array<{ mean: [number, number]; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
   motionSegments?: MotionSegment[];
   retrospectiveMotionSegments?: RetrospectiveMotionSegment[];
-  useRetrospective?: boolean;
   pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
   darkMode: boolean;
   memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, selectedMotionSegment, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], useRetrospective = false, pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
-  // Use retrospective segments when enabled and available, otherwise fall back to real-time
+const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, selectedMotionSegment, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
+  // Always use retrospective segments when available, fall back to real-time
   const effectiveMotionSegments = useMemo(() => {
-    if (useRetrospective && retrospectiveMotionSegments.length > 0) {
+    if (retrospectiveMotionSegments.length > 0) {
       // Convert RetrospectiveMotionSegment to MotionSegment format
       // Retrospective segments don't have anchor objects, so we create minimal anchors
       return retrospectiveMotionSegments.map((rs): MotionSegment => {
@@ -56,7 +55,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           getConfidence() { return rs.confidence; },
           getConfidenceLevel() { return "medium" as const; },
           mahalanobis2() { return 0; },
-          kalmanUpdate() {},
+          kalmanUpdate() { },
         };
 
         const endAnchor = rs.endTime ? {
@@ -70,7 +69,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
           getConfidence() { return rs.confidence; },
           getConfidenceLevel() { return "medium" as const; },
           mahalanobis2() { return 0; },
-          kalmanUpdate() {},
+          kalmanUpdate() { },
         } : null;
 
         return {
@@ -83,7 +82,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       });
     }
     return motionSegments;
-  }, [motionSegments, retrospectiveMotionSegments, useRetrospective]);
+  }, [motionSegments, retrospectiveMotionSegments]);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapDivRef = useRef<HTMLDivElement | null>(null);
@@ -365,7 +364,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
       } else {
         setMotionHover(null);
       }
-      
+
       const container = map.getContainer();
       if (hit?.items?.length) {
         container.style.cursor = "pointer";
@@ -568,29 +567,29 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, re
     const { segment } = motionHover;
     const started = new Date(segment.startTime).toLocaleString();
     const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "-";
-    
+
     // Calculate total distance and duration
     let distance = 0;
     let durationMs = 0;
-    
+
     if (segment.endTime) {
       durationMs = segment.endTime - segment.startTime;
     } else if (segment.path.length > 0) {
-       // For in-progress, we don't have an easy "current time" reference here without passing it down, 
-       // but we can approximate or just show "In progress"
+      // For in-progress, we don't have an easy "current time" reference here without passing it down, 
+      // but we can approximate or just show "In progress"
       durationMs = Date.now() - segment.startTime;
     }
 
     // Calculate distance along path
     for (let i = 0; i < segment.path.length - 1; i++) {
-        const p1 = segment.path[i]!;
-        const p2 = segment.path[i+1]!;
-        // Approximate distance in meters (since we have meters in Vec2)
-        const dx = p1[0] - p2[0];
-        const dy = p1[1] - p2[1];
-        distance += Math.sqrt(dx*dx + dy*dy);
+      const p1 = segment.path[i]!;
+      const p2 = segment.path[i + 1]!;
+      // Approximate distance in meters (since we have meters in Vec2)
+      const dx = p1[0] - p2[0];
+      const dy = p1[1] - p2[1];
+      distance += Math.sqrt(dx * dx + dy * dy);
     }
-    
+
     // Speed (m/s) -> km/h
     const speedMps = durationMs > 0 ? (distance / (durationMs / 1000)) : 0;
     const speedKmph = speedMps * 3.6;

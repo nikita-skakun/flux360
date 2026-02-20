@@ -37,7 +37,6 @@ const initialState: StoreState = {
     refLon: null,
     worldBounds: null,
     editingTarget: null,
-    useRetrospective: true,
   },
   refs: {
     deviceToGroupsMap: new Map(),
@@ -66,7 +65,7 @@ export const useStore = create<Store>()(
       // Device/Group Management
       setDevicesFromApi: async (devices: TraccarDevice[]) => {
         const { colorForDevice } = await import("@/ui/color");
-        
+
         const {
           nameMap,
           iconMap,
@@ -406,7 +405,7 @@ export const useStore = create<Store>()(
         const { refs } = state;
         const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition, engineCheckpoints } = refs;
         const { refLat, refLon } = state.ui;
-        
+
         const result = computeProcessedPositions(
           positionsAll,
           processedKeys,
@@ -634,15 +633,6 @@ export const useStore = create<Store>()(
         }));
       },
 
-      setUseRetrospective: (value: boolean) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            useRetrospective: value,
-          }
-        }));
-      },
-
       setMotionSegments: (segments) => {
         set(() => ({
           motionSegments: segments,
@@ -654,7 +644,7 @@ export const useStore = create<Store>()(
 
         // 1. Debounce: If already analyzing or recently analyzed, skip
         if (state.retrospective.isAnalyzing) return;
-        
+
         // Simple debounce: don't run if last update was < 2 seconds ago
         // This prevents rapid-fire executions during initial data load
         if (Date.now() - state.retrospective.lastUpdate < 2000) return;
