@@ -82,8 +82,13 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
+  const componentsRef = useRef<DevicePoint[]>(components);
   const selectedDeviceIdRef = useRef(selectedDeviceId);
   const onSelectDeviceRef = useRef(onSelectDevice);
+
+  useEffect(() => {
+    componentsRef.current = components;
+  }, [components]);
 
   useEffect(() => {
     selectedDeviceIdRef.current = selectedDeviceId;
@@ -222,13 +227,12 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
         map.on("click", "devices", (e) => {
           const features = e.features;
-          if (features && features.length > 0) {
-            const props = features[0]?.properties;
-            if (props) {
-              const id = props["id"];
-              if (typeof id === "number") {
-                onSelectDeviceRef.current(id);
-              }
+          if (features?.[0]?.properties) {
+            const props = features[0].properties;
+            const id = props["id"];
+            if (typeof id === "number") {
+              onSelectDeviceRef.current(id);
+              flyToDevice(id);
             }
           }
         });
@@ -258,16 +262,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map || !worldBounds || refLat == null || refLon == null) return;
 
+    const c = componentsRef.current;
     const sw = { lat: refLat - 0.01, lon: refLon - 0.01 };
     const ne = { lat: refLat + 0.01, lon: refLon + 0.01 };
 
-    if (components.length > 0) {
+    if (c.length > 0) {
       let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
-      for (const c of components) {
-        minLat = Math.min(minLat, c.lat);
-        minLon = Math.min(minLon, c.lon);
-        maxLat = Math.max(maxLat, c.lat);
-        maxLon = Math.max(maxLon, c.lon);
+      for (const comp of c) {
+        minLat = Math.min(minLat, comp.lat);
+        minLon = Math.min(minLon, comp.lon);
+        maxLat = Math.max(maxLat, comp.lat);
+        maxLon = Math.max(maxLon, comp.lon);
       }
       const padding = 0.005;
       sw.lat = minLat - padding;
@@ -280,7 +285,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       [sw.lon, sw.lat, ne.lon, ne.lat],
       { padding: 40, maxZoom: 18, duration: 0 }
     );
-  }, [worldBounds, refLat, refLon, components]);
+  }, [worldBounds, refLat, refLon]);
 
   return (
     <div style={{ height: typeof height === "number" ? `${height}px` : height, position: "relative", width: "100%" }}>
