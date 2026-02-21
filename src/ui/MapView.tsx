@@ -1,7 +1,7 @@
 import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config } from "@maptiler/sdk";
 import React, { useCallback, useEffect, useImperativeHandle, useRef } from "react";
-import type { DevicePoint } from "@/types";
+import type { DevicePoint, Vec2 } from "@/types";
 import type { FeatureCollection, Feature, Point } from "geojson";
 
 export type MapViewHandle = {
@@ -106,7 +106,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const device = componentsRef.current.find(c => c.device === id);
     if (!device) return;
 
-    const target = [device.lon, device.lat] as [number, number];
+    const target = [device.lon, device.lat] as Vec2;
 
     const center = map.getCenter();
     let duration = 800;
@@ -135,7 +135,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     config.apiKey = maptilerApiKey;
 
-    let initialCenter: [number, number] = [0, 0];
+    let initialCenter: Vec2 = [0, 0];
     let initialZoom = 2;
 
     if (worldBounds && refLat != null && refLon != null) {
@@ -188,7 +188,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         type: "Feature" as const,
         geometry: {
           type: "Point" as const,
-          coordinates: [c.lon, c.lat] as [number, number],
+          coordinates: [c.lon, c.lat] as Vec2,
         },
         properties: {
           id: c.device,
