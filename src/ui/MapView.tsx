@@ -103,41 +103,27 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
 
-    const device = components.find(c => c.device === id);
+    const device = componentsRef.current.find(c => c.device === id);
     if (!device) return;
 
     const target = [device.lon, device.lat] as [number, number];
-    const currentZoom = map.getZoom();
 
-    if (currentZoom >= 14) {
-      // Phase 1: Zoom out in place (no pan)
-      map.easeTo({
-        zoom: 12,
-        duration: 500,
-      });
-      // Phase 2: Pan to target at zoom 12
-      setTimeout(() => {
-        map.easeTo({
-          center: target,
-          duration: 1000,
-        });
-        // Phase 3: Zoom in
-        setTimeout(() => {
-          map.easeTo({
-            zoom: 18,
-            duration: 1000,
-          });
-        }, 1000);
-      }, 500);
-    } else {
-      // Already zoomed out: pan and zoom in together
-      map.easeTo({
-        center: target,
-        zoom: 18,
-        duration: 2000,
-      });
+    const center = map.getCenter();
+    let duration = 800;
+    if (center) {
+      const dLat = target[1] - center.lat;
+      const dLon = target[0] - center.lng;
+      const distanceDeg = Math.sqrt(dLat * dLat + dLon * dLon);
+
+      const minDuration = 300;
+      const maxDuration = 2500;
+      const maxDistanceDeg = 0.045; // ~0.045 degrees ≈ 5km in latitude
+      const t = Math.min(1, distanceDeg / maxDistanceDeg);
+      duration = Math.round(minDuration + t * (maxDuration - minDuration));
     }
-  }, [components]);
+
+    map.flyTo({ center: target, zoom: 18, duration });
+  }, []);
 
   useImperativeHandle(ref, () => ({
     flyToDevice,
