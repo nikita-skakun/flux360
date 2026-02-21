@@ -86,6 +86,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   const componentsRef = useRef<DevicePoint[]>(components);
   const selectedDeviceIdRef = useRef(selectedDeviceId);
   const onSelectDeviceRef = useRef(onSelectDevice);
+  const hasFittedInitially = useRef(false);
 
   useEffect(() => {
     componentsRef.current = components;
@@ -272,7 +273,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !worldBounds || refLat == null || refLon == null) return;
+    if (!map || !worldBounds || refLat == null || refLon == null || hasFittedInitially.current) return;
 
     const c = componentsRef.current;
     const sw = { lat: refLat - 0.01, lon: refLon - 0.01 };
@@ -297,6 +298,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       [sw.lon, sw.lat, ne.lon, ne.lat],
       { padding: 40, maxZoom: 18, duration: 0 }
     );
+
+    hasFittedInitially.current = true;
   }, [worldBounds, refLat, refLon]);
 
   return (
