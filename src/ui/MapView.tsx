@@ -2,6 +2,7 @@ import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config } from "@maptiler/sdk";
 import React, { useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import type { DevicePoint } from "@/types";
+import type { FeatureCollection, Feature, Point } from "geojson";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -189,7 +190,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     if (!map || components.length === 0) return;
 
     const keyToIconColor = new Map<string, { icon: string, color: string }>();
-    const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+    const features: Feature<Point>[] = [];
 
     for (const c of components) {
       const icon = deviceIcons[c.device] ?? "?";
@@ -214,15 +215,15 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       });
     }
 
-    const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
+    const geojson: FeatureCollection = { type: "FeatureCollection", features };
 
     const ensureMapLayers = () => {
       // Ensure source exists
-      let source = map.getSource("devices") as GeoJSONSource | undefined;
-      if (!source) {
-        map.addSource("devices", { type: "geojson", data: geojson });
-      } else {
+      let source: GeoJSONSource | undefined = map.getSource("devices");
+      if (source) {
         source.setData(geojson);
+      } else {
+        map.addSource("devices", { type: "geojson", data: geojson });
       }
 
       // Add missing images
@@ -252,13 +253,12 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         });
 
         map.on("click", "devices", (e) => {
-          const features = e.features;
-          if (features?.[0]?.properties) {
-            const props = features[0].properties;
-            const id = props["id"];
-            if (typeof id === "number") {
-              onSelectDeviceRef.current(id);
-              flyToDevice(id);
+          const feature = e.features?.[0];
+          if (feature?.properties) {
+            const idVal = (feature.properties as { id?: unknown }).id;
+            if (typeof idVal === "number") {
+              onSelectDeviceRef.current(idVal);
+              flyToDevice(idVal);
             }
           }
         });
