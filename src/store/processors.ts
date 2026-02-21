@@ -32,8 +32,7 @@ export function parseDevices(
         motionProfileMap[device.id] = profile;
         motionProfileAttributeMap[device.id] = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
 
-        const colorAttr = typeof device.attributes["color"] === "string" ? device.attributes["color"] : null;
-        colorAttributeMap[device.id] = colorAttr;
+        colorAttributeMap[device.id] = typeof device.attributes["color"] === "string" && device.attributes["color"] || rgbToHex(...colorForDevice(device.id));
 
         // Check if it's a group device
         const memberDeviceIdsAttr = device.attributes["memberDeviceIds"];

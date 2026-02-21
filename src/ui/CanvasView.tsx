@@ -593,7 +593,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     return () => { };
   }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
 
-  return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
+  return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none" }} />;
 });
 
 export default React.memo(CanvasView);

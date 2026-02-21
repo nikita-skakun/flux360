@@ -90,7 +90,7 @@ function DeviceOverlayComponent({
   const mostRecentSourceName = mostRecentSourceId ? (deviceNames[mostRecentSourceId] ?? `Device ${mostRecentSourceId}`) : null;
 
   return (
-    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
+    <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
       <div className="flex items-start">
         <div className="flex-1">
           {(() => {

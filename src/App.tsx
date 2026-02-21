@@ -6,7 +6,7 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment, Vec2 } from "./types";
+import type { MotionSegment, RetrospectiveMotionSegment } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -57,15 +57,16 @@ export function App() {
   }, [devices, groupDevices]);
 
   // Build set of member device IDs to hide them on the map (but keep in side panel)
-  const memberDeviceIds = useMemo(() => {
-    const memberIds = new Set<number>();
-    for (const group of groupDevices) {
-      for (const memberId of group.memberDeviceIds) {
-        memberIds.add(memberId);
-      }
-    }
-    return memberIds;
-  }, [groupDevices]);
+  // TODO: Re-enable when MapView supports memberDeviceIds prop
+  // const memberDeviceIds = useMemo(() => {
+  //   const memberIds = new Set<number>();
+  //   for (const group of groupDevices) {
+  //     for (const memberId of group.memberDeviceIds) {
+  //       memberIds.add(memberId);
+  //     }
+  //   }
+  //   return memberIds;
+  // }, [groupDevices]);
 
   const positionsAllRef = useStore(state => state.refs.positionsAll);
   const setPositionsAll = useStore(state => state.setPositionsAll);
@@ -141,11 +142,12 @@ export function App() {
     onDevices: setDevicesFromApi,
   });
 
-  const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
+  const [, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
-  const motionSegments = useStore(state => state.motionSegments);
-  const retrospectiveByDevice = useStore(state => state.retrospective.byDevice);
+  // TODO: Re-enable when MapView supports debug features
+  // const motionSegments = useStore(state => state.motionSegments);
+  // const retrospectiveByDevice = useStore(state => state.retrospective.byDevice);
   const runRetrospectiveAnalysis = useStore(state => state.runRetrospectiveAnalysis);
 
   const mapViewRef = useRef<MapViewHandle>(null);
@@ -265,30 +267,31 @@ export function App() {
     setSelectedMotionSegment(null);
   }, [selectedDeviceId]);
 
-  // current debug frame to render on the map (if any)
-  const currentDebugFrame = useMemo(() => {
-    if (selectedDeviceId == null || !debugMode) return null;
-    const eng = enginesRef.get(selectedDeviceId);
-    if (!eng) return null;
-    const fr = eng.getDebugFrames();
-    if (fr.length === 0) return null;
-    return fr[Math.max(0, Math.min(fr.length - 1, debugFrameIndex))] ?? null;
-  }, [selectedDeviceId, debugMode, enginesRef, debugFrameIndex]);
+  // TODO: Re-enable when MapView supports debug features
+  // // current debug frame to render on the map (if any)
+  // const currentDebugFrame = useMemo(() => {
+  //   if (selectedDeviceId == null || !debugMode) return null;
+  //   const eng = enginesRef.get(selectedDeviceId);
+  //   if (!eng) return null;
+  //   const fr = eng.getDebugFrames();
+  //   if (fr.length === 0) return null;
+  //   return fr[Math.max(0, Math.min(fr.length - 1, debugFrameIndex))] ?? null;
+  // }, [selectedDeviceId, debugMode, enginesRef, debugFrameIndex]);
 
-  const currentDebugAnchors = useMemo(() => {
-    if (selectedDeviceId == null || !debugMode) return [];
-    const eng = enginesRef.get(selectedDeviceId);
-    if (!eng) return [];
-    type AnchorView = { mean: Vec2; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number };
-    const anchors: AnchorView[] = [];
-    const pushAnchor = (a: typeof eng.activeAnchor, type: AnchorView["type"]) => {
-      if (!a) return;
-      anchors.push({ mean: a.mean, variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
-    };
-    pushAnchor(eng.activeAnchor, "active");
-    for (const a of eng.closedAnchors) pushAnchor(a, "closed");
-    return anchors;
-  }, [selectedDeviceId, debugMode, enginesRef]);
+  // const currentDebugAnchors = useMemo(() => {
+  //   if (selectedDeviceId == null || !debugMode) return [];
+  //   const eng = enginesRef.get(selectedDeviceId);
+  //   if (!eng) return [];
+  //   type AnchorView = { mean: Vec2; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number };
+  //   const anchors: AnchorView[] = [];
+  //   const pushAnchor = (a: typeof eng.activeAnchor, type: AnchorView["type"]) => {
+  //     if (!a) return;
+  //     anchors.push({ mean: a.mean, variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
+  //   };
+  //   pushAnchor(eng.activeAnchor, "active");
+  //   for (const a of eng.closedAnchors) pushAnchor(a, "closed");
+  //   return anchors;
+  // }, [selectedDeviceId, debugMode, enginesRef]);
 
   const deviceList = useMemo(() => {
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
@@ -391,37 +394,25 @@ export function App() {
       />
       <MapView
         ref={mapViewRef}
-        debugFrame={currentDebugFrame}
-        debugAnchors={currentDebugAnchors}
-        motionSegments={debugMode && selectedDeviceId != null ? (motionSegments[selectedDeviceId] ?? []) : []}
-        retrospectiveMotionSegments={debugMode && selectedDeviceId != null ? (retrospectiveByDevice.get(selectedDeviceId)?.motionSegments ?? []) : []}
         components={frame.components}
         refLat={refLat}
         refLon={refLon}
         worldBounds={worldBounds}
         height="100vh"
         selectedDeviceId={selectedDeviceId}
-        selectedMotionSegment={selectedMotionSegment}
-        pulsingDeviceIds={pulsingDeviceIds}
         onSelectDevice={(id) => {
           if (selectedDeviceId === id) {
             mapViewRef.current?.flyToDevice(id);
           }
           setSelectedDeviceId(id);
         }}
-        onSelectMotionSegment={(segment) => {
-          if (debugMode) {
-            setSelectedMotionSegment(segment);
-          }
-        }}
-        memberDeviceIds={memberDeviceIds}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
         deviceColors={deviceColors}
         maptilerApiKey={maptilerApiKey}
         darkMode={isDark}
         overlay={
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
               baseUrlInput={baseUrlInput}
               setBaseUrlInput={setBaseUrlInput}

@@ -1,15 +1,53 @@
-import { ClusterPopup } from "./map/ClusterPopup";
-import { MaptilerLayer } from "@maptiler/leaflet-maptilersdk";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
-import { PulsingMarker } from "./map/PulsingMarker";
-import CanvasView, { type CanvasViewHandle } from "./CanvasView";
-import L from "leaflet";
-import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
-import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
+import "@maptiler/sdk/dist/maptiler-sdk.css";
+import { GeoJSONSource, Map as MaptilerMap, MapStyle, config } from "@maptiler/sdk";
+import React, { useCallback, useEffect, useImperativeHandle, useRef } from "react";
+import type { DevicePoint } from "@/types";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
 };
+
+function createPinImage(icon: string, color: string, darkMode: boolean): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  const size = 48;
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+
+  const PIN_R = 14;
+  const tipX = size / 2;
+  const tipY = 36;
+  const bodyHeight = PIN_R * 1.5;
+  const headY = tipY - bodyHeight;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(tipX - PIN_R, headY);
+  ctx.arc(tipX, headY, PIN_R, Math.PI, 0);
+  ctx.bezierCurveTo(tipX + PIN_R, headY + PIN_R * 0.9, tipX + PIN_R * 0.35, headY + bodyHeight * 0.65, tipX, tipY);
+  ctx.bezierCurveTo(tipX - PIN_R * 0.35, headY + bodyHeight * 0.65, tipX - PIN_R, headY + PIN_R * 0.9, tipX - PIN_R, headY);
+  ctx.closePath();
+
+  ctx.fillStyle = darkMode ? "rgb(40,40,40)" : "rgb(255,255,255)";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = color;
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = 0.7;
+  ctx.stroke();
+  ctx.globalAlpha = 1.0;
+
+  if (icon) {
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${PIN_R}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
+    ctx.fillText(String(icon), tipX, headY + 1);
+  }
+
+  ctx.restore();
+  return canvas;
+}
 
 type Props = {
   components: DevicePoint[];
@@ -20,776 +58,235 @@ type Props = {
   refLon: number | null;
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   height: number | string;
-  overlay: React.ReactNode;
+  overlay?: React.ReactNode;
   selectedDeviceId: number | null;
-  selectedMotionSegment?: MotionSegment | RetrospectiveMotionSegment | null;
   onSelectDevice: (id: number) => void;
-  onSelectMotionSegment?: (segment: MotionSegment | RetrospectiveMotionSegment) => void;
-  debugFrame?: import("@/engine/engine").DebugFrame | null;
-  debugAnchors?: Array<{ mean: Vec2; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
-  motionSegments?: MotionSegment[];
-  retrospectiveMotionSegments?: RetrospectiveMotionSegment[];
-  pulsingDeviceIds?: number[];
   maptilerApiKey?: string;
   darkMode: boolean;
-  memberDeviceIds: Set<number>;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, selectedMotionSegment, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
-  // Always use retrospective segments when available, fall back to real-time
-  const effectiveMotionSegments = useMemo(() => {
-    if (retrospectiveMotionSegments.length > 0) {
-      // Convert RetrospectiveMotionSegment to MotionSegment format
-      // Retrospective segments don't have anchor objects, so we create minimal anchors
-      return retrospectiveMotionSegments.map((rs): MotionSegment => {
-        // Create minimal anchor-like objects for compatibility
-        // These will be used for rendering only
-        const startAnchor = {
-          mean: rs.startPosition,
-          variance: 1,
-          startTimestamp: rs.startTime,
-          endTimestamp: null,
-          confidence: rs.confidence,
-          lastUpdateTimestamp: rs.startTime,
-          clone() { return { ...this }; },
-          getConfidence() { return rs.confidence; },
-          getConfidenceLevel() { return "medium" as const; },
-          mahalanobis2() { return 0; },
-          kalmanUpdate() { },
-        };
-
-        const endAnchor = rs.endTime ? {
-          mean: rs.endPosition,
-          variance: 1,
-          startTimestamp: rs.endTime,
-          endTimestamp: rs.endTime,
-          confidence: rs.confidence,
-          lastUpdateTimestamp: rs.endTime,
-          clone() { return { ...this }; },
-          getConfidence() { return rs.confidence; },
-          getConfidenceLevel() { return "medium" as const; },
-          mahalanobis2() { return 0; },
-          kalmanUpdate() { },
-        } : null;
-
-        return {
-          startAnchor: startAnchor as MotionSegment["startAnchor"],
-          endAnchor: endAnchor as MotionSegment["endAnchor"],
-          path: rs.path,
-          startTime: rs.startTime,
-          endTime: rs.endTime,
-        };
-      });
-    }
-    return motionSegments;
-  }, [motionSegments, retrospectiveMotionSegments]);
-
+const MapView = React.forwardRef<MapViewHandle, Props>(({
+  components,
+  deviceNames,
+  deviceIcons,
+  deviceColors,
+  refLat,
+  refLon,
+  worldBounds,
+  height,
+  overlay,
+  selectedDeviceId,
+  onSelectDevice,
+  maptilerApiKey,
+  darkMode,
+}, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapDivRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.Layer | null>(null);
-
-  const [size, setSize] = useState({ width: 800, height: 600 });
-  const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [pixelsPerMeter, setPixelsPerMeter] = useState<number | null>(null);
-
-  const canvasApiRef = useRef<CanvasViewHandle | null>(null);
-  const deviceNamesRef = useRef<Record<number, string>>(deviceNames);
-  const [clusterPopup, setClusterPopup] = useState<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
-  const [clusterAnimation, setClusterAnimation] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle');
-  const clusterAnimationTimerRef = useRef<number | null>(null);
-  const CLUSTER_ANIM_MS = 150;
-  const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
-  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment | RetrospectiveMotionSegment } | null>(null);
-  const [timeTick, setTimeTick] = useState(0);
-
-  // Coordinate system for transforming between lat/lon and meters
-  const coordinateSystemRef = useRef<ProjectedCoordinateSystem | null>(null);
-
-  useEffect(() => {
-    if (refLat != null && refLon != null) {
-      coordinateSystemRef.current = new ProjectedCoordinateSystem(refLat, refLon);
-    } else {
-      coordinateSystemRef.current = null;
-    }
-  }, [refLat, refLon]);
-
-  // Animation tracking refs for smooth marker updates during animations
-  const animFrameRef = useRef<number | null>(null);
-  const animationInProgressRef = useRef(false);
-  const lastCenterRef = useRef<L.LatLng | null>(null);
-  const lastZoomRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!debugAnchors?.length && anchorHover) {
-      setAnchorHover(null);
-    }
-  }, [debugAnchors, anchorHover]);
-
-  useEffect(() => {
-    if (!motionHover || motionHover.segment.endTime) return;
-    const id = setInterval(() => setTimeTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [motionHover]);
-
-  const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
-  const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
-  const prevMaptilerApiKeyRef = useRef<string | undefined>(undefined);
+  const mapRef = useRef<MaptilerMap | null>(null);
+  const selectedDeviceIdRef = useRef(selectedDeviceId);
   const onSelectDeviceRef = useRef(onSelectDevice);
-  const onSelectMotionSegmentRef = useRef(onSelectMotionSegment);
 
   useEffect(() => {
-    clusterPopupRef.current = clusterPopup;
-    clusterAnimationRef.current = clusterAnimation;
-  }, [clusterPopup, clusterAnimation]);
-
-  useEffect(() => {
-    deviceNamesRef.current = deviceNames;
-  }, [deviceNames]);
+    selectedDeviceIdRef.current = selectedDeviceId;
+  }, [selectedDeviceId]);
 
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
 
-  useEffect(() => {
-    onSelectMotionSegmentRef.current = onSelectMotionSegment;
-  }, [onSelectMotionSegment]);
+  const flyToDevice = useCallback((id: number) => {
+    const map = mapRef.current;
+    if (!map) return;
 
-  const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
-    if (clusterAnimationTimerRef.current) {
-      window.clearTimeout(clusterAnimationTimerRef.current);
-      clusterAnimationTimerRef.current = null;
-    }
-    clusterPopupRef.current = popup;
-    setClusterPopup(popup);
-    clusterAnimationRef.current = 'entering';
-    setClusterAnimation('entering');
-    clusterAnimationTimerRef.current = window.setTimeout(() => {
-      clusterAnimationRef.current = 'visible';
-      setClusterAnimation('visible');
-      clusterAnimationTimerRef.current = null;
-    }, 10);
-  };
+    const device = components.find(c => c.device === id);
+    if (!device) return;
 
-  const closeClusterPopupAnimated = () => {
-    if (!clusterPopupRef.current || clusterAnimationRef.current === 'exiting') return;
-    if (clusterAnimationTimerRef.current) {
-      window.clearTimeout(clusterAnimationTimerRef.current);
-      clusterAnimationTimerRef.current = null;
-    }
-    clusterAnimationRef.current = 'exiting';
-    setClusterAnimation('exiting');
-    clusterAnimationTimerRef.current = window.setTimeout(() => {
-      clusterPopupRef.current = null;
-      setClusterPopup(null);
-      clusterAnimationRef.current = 'idle';
-      setClusterAnimation('idle');
-      clusterAnimationTimerRef.current = null;
-    }, CLUSTER_ANIM_MS);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (clusterAnimationTimerRef.current) {
-        window.clearTimeout(clusterAnimationTimerRef.current);
-        clusterAnimationTimerRef.current = null;
-      }
-      clusterPopupRef.current = null;
-      clusterAnimationRef.current = 'idle';
-    };
-  }, []);
-
-  const refLatRef = useRef<number | null>(refLat);
-  const refLonRef = useRef<number | null>(refLon);
-  useEffect(() => {
-    refLatRef.current = refLat;
-    refLonRef.current = refLon;
-  }, [refLat, refLon]);
-
-  const prevSelectedRef = useRef<number | null>(selectedDeviceId);
-  const skipNextAutoFitRef = useRef(false);
-  const selectedZoomedRef = useRef(false);
-
-  const flyDurationForMeters = (meters: number) => {
-    const m = Math.max(1, meters);
-    const v = Math.log10(m);
-    return Math.max(0.25, Math.min(1.5, v * 0.22 + 0.15));
-  };
-
-  const componentsRef = useRef(components);
-  useEffect(() => { componentsRef.current = components; }, [components]);
+    map.easeTo({
+      center: [device.lon, device.lat],
+      zoom: 18,
+      duration: 1000,
+    });
+  }, [components]);
 
   useImperativeHandle(ref, () => ({
-    flyToDevice: (id: number) => {
-      const map = mapRef.current;
-      if (!map || refLatRef.current == null || refLonRef.current == null) return;
-
-      const sel = componentsRef.current.find((c) => Number(c.device) === Number(id));
-      if (!sel?.mean) return;
-
-      const deg = coordinateSystemRef.current?.unproject(sel.mean[0], sel.mean[1]) ?? { lat: 0, lon: 0 };
-      const ZOOM_FOR_SELECTED = 18;
-
-      try {
-        if (map.stop) map.stop();
-        const center = map.getCenter();
-        const centerLatLng = L.latLng(center.lat, center.lng);
-        const targetLatLng = L.latLng(deg.lat, deg.lon);
-        const distMeters = centerLatLng.distanceTo(targetLatLng);
-
-        const dur = flyDurationForMeters(distMeters);
-        const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
-
-        map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
-        // Set this to true so we don't double-animate if selectedDeviceId changes right after
-        selectedZoomedRef.current = true;
-      } catch {
-        // ignore map animation errors
-      }
-    }
+    flyToDevice,
   }));
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !pulsingDeviceIds || pulsingDeviceIds.length === 0 || refLatRef.current == null || refLonRef.current == null) return;
+    const container = containerRef.current;
+    if (!container || !maptilerApiKey) return;
 
-    // Defer slightly to allow render to settle if needed, but synchronous is usually fine for map events
-    // Logic: Find all selected devices in CURRENT components (latest known positions)
-    const points: L.LatLng[] = [];
-    for (const id of pulsingDeviceIds) {
-      const comp = componentsRef.current.find(c => Number(c.device) === id);
-      if (comp?.mean) {
-        const deg = coordinateSystemRef.current?.unproject(comp.mean[0], comp.mean[1]) ?? { lat: 0, lon: 0 };
-        points.push(L.latLng(deg.lat, deg.lon));
-      }
+    config.apiKey = maptilerApiKey;
+
+    let initialCenter: [number, number] = [0, 0];
+    let initialZoom = 2;
+
+    if (worldBounds && refLat != null && refLon != null) {
+      initialCenter = [refLon, refLat];
+      initialZoom = 15;
+    } else if (refLat != null && refLon != null) {
+      initialCenter = [refLon, refLat];
+      initialZoom = 15;
     }
 
-    if (points.length === 0) return;
-
-    try {
-      if (map.stop) map.stop();
-      // Use fitBounds for all cases (single or multiple) to ensure consistent behavior
-      // maxZoom: 18 allows close zoom for single or clusters of devices
-      const bounds = L.latLngBounds(points);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 18, animate: true, duration: 1.5 });
-    } catch {
-      // ignore map errors
-    }
-  }, [pulsingDeviceIds]);
-
-  useEffect(() => {
-    if (prevSelectedRef.current != null && selectedDeviceId == null) {
-      skipNextAutoFitRef.current = true;
-    }
-    if (prevSelectedRef.current !== selectedDeviceId) selectedZoomedRef.current = false;
-    prevSelectedRef.current = selectedDeviceId;
-  }, [selectedDeviceId]);
-
-  const updateTransform = () => {
-    const map = mapRef.current;
-    if (!map) return;
-    try {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
-      const ppm = 1 / mpp;
-      setPixelsPerMeter(ppm);
-      if (refLatRef.current != null && refLonRef.current != null) {
-        const [x, y] = coordinateSystemRef.current?.project(center.lat, center.lng) ?? [0, 0];
-        const cm = { x, y };
-        setCenterMeters(cm);
-      } else {
-        setCenterMeters({ x: 0, y: 0 });
-      }
-      // Update refs with current values for animation loop comparison
-      lastCenterRef.current = center;
-      lastZoomRef.current = zoom;
-    } catch {
-      // ignore transform update errors
-    }
-  };
-
-  const startAnimationLoop = () => {
-    if (animationInProgressRef.current) return;
-    animationInProgressRef.current = true;
-
-    const animate = () => {
-      const map = mapRef.current;
-      if (!map) {
-        animationInProgressRef.current = false;
-        return;
-      }
-
-      const currentCenter = map.getCenter();
-      const currentZoom = map.getZoom();
-
-      // Check if anything changed since last update
-      const centerChanged = !lastCenterRef.current ||
-        Math.abs(currentCenter.lat - lastCenterRef.current.lat) > 0.0000001 ||
-        Math.abs(currentCenter.lng - lastCenterRef.current.lng) > 0.0000001;
-      const zoomChanged = lastZoomRef.current === null || currentZoom !== lastZoomRef.current;
-
-      if (centerChanged || zoomChanged) {
-        updateTransform();
-      }
-
-      if (animationInProgressRef.current) {
-        animFrameRef.current = window.requestAnimationFrame(animate);
-      }
-    };
-
-    animFrameRef.current = window.requestAnimationFrame(animate);
-  };
-
-  const stopAnimationLoop = () => {
-    animationInProgressRef.current = false;
-    if (animFrameRef.current !== null) {
-      window.cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    const mapContainer = mapDivRef.current;
-    if (!mapContainer) return;
-
-    const map = L.map(mapContainer, { attributionControl: true, zoomControl: false, maxZoom: 22 });
-
-    const initialLat = refLatRef.current;
-    const initialLon = refLonRef.current;
-    if (worldBounds && initialLat != null && initialLon != null) {
-      const sw = coordinateSystemRef.current?.unproject(worldBounds.minX, worldBounds.minY) ?? { lat: 0, lon: 0 };
-      const ne = coordinateSystemRef.current?.unproject(worldBounds.maxX, worldBounds.maxY) ?? { lat: 0, lon: 0 };
-      try {
-        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
-      } catch {
-        map.setView([initialLat, initialLon], 15);
-      }
-    } else if (initialLat != null && initialLon != null) {
-      map.setView([initialLat, initialLon], 15);
-    } else {
-      map.setView([0, 0], 2);
-    }
-
-    updateTransform();
-
-    map.on("move", updateTransform);
-    map.on("zoom", updateTransform);
-    map.on("movestart", startAnimationLoop);
-    map.on("zoomstart", startAnimationLoop);
-    map.on("moveend", stopAnimationLoop);
-    map.on("zoomend", stopAnimationLoop);
-
-    const onMapClick = (ev: L.LeafletMouseEvent) => {
-      const pt = map.latLngToContainerPoint(ev.latlng);
-      const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-      if (hit?.items?.length) {
-        if (hit.items.length === 1) {
-          const devKey = hit.items[0]!.device;
-          const devNum = Number(devKey);
-          if (Number.isFinite(devNum)) onSelectDeviceRef.current(devNum);
-          closeClusterPopupAnimated();
-        } else {
-          const clusterPoint = map.containerPointToLatLng(L.point(hit.x, hit.y));
-          try {
-            if (map.stop) map.stop();
-            const center = map.getCenter();
-            const dist = L.latLng(center.lat, center.lng).distanceTo(L.latLng(clusterPoint.lat, clusterPoint.lng));
-            if (dist >= 5) {
-              const dur = flyDurationForMeters(dist);
-              map.flyTo([clusterPoint.lat, clusterPoint.lng], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
-            }
-          } catch {
-            // ignore map animation errors
-          }
-          openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items });
-        }
-      } else {
-        const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
-        if (motionHit && onSelectMotionSegmentRef.current) {
-          onSelectMotionSegmentRef.current(motionHit.segment);
-        }
-        closeClusterPopupAnimated();
-      }
-    };
-
-    const onMapMove = (ev: L.LeafletMouseEvent) => {
-      const pt = map.latLngToContainerPoint(ev.latlng);
-      const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-      const anchorHit = canvasApiRef.current?.hitTestAnchor(pt.x, pt.y) ?? null;
-      if (anchorHit) {
-        setAnchorHover({ x: anchorHit.x, y: anchorHit.y, anchor: anchorHit.anchor });
-      } else {
-        setAnchorHover(null);
-      }
-
-      const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
-      if (motionHit) {
-        setMotionHover({ x: motionHit.x, y: motionHit.y, segment: motionHit.segment });
-      } else {
-        setMotionHover(null);
-      }
-
-      const container = map.getContainer();
-      if (hit?.items?.length) {
-        container.style.cursor = "pointer";
-        if (hit.items.length === 1) {
-          const first = hit.items[0];
-          if (first) container.title = deviceNamesRef.current[first.device] ?? String(first.device);
-          else container.title = "";
-        } else {
-          container.title = "";
-        }
-      } else {
-        container.style.cursor = "";
-        container.title = "";
-      }
-    };
-
-    const container = map.getContainer();
-    const onMouseLeave = () => {
-      container.style.cursor = "";
-      container.title = "";
-      setAnchorHover(null);
-      setMotionHover(null);
-    };
-
-    map.on("click", onMapClick);
-    map.on("mousemove", onMapMove);
-    container.addEventListener("mouseleave", onMouseLeave);
+    const map = new MaptilerMap({
+      container,
+      center: initialCenter,
+      zoom: initialZoom,
+      style: darkMode ? MapStyle.DATAVIZ.DARK : MapStyle.DATAVIZ,
+      navigationControl: false,
+      geolocateControl: false,
+      scaleControl: false,
+      fullscreenControl: false,
+    });
 
     mapRef.current = map;
 
     return () => {
-      map.off("move", updateTransform);
-      map.off("zoom", updateTransform);
-      map.off("movestart", startAnimationLoop);
-      map.off("zoomstart", startAnimationLoop);
-      map.off("moveend", stopAnimationLoop);
-      map.off("zoomend", stopAnimationLoop);
-      map.off("click", onMapClick);
-      map.off("mousemove", onMapMove);
-      container.removeEventListener("mouseleave", onMouseLeave);
-      // Stop any ongoing animations before removing the map to prevent errors
-      if (map.stop) map.stop();
-      stopAnimationLoop();
-
-      // Explicitly remove tile layer first to prevent "el is undefined" errors
-      if (tileLayerRef.current) {
-        try {
-          if (map.hasLayer(tileLayerRef.current)) {
-            map.removeLayer(tileLayerRef.current);
-          }
-        } catch {
-          // ignore removal errors
-        }
-        tileLayerRef.current = null;
-      }
-
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [maptilerApiKey]);
 
-  // Update tile layer when maptilerApiKey changes
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-
-    // Optimization: if only changing style (dark mode) and API key matches, try to use setStyle
-    // to avoid destroying/recreating the layer which causes animation errors.
-    if (tileLayerRef.current &&
-      prevMaptilerApiKeyRef.current === maptilerApiKey &&
-      maptilerApiKey) {
-      try {
-        const layer = tileLayerRef.current as InstanceType<typeof MaptilerLayer>;
-        layer.setStyle(darkMode ? "dataviz-dark" : "dataviz");
-      } catch (e) {
-        console.warn("Error updating layer style:", e);
-      }
-    }
-
-    prevMaptilerApiKeyRef.current = maptilerApiKey;
-
-    // Remove existing tile layer safely
-    if (tileLayerRef.current) {
-      try {
-        if (map.hasLayer(tileLayerRef.current)) {
-          map.removeLayer(tileLayerRef.current);
-        }
-      } catch (e) {
-        console.warn("Error removing tile layer:", e);
-      }
-      tileLayerRef.current = null;
-    }
-
-    // Add new tile layer based on API key
-    if (maptilerApiKey) {
-      try {
-        const ml = new MaptilerLayer({
-          apiKey: maptilerApiKey,
-          style: darkMode ? "dataviz-dark" : "dataviz",
-        });
-        ml.addTo(map);
-        tileLayerRef.current = ml;
-      } catch (e) {
-        console.error("Error adding tile layer:", e);
-      }
-    }
+    if (!map || !maptilerApiKey) return;
+    map.setStyle(darkMode ? MapStyle.DATAVIZ.DARK : MapStyle.DATAVIZ);
   }, [maptilerApiKey, darkMode]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || selectedDeviceId != null) return;
-    if (skipNextAutoFitRef.current) {
-      skipNextAutoFitRef.current = false;
-      return;
+    if (!map || components.length === 0) return;
+
+    const keyToIconColor = new Map<string, { icon: string, color: string }>();
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+
+    for (const c of components) {
+      const icon = deviceIcons[c.device] ?? "?";
+      const color = deviceColors[c.device] ?? "#3b82f6";
+      const key = `${icon}-${color}-${darkMode ? 'dark' : 'light'}`;
+      keyToIconColor.set(key, { icon, color });
+
+      features.push({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: [c.lon, c.lat] as [number, number],
+        },
+        properties: {
+          id: c.device,
+          name: deviceNames[c.device] ?? String(c.device),
+          icon,
+          color,
+          accuracy: c.accuracy,
+          imageKey: key,
+        },
+      });
     }
 
-    if (worldBounds && refLat != null && refLon != null) {
-      const sw = coordinateSystemRef.current?.unproject(worldBounds.minX, worldBounds.minY) ?? { lat: 0, lon: 0 };
-      const ne = coordinateSystemRef.current?.unproject(worldBounds.maxX, worldBounds.maxY) ?? { lat: 0, lon: 0 };
-      try {
-        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
-      } catch {
-        map.setView([refLat, refLon], 15);
+    const geojson: GeoJSON.FeatureCollection<GeoJSON.Point> = { type: "FeatureCollection", features };
+
+    const ensureMapLayers = () => {
+      // Ensure source exists
+      let source = map.getSource("devices") as GeoJSONSource | undefined;
+      if (!source) {
+        map.addSource("devices", { type: "geojson", data: geojson });
+      } else {
+        source.setData(geojson);
       }
-    } else if (refLat != null && refLon != null) {
-      map.setView([refLat, refLon], 15);
+
+      // Add missing images
+      for (const [key, { icon, color }] of keyToIconColor) {
+        if (!map.hasImage(key)) {
+          const pinCanvas = createPinImage(icon, color, darkMode);
+          const ctx = pinCanvas.getContext("2d");
+          const imageData = ctx?.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+          if (imageData) {
+            map.addImage(key, imageData);
+          }
+        }
+      }
+
+      // Add layer if not exists
+      if (!map.getLayer("devices")) {
+        map.addLayer({
+          id: "devices",
+          type: "symbol",
+          source: "devices",
+          layout: {
+            "icon-image": ["get", "imageKey"],
+            "icon-size": 1,
+            "icon-anchor": "bottom",
+            "icon-allow-overlap": true,
+          },
+        });
+
+        map.on("click", "devices", (e) => {
+          const features = e.features;
+          if (features && features.length > 0) {
+            const props = features[0]?.properties;
+            if (props) {
+              const id = props["id"];
+              if (typeof id === "number") {
+                onSelectDeviceRef.current(id);
+              }
+            }
+          }
+        });
+
+        map.on("mouseenter", "devices", () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+
+        map.on("mouseleave", "devices", () => {
+          map.getCanvas().style.cursor = "";
+        });
+      }
+    };
+
+    if (map.loaded()) {
+      ensureMapLayers();
     } else {
-      map.setView([0, 0], 2);
+      map.on("load", ensureMapLayers);
     }
 
-    updateTransform();
-  }, [refLat, refLon, worldBounds, selectedDeviceId]);
+    return () => {
+      map.off("load", ensureMapLayers);
+    };
+  }, [components, deviceNames, deviceIcons, deviceColors, darkMode, onSelectDevice]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    if (selectedDeviceId == null) return;
+    if (!map || !worldBounds || refLat == null || refLon == null) return;
 
-    const sel = components.find((c) => Number(c.device) === Number(selectedDeviceId));
-    if (!sel?.mean || refLat == null || refLon == null)
-      return;
+    const sw = { lat: refLat - 0.01, lon: refLon - 0.01 };
+    const ne = { lat: refLat + 0.01, lon: refLon + 0.01 };
 
-    const deg = coordinateSystemRef.current?.unproject(sel.mean[0], sel.mean[1]) ?? { lat: 0, lon: 0 };
-
-    try {
-      const ZOOM_FOR_SELECTED = 18;
-      const PAN_DISTANCE_METERS = 20;
-
-      const center = map.getCenter();
-      const centerLatLng = L.latLng(center.lat, center.lng);
-      const targetLatLng = L.latLng(deg.lat, deg.lon);
-      const distMeters = centerLatLng.distanceTo(targetLatLng);
-
-      if (!selectedZoomedRef.current) {
-        if (map.stop) map.stop();
-        const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
-        if (distMeters < 5) {
-          map.setZoom(targetZoom, { animate: true });
-        } else {
-          const dur = flyDurationForMeters(distMeters);
-          map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
-        }
-        selectedZoomedRef.current = true;
-      } else {
-        if (distMeters > PAN_DISTANCE_METERS) {
-          if (map.stop) map.stop();
-          const dur = flyDurationForMeters(distMeters);
-          map.flyTo([deg.lat, deg.lon], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
-        }
+    if (components.length > 0) {
+      let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
+      for (const c of components) {
+        minLat = Math.min(minLat, c.lat);
+        minLon = Math.min(minLon, c.lon);
+        maxLat = Math.max(maxLat, c.lat);
+        maxLon = Math.max(maxLon, c.lon);
       }
-    } catch {
-      // ignore map animation errors
-    }
-  }, [selectedDeviceId, components, refLat, refLon]);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setSize({ width: el.clientWidth || 0, height: el.clientHeight || 0 });
-      if (mapRef.current) mapRef.current.invalidateSize();
-    });
-    ro.observe(el);
-    setSize({ width: el.clientWidth || 0, height: el.clientHeight || 0 });
-    return () => ro.disconnect();
-  }, []);
-
-  const clusterPoint = useMemo(() => {
-    if (!clusterPopup || !centerMeters || pixelsPerMeter === null) return null;
-    const width = size.width;
-    const height = size.height;
-    const { x: anchorX, y: anchorY } = centerMeters;
-    const localZoom = pixelsPerMeter;
-    if (refLat == null || refLon == null) return null;
-
-    const [meterX, meterY] = coordinateSystemRef.current?.project(clusterPopup.lat, clusterPopup.lng) ?? [0, 0];
-    const x = width / 2 + (meterX - anchorX) * localZoom;
-    const y = height / 2 - (meterY - anchorY) * localZoom;
-
-    return { x, y };
-  }, [clusterPopup, centerMeters, pixelsPerMeter, refLat, refLon, size]);
-
-  const anchorHoverLabel = useMemo(() => {
-    if (!anchorHover) return null;
-    const { anchor } = anchorHover;
-    const typeLabel = anchor.type === "active" ? "Active" : anchor.type === "candidate" ? "Candidate" : anchor.type === "frame" ? "Frame" : "Closed";
-    const started = new Date(anchor.startTimestamp).toLocaleString();
-    const ended = anchor.endTimestamp ? new Date(anchor.endTimestamp).toLocaleString() : null;
-    const updated = new Date(anchor.lastUpdateTimestamp).toLocaleString();
-    return { typeLabel, started, ended, updated, confidence: anchor.confidence };
-  }, [anchorHover]);
-
-  const motionHoverLabel = useMemo(() => {
-    if (!motionHover) return null;
-    const { segment } = motionHover;
-    const started = new Date(segment.startTime).toLocaleString();
-    const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "-";
-
-    // Calculate total distance and duration
-    let distance = 0;
-    let durationMs = 0;
-
-    if (segment.endTime) {
-      durationMs = segment.endTime - segment.startTime;
-    } else if (segment.path.length > 0) {
-      // For in-progress, we don't have an easy "current time" reference here without passing it down, 
-      // but we can approximate or just show "In progress"
-      durationMs = Date.now() - segment.startTime;
+      const padding = 0.005;
+      sw.lat = minLat - padding;
+      sw.lon = minLon - padding;
+      ne.lat = maxLat + padding;
+      ne.lon = maxLon + padding;
     }
 
-    // Calculate distance along path
-    for (let i = 0; i < segment.path.length - 1; i++) {
-      const p1 = segment.path[i]!;
-      const p2 = segment.path[i + 1]!;
-      // Approximate distance in meters (since we have meters in Vec2)
-      const dx = p1[0] - p2[0];
-      const dy = p1[1] - p2[1];
-      distance += Math.sqrt(dx * dx + dy * dy);
-    }
-
-    // Speed (m/s) -> km/h
-    const speedMps = durationMs > 0 ? (distance / (durationMs / 1000)) : 0;
-    const speedKmph = speedMps * 3.6;
-
-    // Format duration
-    const minutes = Math.floor(durationMs / 60000);
-    const seconds = Math.floor((durationMs % 60000) / 1000);
-    const durationStr = `${minutes}m ${seconds}s`;
-
-    return { started, ended, distance: Math.round(distance), duration: durationStr, speed: speedKmph.toFixed(1) };
-  }, [motionHover, timeTick]);
-
-  const pulsingMarkerPositions = useMemo(() => {
-    if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !centerMeters || pixelsPerMeter === null) return [];
-    const width = size.width;
-    const height = size.height;
-    const { x: anchorX, y: anchorY } = centerMeters;
-    const localZoom = pixelsPerMeter;
-
-    const positions: { id: number; x: number; y: number }[] = [];
-
-    for (const id of pulsingDeviceIds) {
-      const comp = components.find(c => Number(c.device) === id);
-      if (!comp?.mean) continue;
-
-      const [devX, devY] = comp.mean;
-      const x = width / 2 + (devX - anchorX) * localZoom;
-      const y = height / 2 - (devY - anchorY) * localZoom;
-
-      positions.push({ id, x, y });
-    }
-
-    return positions;
-  }, [pulsingDeviceIds, components, centerMeters, pixelsPerMeter, size]);
+    map.fitBounds(
+      [sw.lon, sw.lat, ne.lon, ne.lat],
+      { padding: 40, maxZoom: 18, duration: 0 }
+    );
+  }, [worldBounds, refLat, refLon, components]);
 
   return (
-    <div ref={containerRef} className="relative w-full" style={{ height: typeof height === "number" ? `${height}px` : height }}>
-      <style>{`
-        .leaflet-control-attribution {
-          display: none !important;
-        }
-        .leaflet-container {
-          background-color: ${darkMode ? 'rgb(40, 40, 40)' : '#ddd'} !important;
-        }
-      `}</style>
-      <div ref={mapDivRef} className="absolute inset-0 z-0" />
-      <div className="absolute inset-0 pointer-events-none z-[1000]">
-        <CanvasView
-          ref={canvasApiRef}
-          components={components}
-          deviceIcons={deviceIcons}
-          deviceColors={deviceColors}
-          width={size.width}
-          height={size.height}
-          zoom={pixelsPerMeter}
-          refMeters={centerMeters}
-          fitToBounds={false}
-          worldBounds={null}
-          selectedDeviceId={selectedDeviceId}
-          openClusterPoint={clusterPoint}
-          debugFrame={debugFrame ?? null}
-          debugAnchors={debugAnchors ?? []}
-          motionSegments={effectiveMotionSegments}
-          selectedMotionSegment={selectedMotionSegment ?? null}
-          darkMode={darkMode}
-          memberDeviceIds={memberDeviceIds}
-        />
-      </div>
-      {anchorHover && anchorHoverLabel ? (
-        <div
-          className="absolute z-[1003] pointer-events-none"
-          style={{ left: anchorHover.x + 12, top: anchorHover.y + 12 }}
-        >
-          <div className="text-xs bg-background/90 border shadow rounded px-2 py-1 text-foreground backdrop-blur-sm border-border">
-            <div className="font-medium">{anchorHoverLabel.typeLabel} anchor</div>
-            <div>Confidence: {anchorHoverLabel.confidence.toFixed(2)}</div>
-            <div>Started: {anchorHoverLabel.started}</div>
-            {anchorHoverLabel.ended ? <div>Ended: {anchorHoverLabel.ended}</div> : null}
-            <div>Updated: {anchorHoverLabel.updated}</div>
-          </div>
-        </div>
-      ) : null}
-
-      {motionHover && motionHoverLabel ? (
-        <div
-          className="absolute z-[1003] pointer-events-none"
-          style={{ left: motionHover.x + 12, top: motionHover.y + 12 }}
-        >
-          <div className="text-xs bg-background/90 border shadow rounded px-2 py-1 text-foreground backdrop-blur-sm border-border">
-            <div className="font-medium text-emerald-500">Motion Segment</div>
-            <div>Duration: {motionHoverLabel.duration}</div>
-            <div>Distance: {motionHoverLabel.distance}m</div>
-            <div>Avg Speed: {motionHoverLabel.speed} km/h</div>
-            <div>Started: {motionHoverLabel.started}</div>
-            <div>End: {motionHoverLabel.ended}</div>
-          </div>
-        </div>
-      ) : null}
-      {pulsingMarkerPositions.map(pos => (
-        <PulsingMarker key={`pulse-${pos.id}`} x={pos.x} y={pos.y} />
-      ))}
-      {clusterPopup && clusterPoint && (
-        <ClusterPopup
-          x={clusterPoint.x}
-          y={clusterPoint.y}
-          items={clusterPopup.items}
-          animationState={clusterAnimation}
-          onClose={() => closeClusterPopupAnimated()}
-          onSelectDevice={onSelectDevice}
-          darkMode={darkMode}
-          deviceColors={deviceColors}
-          deviceIcons={deviceIcons}
-          deviceNames={deviceNames}
-        />
-      )}
-      <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
-        <div className="w-full sm:w-80 bg-background backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
-          {overlay}
-        </div>
-      </div>
+    <div style={{ height: typeof height === "number" ? `${height}px` : height, position: "relative", width: "100%" }}>
+      <style>{`.maplibregl-ctrl-attrib{display:none}`}</style>
+      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+      {overlay && <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>}
     </div>
   );
 });
