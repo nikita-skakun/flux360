@@ -260,14 +260,16 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     };
 
-    if (map.loaded()) {
+    if (map.isStyleLoaded()) {
       ensureMapLayers();
     } else {
       map.on("load", ensureMapLayers);
+      map.on("styledata", ensureMapLayers);
     }
 
     return () => {
       map.off("load", ensureMapLayers);
+      map.off("styledata", ensureMapLayers);
     };
   }, [components, deviceNames, deviceIcons, deviceColors, darkMode, onSelectDevice]);
 
