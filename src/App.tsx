@@ -224,10 +224,7 @@ export function App() {
       }
     }
 
-    return allComps.filter(
-      (comp) =>
-        activeDevices.has(comp.device) // && !hiddenDevices.has(comp.device)
-    );
+    return allComps.filter((comp) => activeDevices.has(comp.device) && !deviceToGroupsMapRef.has(comp.device));
   }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
 
   const frame = { components: visibleComponents };
@@ -374,9 +371,7 @@ export function App() {
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           if (typeof id === "number") {
-            if (selectedDeviceId === id) {
-              mapViewRef.current?.flyToDevice(id);
-            }
+            mapViewRef.current?.flyToDevice(id);
             setSelectedDeviceId(id);
           }
           setIsSidePanelOpen(false);
@@ -401,10 +396,10 @@ export function App() {
         height="100vh"
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
-          if (selectedDeviceId === id) {
+          if (typeof id === "number") {
             mapViewRef.current?.flyToDevice(id);
+            setSelectedDeviceId(id);
           }
-          setSelectedDeviceId(id);
         }}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
