@@ -306,7 +306,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
   return (
     <div style={{ height: typeof height === "number" ? `${height}px` : height, position: "relative", width: "100%" }}>
-      <style>{`.maplibregl-ctrl-attrib{display:none}`}</style>
+      <style>{`.maplibregl-ctrl-attrib{display:none} .maplibregl-ctrl-bottom-left{display:none}`}</style>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
       {overlay && <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>}
     </div>
