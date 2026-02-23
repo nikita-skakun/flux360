@@ -10,14 +10,14 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 
 type Device = {
-  id: number | string;
-  isGroup?: boolean;
+  id: number;
+  isGroup: boolean;
   name: string;
   emoji: string;
   lastSeen: number | null;
   hasPosition: boolean;
-  memberDeviceIds?: number[];
-  color?: string | null;
+  memberDeviceIds: number[];
+  color: string | null;
 };
 
 const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
@@ -27,15 +27,15 @@ const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) 
 
 const DeviceListSidePanel: React.FC<{
   devices: Device[];
-  selectedDeviceId: number | string | null;
-  onSelectDevice: (id: number | string) => void;
+  selectedDeviceId: number | null;
+  onSelectDevice: (id: number) => void;
   isOpen: boolean;
   onToggle: () => void;
   onCreateGroup: (name: string, memberDeviceIds: number[], emoji: string) => Promise<void>;
   onDeleteGroup: (groupId: number) => Promise<void>;
   onAddDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
   onEditGroup: (groupId: number) => void;
-  onCreateGroupSelectionChange?: (selectedIds: number[]) => void;
+  onCreateGroupSelectionChange: (selectedIds: number[]) => void;
   allDevices: Array<{ id: number; name: string; emoji: string }>;
 }> = ({
   devices,
@@ -50,7 +50,7 @@ const DeviceListSidePanel: React.FC<{
   onCreateGroupSelectionChange,
   allDevices
 }) => {
-    const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
+    const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [mode, setMode] = useState<"list" | "create">("list");
 
     // Context Menu State
@@ -88,7 +88,7 @@ const DeviceListSidePanel: React.FC<{
 
     const { topLevel, memberMap, sort } = useMemo(() => {
       const memberIds = new Set<number>();
-      const map = new Map<number | string, Device>();
+      const map = new Map<number, Device>();
       devices.forEach(d => {
         map.set(d.id, d);
         d.memberDeviceIds?.forEach(id => memberIds.add(id));
@@ -106,7 +106,7 @@ const DeviceListSidePanel: React.FC<{
       return { topLevel: sort(top), memberMap: map, sort };
     }, [devices]);
 
-    const toggle = (e: React.MouseEvent, id: number | string) => {
+    const toggle = (e: React.MouseEvent, id: number) => {
       e.stopPropagation();
       setExpanded(prev => {
         const next = new Set(prev);
@@ -142,8 +142,7 @@ const DeviceListSidePanel: React.FC<{
     };
 
     const renderItem = (device: Device, depth: number = 0, isLast = false, isFirst = false) => {
-      const colorId = typeof device.id === "string" ? device.id.split("-").pop()?.charCodeAt(0) ?? 0 : Number(device.id);
-      const [r, g, b] = colorForDevice(colorId);
+      const [r, g, b] = colorForDevice(device.id);
       const defaultColor = `rgb(${r}, ${g}, ${b})`;
       const colorStr = device.color ?? defaultColor;
       const displayName = device.name || `Device ${device.id}`;
@@ -151,12 +150,11 @@ const DeviceListSidePanel: React.FC<{
         .map(id => memberMap.get(id)).filter((d): d is Device => !!d);
 
       const sortedChildren = sort(children);
-      const isGroup = !!device.isGroup;
 
       return (
-        <React.Fragment key={`${isGroup ? "g" : "d"}-${device.id}`}>
+        <React.Fragment key={`${device.isGroup ? "g" : "d"}-${device.id}`}>
           <li onContextMenu={(e) => {
-            if (isGroup && typeof device.id === 'number') {
+            if (device.isGroup) {
               handleContextMenu(e, device.id);
             }
           }}>
@@ -175,8 +173,8 @@ const DeviceListSidePanel: React.FC<{
                 </div>
               )}
 
-              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => isGroup && toggle(e, device.id)}>
-                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
+              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => device.isGroup && toggle(e, device.id)}>
+                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${device.isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
                   {device.emoji?.length > 1 ? (
                     <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.emoji}</span>
                   ) : (

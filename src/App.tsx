@@ -36,7 +36,8 @@ export function App() {
     const lastSeen: Record<number, number | null> = {};
     for (const id of Object.keys(devices)) {
       const numId = Number(id);
-      const d = devices[numId]!;
+      const d = devices[numId];
+      if (!d) continue;
       names[numId] = d.name;
       colors[numId] = d.color ?? "";
       icons[numId] = d.emoji;
@@ -55,18 +56,6 @@ export function App() {
     }
     return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
   }, [devices, groupDevices]);
-
-  // Build set of member device IDs to hide them on the map (but keep in side panel)
-  // TODO: Re-enable when MapView supports memberDeviceIds prop
-  // const memberDeviceIds = useMemo(() => {
-  //   const memberIds = new Set<number>();
-  //   for (const group of groupDevices) {
-  //     for (const memberId of group.memberDeviceIds) {
-  //       memberIds.add(memberId);
-  //     }
-  //   }
-  //   return memberIds;
-  // }, [groupDevices]);
 
   const positionsAllRef = useStore(state => state.refs.positionsAll);
   const setPositionsAll = useStore(state => state.setPositionsAll);
@@ -293,18 +282,18 @@ export function App() {
   const deviceList = useMemo(() => {
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
     const result: Array<{
-      id: number | string;
+      id: number;
       isGroup: boolean;
       name: string;
       emoji: string;
       lastSeen: number | null;
       hasPosition: boolean;
-      memberDeviceIds?: number[];
-      color?: string | null;
+      memberDeviceIds: number[];
+      color: string | null;
     }> = [];
 
     // Track seen IDs to prevent duplicates
-    const seenIds = new Set<number | string>();
+    const seenIds = new Set<number>();
 
     // Create a set of group IDs to skip when processing individual devices
     const groupIds = new Set(groupDevices.map(g => g.id));
@@ -313,12 +302,7 @@ export function App() {
     for (const [id, name] of Object.entries(deviceNames)) {
       const numId = Number(id);
 
-      if (groupIds.has(numId)) {
-        continue; // Skip if it's a group device
-      }
-      if (seenIds.has(numId)) {
-        continue; // Skip if already added
-      }
+      if (groupIds.has(numId) || seenIds.has(numId)) continue;
 
       const lastSeen = deviceLastSeen[numId] ?? null;
       if (!lastSeen || lastSeen <= cutoff) continue; // Skip old devices
@@ -331,6 +315,7 @@ export function App() {
         emoji: deviceIcons[numId] ?? "device_unknown",
         lastSeen,
         hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
+        memberDeviceIds: [],
         color: color && color !== "" ? color : null,
       });
       seenIds.add(numId);
@@ -393,13 +378,10 @@ export function App() {
         refLat={refLat}
         refLon={refLon}
         worldBounds={worldBounds}
-        height="100vh"
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
-          if (typeof id === "number") {
-            mapViewRef.current?.flyToDevice(id);
-            setSelectedDeviceId(id);
-          }
+          mapViewRef.current?.flyToDevice(id);
+          setSelectedDeviceId(id);
         }}
         deviceNames={deviceNames}
         deviceIcons={deviceIcons}
@@ -453,7 +435,6 @@ export function App() {
                 onClose={() => setSelectedMotionSegment(null)}
               />
             )}
-
           </div>
         }
       />

@@ -58,11 +58,10 @@ type Props = {
   refLat: number | null;
   refLon: number | null;
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
-  height: number | string;
-  overlay?: React.ReactNode;
+  overlay: React.ReactNode;
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
-  maptilerApiKey?: string;
+  maptilerApiKey: string | null;
   darkMode: boolean;
 };
 
@@ -74,7 +73,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   refLat,
   refLon,
   worldBounds,
-  height,
   overlay,
   selectedDeviceId,
   onSelectDevice,
@@ -139,10 +137,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     let initialCenter: Vec2 = [0, 0];
     let initialZoom = 2;
 
-    if (worldBounds && refLat != null && refLon != null) {
-      initialCenter = [refLon, refLat];
-      initialZoom = 15;
-    } else if (refLat != null && refLon != null) {
+    if (refLat != null && refLon != null) {
       initialCenter = [refLon, refLat];
       initialZoom = 15;
     }
@@ -305,10 +300,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   }, [worldBounds, refLat, refLon]);
 
   return (
-    <div style={{ height: typeof height === "number" ? `${height}px` : height, position: "relative", width: "100%" }}>
+    <div style={{ height: "100vh", position: "relative", width: "100%" }}>
       <style>{`.maplibregl-ctrl-attrib{display:none} .maplibregl-ctrl-bottom-left{display:none}`}</style>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
-      {overlay && <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>}
+      <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>
     </div>
   );
 });

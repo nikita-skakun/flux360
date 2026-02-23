@@ -28,7 +28,7 @@ export async function fetchPositions(
   device: number,
   from: Date,
   to: Date | null = null,
-  params: Record<string, string | number | boolean> = {}
+  params: Record<string, string> = {}
 ): Promise<NormalizedPosition[]> {
   const fetcher = opts.fetchImpl ?? fetch;
   const protocol = opts.secure ? 'https' : 'http';
@@ -39,7 +39,7 @@ export async function fetchPositions(
   };
   if (to) paramsBase["to"] = to.toISOString();
   for (const [k, v] of Object.entries(params)) {
-    paramsBase[k] = String(v);
+    paramsBase[k] = v;
   }
 
   const qs = new URLSearchParams(paramsBase).toString();

@@ -8,7 +8,7 @@ type Props = {
 };
 
 export const TimelineSlider: React.FC<Props> = ({ snapshots, time, onChange }: Props) => {
-  const hasSnapshots = snapshots && snapshots.length > 0;
+  const hasSnapshots = snapshots?.length > 0;
 
   if (!hasSnapshots) {
     return (
