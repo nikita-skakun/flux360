@@ -412,22 +412,6 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         }
       }
 
-      // Draw circle highlight for the selected device (if any)
-      for (const item of drawItems) {
-        const { x, y, r, color } = item;
-        if (selectedDeviceId == null || item.device !== selectedDeviceId) continue;
-
-        ctx.save();
-        ctx.fillStyle = rgbaString(color, 0.25);
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = rgbaString(color, 0.4);
-        ctx.stroke();
-        ctx.restore();
-      }
-
       // determine cluster membership
       const clusteredIdxs = new Set<number>();
       for (const cl of clustersRef.current) {

@@ -106,8 +106,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   const selectedDeviceIdRef = useRef(selectedDeviceId);
   const onSelectDeviceRef = useRef(onSelectDevice);
   const hasFittedInitially = useRef(false);
-  
-  const [clusterPopup, setClusterPopup] = useState<{x: number, y: number, items: DevicePoint[]} | null>(null);
+
+  const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
   const updateLayersTimeout = useRef<number | null>(null);
 
   useEffect(() => {
@@ -176,7 +176,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     // Compute clusters
     let clusters = computeClusters(drawItems, CLUSTER_DISTANCE_PX);
-    
+
     // Handle selected device: reposition cluster to selected device's location
     if (selectedDeviceId != null) {
       clusters = clusters.map(cl => {
@@ -232,17 +232,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     // Clusters: size > 1
     for (const cl of clusters) {
       if (cl.size <= 1) continue;
-      
+
       // Representative: selected device if in cluster, else most recent
       const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
-                      cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+        cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
       const repIdx = drawItems.findIndex(di => di.device === repItem.device);
       const rep = drawItems[repIdx];
       if (!rep) continue;
 
       // Convert cluster center to lng/lat
       const centerLL = map.unproject([cl.x, cl.y]);
-      
+
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
         const pinCanvas = createPinImage(rep.iconText, rep.colorHex, darkMode, String(cl.size));
@@ -264,43 +264,24 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     // Update sources
     const dotsSrc = map.getSource('dots-source') as GeoJSONSource;
     if (dotsSrc) dotsSrc.setData({ type: 'FeatureCollection', features: dotsFeatures });
-    
+
     const indSrc = map.getSource('individuals-source') as GeoJSONSource;
     if (indSrc) indSrc.setData({ type: 'FeatureCollection', features: individualsFeatures });
-    
+
     const clSrc = map.getSource('clusters-source') as GeoJSONSource;
     if (clSrc) clSrc.setData({ type: 'FeatureCollection', features: clustersFeatures });
-
-    // Selection highlight
-    const selSrc = map.getSource('selection-source') as GeoJSONSource;
-    if (selSrc) {
-      if (selectedDeviceId != null) {
-        const comp = components.find(c => c.device === selectedDeviceId);
-        if (comp) {
-          const colorHex = deviceColors[selectedDeviceId] ?? '#3b82f6';
-          selSrc.setData({
-            type: 'FeatureCollection',
-            features: [{ type: 'Feature', geometry: { type: 'Point', coordinates: [comp.lon, comp.lat] }, properties: { color: colorHex } }],
-          });
-        } else {
-          selSrc.setData({ type: 'FeatureCollection', features: [] });
-        }
-      } else {
-        selSrc.setData({ type: 'FeatureCollection', features: [] });
-      }
-    }
   }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId]);
 
   const setupLayers = useCallback(() => {
     const map = mapRef.current;
     if (!map) return;
-  
+
     // Add sources (if missing)
     if (!map.getSource('dots-source')) map.addSource('dots-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     if (!map.getSource('individuals-source')) map.addSource('individuals-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
     if (!map.getSource('clusters-source')) map.addSource('clusters-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    if (!map.getSource('selection-source')) map.addSource('selection-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  
+    if (!map.getSource('dots-source')) map.addSource('dots-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
     // Add layers in order (bottom to top)
     if (!map.getLayer('dots-layer')) {
       map.addLayer({
@@ -310,22 +291,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         paint: { 'circle-radius': 3, 'circle-color': ['get', 'color'], 'circle-opacity': 1 },
       });
     }
-  
-    if (!map.getLayer('selection-highlight-layer')) {
-      map.addLayer({
-        id: 'selection-highlight-layer',
-        type: 'circle',
-        source: 'selection-source',
-        paint: {
-          'circle-radius': 15,
-          'circle-color': ['get', 'color'],
-          'circle-opacity': 0.3,
-          'circle-stroke-width': 2,
-          'circle-stroke-color': ['get', 'color'],
-        },
-      });
-    }
-  
+
     if (!map.getLayer('individuals-layer')) {
       map.addLayer({
         id: 'individuals-layer',
@@ -339,7 +305,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         },
       });
     }
-  
+
     if (!map.getLayer('clusters-layer')) {
       map.addLayer({
         id: 'clusters-layer',
@@ -363,7 +329,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     if (!container || !maptilerApiKey) return;
 
     config.apiKey = maptilerApiKey;
-    
+
     let initialCenter: Vec2 = [0, 0];
     let initialZoom = 2;
 
@@ -405,94 +371,94 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
   // Listeners setup
   useEffect(() => {
-      const map = mapRef.current;
-      if (!map) return;
+    const map = mapRef.current;
+    if (!map) return;
 
-      const onMove = () => {
-        if (updateLayersTimeout.current) window.cancelAnimationFrame(updateLayersTimeout.current);
-        updateLayersTimeout.current = window.requestAnimationFrame(() => {
-          updateLayersRef.current();
-        });
-      };
+    const onMove = () => {
+      if (updateLayersTimeout.current) window.cancelAnimationFrame(updateLayersTimeout.current);
+      updateLayersTimeout.current = window.requestAnimationFrame(() => {
+        updateLayersRef.current();
+      });
+    };
 
-      const onIndividualClick = (e: MapMouseEvent) => {
-        e.preventDefault(); 
-        const features = (e as unknown as { features: Feature<Point>[] }).features;
-        const props = features?.[0]?.properties;
-        const device: unknown = props ? props['device'] : undefined;
-        if (typeof device === 'number') {
-          onSelectDeviceRef.current(device);
-          flyToDevice(device);
-        }
-      };
-
-      const onClusterClick = (e: MapMouseEvent) => {
-        e.preventDefault();
-        const features = (e as unknown as { features: Feature<Point>[] }).features;
-        const props = features?.[0]?.properties;
-        const membersProp: unknown = props ? props['members'] : undefined;
-        
-        let memberIds: number[] = [];
-        if (typeof membersProp === 'string') {
-            try { 
-                const parsed: unknown = JSON.parse(membersProp);
-                if (Array.isArray(parsed)) memberIds = parsed as number[];
-            } catch { /* ignore */ }
-        } else if (Array.isArray(membersProp)) {
-            memberIds = membersProp as number[];
-        }
-
-        const coords = features?.[0]?.geometry as Point;
-        if (memberIds && memberIds.length > 0 && coords) {
-          const screen = map.project(coords.coordinates as [number, number]);
-          const items: DevicePoint[] = memberIds.map(deviceId => {
-             const comp = componentsRef.current.find(c => c.device === deviceId);
-             if (comp) return { ...comp };
-             return { device: deviceId, mean: [0, 0] as Vec2, variance: 100, lat: 0, lon: 0, timestamp: 0, accuracy: 0, anchorAgeMs: 0, confidence: 0 };
-          });
-          setClusterPopup({ x: screen.x, y: screen.y, items });
-        }
-      };
-      
-      const onMapClick = (e: MapMouseEvent) => {
-          if (e.defaultPrevented) return;
-          const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer', 'clusters-layer'] });
-          if (!features.length) {
-              setClusterPopup(null);
-          }
-      };
-
-      if (!listenersAttached.current) {
-          map.on('move', onMove);
-          map.on('moveend', onMove);
-          map.on('zoom', onMove);
-          map.on('click', 'individuals-layer', onIndividualClick);
-          map.on('click', 'clusters-layer', onClusterClick);
-          map.on('click', onMapClick);
-          
-          map.on("mouseenter", "individuals-layer", () => { map.getCanvas().style.cursor = "pointer"; });
-          map.on("mouseleave", "individuals-layer", () => { map.getCanvas().style.cursor = ""; });
-          map.on("mouseenter", "clusters-layer", () => { map.getCanvas().style.cursor = "pointer"; });
-          map.on("mouseleave", "clusters-layer", () => { map.getCanvas().style.cursor = ""; });
-          
-          listenersAttached.current = true;
+    const onIndividualClick = (e: MapMouseEvent) => {
+      e.preventDefault();
+      const features = (e as unknown as { features: Feature<Point>[] }).features;
+      const props = features?.[0]?.properties;
+      const device: unknown = props ? props['device'] : undefined;
+      if (typeof device === 'number') {
+        onSelectDeviceRef.current(device);
+        flyToDevice(device);
       }
+    };
+
+    const onClusterClick = (e: MapMouseEvent) => {
+      e.preventDefault();
+      const features = (e as unknown as { features: Feature<Point>[] }).features;
+      const props = features?.[0]?.properties;
+      const membersProp: unknown = props ? props['members'] : undefined;
+
+      let memberIds: number[] = [];
+      if (typeof membersProp === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(membersProp);
+          if (Array.isArray(parsed)) memberIds = parsed as number[];
+        } catch { /* ignore */ }
+      } else if (Array.isArray(membersProp)) {
+        memberIds = membersProp as number[];
+      }
+
+      const coords = features?.[0]?.geometry as Point;
+      if (memberIds && memberIds.length > 0 && coords) {
+        const screen = map.project(coords.coordinates as [number, number]);
+        const items: DevicePoint[] = memberIds.map(deviceId => {
+          const comp = componentsRef.current.find(c => c.device === deviceId);
+          if (comp) return { ...comp };
+          return { device: deviceId, mean: [0, 0] as Vec2, variance: 100, lat: 0, lon: 0, timestamp: 0, accuracy: 0, anchorAgeMs: 0, confidence: 0 };
+        });
+        setClusterPopup({ x: screen.x, y: screen.y, items });
+      }
+    };
+
+    const onMapClick = (e: MapMouseEvent) => {
+      if (e.defaultPrevented) return;
+      const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer', 'clusters-layer'] });
+      if (!features.length) {
+        setClusterPopup(null);
+      }
+    };
+
+    if (!listenersAttached.current) {
+      map.on('move', onMove);
+      map.on('moveend', onMove);
+      map.on('zoom', onMove);
+      map.on('click', 'individuals-layer', onIndividualClick);
+      map.on('click', 'clusters-layer', onClusterClick);
+      map.on('click', onMapClick);
+
+      map.on("mouseenter", "individuals-layer", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "individuals-layer", () => { map.getCanvas().style.cursor = ""; });
+      map.on("mouseenter", "clusters-layer", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "clusters-layer", () => { map.getCanvas().style.cursor = ""; });
+
+      listenersAttached.current = true;
+    }
   }, [maptilerApiKey]);
 
   // Style data listener to restore layers after style change
   useEffect(() => {
-      const map = mapRef.current;
-      if (!map) return;
-      
-      const onStyleData = () => {
-          if (map.isStyleLoaded()) {
-              setupLayers();
-              updateLayersRef.current();
-          }
-      };
-      
-      map.on('styledata', onStyleData);
-      return () => { map?.off('styledata', onStyleData); };
+    const map = mapRef.current;
+    if (!map) return;
+
+    const onStyleData = () => {
+      if (map.isStyleLoaded()) {
+        setupLayers();
+        updateLayersRef.current();
+      }
+    };
+
+    map.on('styledata', onStyleData);
+    return () => { map?.off('styledata', onStyleData); };
   }, [maptilerApiKey, setupLayers]);
 
   // Data update effect
@@ -541,21 +507,21 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>
       {clusterPopup && (
         <div style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20 }}>
-            <ClusterPopup
-              x={clusterPopup.x}
-              y={clusterPopup.y}
-              items={clusterPopup.items}
-              animationState="visible"
-              onClose={() => setClusterPopup(null)}
-              onSelectDevice={(id) => {
-                onSelectDevice(id);
-                setClusterPopup(null);
-              }}
-              darkMode={darkMode}
-              deviceColors={deviceColors}
-              deviceIcons={deviceIcons}
-              deviceNames={deviceNames}
-            />
+          <ClusterPopup
+            x={clusterPopup.x}
+            y={clusterPopup.y}
+            items={clusterPopup.items}
+            animationState="visible"
+            onClose={() => setClusterPopup(null)}
+            onSelectDevice={(id) => {
+              onSelectDevice(id);
+              setClusterPopup(null);
+            }}
+            darkMode={darkMode}
+            deviceColors={deviceColors}
+            deviceIcons={deviceIcons}
+            deviceNames={deviceNames}
+          />
         </div>
       )}
     </div>
