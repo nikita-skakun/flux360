@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import { Pencil, X } from "lucide-react";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { fromWebMercator } from "@/util/webMercator";
 import { Slider } from "@/components/ui/slider";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React from "react";
@@ -18,8 +18,6 @@ type Props = {
   deviceLastSeen: Record<number, number | null>;
   groupDevices: Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>;
   setSelectedDeviceId: (id: number | null) => void;
-  refLat: number | null;
-  refLon: number | null;
   enginesRef: Map<number, Engine>;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
@@ -51,8 +49,6 @@ function DeviceOverlayComponent({
   deviceLastSeen,
   groupDevices,
   setSelectedDeviceId,
-  refLat,
-  refLon,
   enginesRef,
   setEditingTarget,
 }: Props) {
@@ -168,7 +164,7 @@ function DeviceOverlayComponent({
               {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
               <div>Anchor start: {chosenFrame.anchor?.startTimestamp != null ? humanDurationSince(chosenFrame.anchor.startTimestamp) : '—'}</div>
               <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
-              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const cs = new ProjectedCoordinateSystem(refLat ?? 0, refLon ?? 0); const { lat, lon } = cs.unproject(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1]); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
+              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const { lat, lon } = fromWebMercator(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1]); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
               <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
             </div>
           ) : null}

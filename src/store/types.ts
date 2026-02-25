@@ -9,7 +9,6 @@ export type Refs = {
   engines: Map<number, Engine>;
   processedKeys: Set<string>;
   positionsAll: NormalizedPosition[];
-  firstPosition: { lat: number; lon: number } | null;
   engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>;
 };
 
@@ -48,7 +47,6 @@ export type StoreState = {
   positions: {
     allPositions: NormalizedPosition[];
     snapshots: Record<number, DevicePoint[]>;
-    firstPosition: { lat: number; lon: number } | null;
   };
 
   // UI State slice
@@ -98,7 +96,6 @@ export type StoreActions = {
   addPositions: (positions: NormalizedPosition[]) => void;
   processPositions: () => { lat: number; lon: number } | null;
   setSnapshots: (snapshots: Record<number, DevicePoint[]>) => void;
-  setFirstPosition: (pos: { lat: number; lon: number } | null) => void;
   setPositionsAll: (updater: (prev: NormalizedPosition[]) => NormalizedPosition[]) => void;
 
   // Settings

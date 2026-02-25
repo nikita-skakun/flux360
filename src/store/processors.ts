@@ -1,6 +1,6 @@
 import { Engine, type EngineState } from '@/engine/engine';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
-import { ProjectedCoordinateSystem } from '@/util/ProjectedCoordinateSystem';
+import { toWebMercator } from '@/util/webMercator';
 import { rgbToHex } from '@/ui/color';
 import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
@@ -100,9 +100,7 @@ export function computeProcessedPositions(
     engines: Map<number, Engine>,
     engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>,
     groupIds: Set<number>,
-    motionProfiles: Record<number, MotionProfileName>,
-    coordinateSystem: ProjectedCoordinateSystem,
-    firstPosition: { lat: number; lon: number } | null
+    motionProfiles: Record<number, MotionProfileName>
 ) {
     if (!positionsAll || positionsAll.length === 0) return null;
 
@@ -226,7 +224,7 @@ export function computeProcessedPositions(
         const deviceId = Number(deviceKey);
         const isGroup = groupIds.has(deviceId);
         const rawArr: DevicePoint[] = arr.map((p) => {
-            const [x, y] = coordinateSystem.project(p.lat, p.lon);
+            const [x, y] = toWebMercator(p.lat, p.lon);
             const comp: DevicePoint = {
                 mean: [x, y],
                 variance: measurementVarianceFromAccuracy(p.accuracy),
@@ -244,11 +242,7 @@ export function computeProcessedPositions(
         rawByDevice[deviceId] = rawArr;
     }
 
-    let firstPos: { lat: number; lon: number } | null = null;
-    if (!firstPosition && newPositions.length > 0) {
-        const first = newPositions[0]!;
-        firstPos = { lat: first.lat, lon: first.lon };
-    }
+    // No need to track firstPosition anymore
 
     const groupMotionProfiles = new Map<number, MotionProfileName>();
     for (const group of groupDevices) {
@@ -266,7 +260,7 @@ export function computeProcessedPositions(
         groupMotionProfiles.set(group.id, profile);
     }
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, coordinateSystem, positionsAll);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, positionsAll);
 
     // Prune old motion segments from engines based on the current data window
     if (positionsAll.length > 0) {
@@ -307,6 +301,5 @@ export function computeProcessedPositions(
         engineSnapshotsByDevice: result.positionsByDevice,
         dominantAnchors: result.dominantAnchors,
         motionSegments: result.motionSegments,
-        firstPos
     };
 }

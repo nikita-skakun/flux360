@@ -1,7 +1,7 @@
 import { Anchor } from "./anchor";
 import { distanceMeters, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { fromWebMercator } from "@/util/webMercator";
 import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
@@ -21,8 +21,6 @@ export type EngineState = {
   seenDebugKeys: Set<string>;
   motionSegments: MotionSegment[];
   currentMotionSegment: MotionSegment | null;
-  refLat: number | null;
-  refLon: number | null;
 };
 
 const DECAY_RATE_ACTIVE = 0.001;
@@ -63,9 +61,6 @@ export class Engine {
   private seenDebugKeys = new Set<string>();
   motionSegments: MotionSegment[] = [];
   private currentMotionSegment: MotionSegment | null = null;
-  // Reference coordinates for distance calculations
-  private refLat: number | null = null;
-  private refLon: number | null = null;
 
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
 
@@ -99,22 +94,13 @@ export class Engine {
 
   private computePathLength(path: Vec2[]): number {
     if (path.length < 2) return 0;
-    if (this.refLat === null || this.refLon === null) {
-      // Fall back to Euclidean if no reference available
-      let total = 0;
-      for (let i = 1; i < path.length; i++) {
-        total += distanceMeters(path[i - 1]!, path[i]!);
-      }
-      return total;
-    }
     let total = 0;
     for (let i = 1; i < path.length; i++) {
       const p1 = path[i - 1]!;
       const p2 = path[i]!;
-      // Convert back to lat/lon and use haversine for accurate distance
-      const cs = new ProjectedCoordinateSystem(this.refLat, this.refLon);
-      const geo1 = cs.unproject(p1[0], p1[1]);
-      const geo2 = cs.unproject(p2[0], p2[1]);
+      // Convert Web Mercator coordinates to lat/lon and use haversine for accurate distance
+      const geo1 = fromWebMercator(p1[0], p1[1]);
+      const geo2 = fromWebMercator(p2[0], p2[1]);
       total += this.haversineDistance(geo1.lat, geo1.lon, geo2.lat, geo2.lon);
     }
     return total;
@@ -203,11 +189,7 @@ export class Engine {
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     const snapshots: EngineSnapshot[] = [];
     for (const m of ms) {
-      // Capture reference coordinates from first measurement
-      if (this.refLat === null || this.refLon === null) {
-        this.refLat = m.lat;
-        this.refLon = m.lon;
-      }
+      // No reference coordinates needed with Web Mercator
       const profile = this.getProfile(this.motionProfile);
       let motionScore: number | null = null;
       let motionScoreSum: number | null = null;
@@ -449,8 +431,6 @@ export class Engine {
         startTime: this.currentMotionSegment.startTime,
         endTime: this.currentMotionSegment.endTime,
       } : null,
-      refLat: this.refLat,
-      refLon: this.refLon,
     };
   }
 
@@ -490,7 +470,5 @@ export class Engine {
       startTime: state.currentMotionSegment.startTime,
       endTime: state.currentMotionSegment.endTime,
     } : null;
-    this.refLat = state.refLat ?? null;
-    this.refLon = state.refLon ?? null;
   }
 }

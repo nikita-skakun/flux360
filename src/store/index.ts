@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
-import { ProjectedCoordinateSystem } from '@/util/ProjectedCoordinateSystem';
 import { rgbToHex } from '@/ui/color';
 import type { Anchor } from '@/engine/anchor';
 import type { GroupDevice, MotionProfileName, DevicePoint, WorldBounds, NormalizedPosition } from '@/types';
@@ -27,7 +26,6 @@ const initialState: StoreState = {
   positions: {
     allPositions: [],
     snapshots: {},
-    firstPosition: null,
   },
   ui: {
     selectedDeviceId: null,
@@ -45,7 +43,6 @@ const initialState: StoreState = {
     engines: new Map(),
     processedKeys: new Set(),
     positionsAll: [],
-    firstPosition: null,
     engineCheckpoints: new Map(),
   },
   engineSnapshotsByDevice: {},
@@ -404,26 +401,7 @@ export const useStore = create<Store>()(
       processPositions: () => {
         const state = get();
         const { refs } = state;
-        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition, engineCheckpoints } = refs;
-        const { refLat, refLon } = state.ui;
-
-        // Determine effective reference point
-        let effectiveRefLat = refLat;
-        let effectiveRefLon = refLon;
-        if (effectiveRefLat == null || effectiveRefLon == null) {
-          if (firstPosition) {
-            effectiveRefLat = firstPosition.lat;
-            effectiveRefLon = firstPosition.lon;
-          } else if (positionsAll.length > 0) {
-            effectiveRefLat = positionsAll[0]?.lat ?? 0;
-            effectiveRefLon = positionsAll[0]?.lon ?? 0;
-          } else {
-            effectiveRefLat = 0;
-            effectiveRefLon = 0;
-          }
-        }
-
-        const coordinateSystem = new ProjectedCoordinateSystem(effectiveRefLat, effectiveRefLon);
+        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, engineCheckpoints } = refs;
 
         const result = computeProcessedPositions(
           positionsAll,
@@ -433,26 +411,20 @@ export const useStore = create<Store>()(
           engines,
           engineCheckpoints,
           groupIds,
-          state.motionProfiles,
-          coordinateSystem,
-          firstPosition
+          state.motionProfiles
         );
 
         if (!result) return null;
 
-        const { engineSnapshotsByDevice, dominantAnchors, motionSegments, firstPos } = result;
+        const { engineSnapshotsByDevice, dominantAnchors, motionSegments } = result;
 
-        set(state => ({
+        set(() => ({
           engineSnapshotsByDevice,
           dominantAnchors,
           motionSegments,
-          refs: {
-            ...state.refs,
-            firstPosition: firstPos ?? state.refs.firstPosition,
-          }
         }));
 
-        return firstPos;
+        return null;
       },
 
       setSnapshots: (snapshots: Record<number, DevicePoint[]>) => {
@@ -460,15 +432,6 @@ export const useStore = create<Store>()(
           positions: {
             ...state.positions,
             snapshots,
-          }
-        }));
-      },
-
-      setFirstPosition: (pos) => {
-        set(state => ({
-          refs: {
-            ...state.refs,
-            firstPosition: pos,
           }
         }));
       },
@@ -671,10 +634,6 @@ export const useStore = create<Store>()(
         const deviceIds = Object.keys(state.devices).map(id => Number(id));
         if (deviceIds.length === 0) return;
 
-        const refLat = state.ui.refLat ?? state.refs.firstPosition?.lat ?? null;
-        const refLon = state.ui.refLon ?? state.refs.firstPosition?.lon ?? null;
-        if (refLat === null || refLon === null) return;
-
         set(prevState => ({
           retrospective: {
             ...prevState.retrospective,
@@ -692,8 +651,6 @@ export const useStore = create<Store>()(
             const results = analyzeAllDevices(
               state.refs.positionsAll,
               deviceIds,
-              refLat,
-              refLon,
               state.motionProfiles
             );
 

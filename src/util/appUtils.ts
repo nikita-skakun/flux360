@@ -1,7 +1,7 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
 import type { Anchor } from "@/engine/anchor";
 import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2 } from "@/types";
-import type { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { fromWebMercator } from "@/util/webMercator";
 
 export function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -31,7 +31,6 @@ export function buildEngineSnapshotsFromByDevice(
   groupIdsRef: Set<number>,
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
-  coordinateSystem: ProjectedCoordinateSystem,
   positionsAll: NormalizedPosition[]
 ): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null>; motionSegments: Record<number, MotionSegment[]> } {
   try {
@@ -88,8 +87,8 @@ export function buildEngineSnapshotsFromByDevice(
             }
           }
 
-          // Convert anchor mean to lat/lon using coordinate system
-          const { lat, lon } = coordinateSystem.unproject(snapshot.activeAnchor.mean[0], snapshot.activeAnchor.mean[1]);
+          // Convert anchor mean to lat/lon from Web Mercator
+          const { lat, lon } = fromWebMercator(snapshot.activeAnchor.mean[0], snapshot.activeAnchor.mean[1]);
           const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, lat, lon, anchorAgeMs, snapshot.activeConfidence);
           currentSnapshots[dId] = [point];
         } else {

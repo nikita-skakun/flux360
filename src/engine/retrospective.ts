@@ -1,6 +1,6 @@
 import { distanceSquared } from "@/util/geo";
 import { MOTION_PROFILES } from "./motionDetector";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { toWebMercator } from "@/util/webMercator";
 import type { NormalizedPosition, Vec2, MotionProfileName } from "@/types";
 
 export type RetrospectiveMotionSegment = {
@@ -45,12 +45,9 @@ function computePathExtent(points: Vec2[]): number {
 }
 
 function toMeterPoint(
-  p: NormalizedPosition,
-  refLat: number,
-  refLon: number
+  p: NormalizedPosition
 ): { mean: Vec2; timestamp: number; accuracy: number } {
-  const cs = new ProjectedCoordinateSystem(refLat, refLon);
-  const [x, y] = cs.project(p.lat, p.lon);
+  const [x, y] = toWebMercator(p.lat, p.lon);
   return { mean: [x, y], timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
@@ -62,8 +59,6 @@ function getDynamicRadius(accuracy: number, maxStationaryRadius: number): number
 
 export function analyzeMotion(
   positions: NormalizedPosition[],
-  refLat: number,
-  refLon: number,
   motionProfile: MotionProfileName = "person"
 ): RetrospectiveResult {
   if (positions.length === 0) {
@@ -75,7 +70,7 @@ export function analyzeMotion(
   const minStationaryDuration = profile.retrospectiveMinStationaryDuration;
   const maxStationaryRadius = profile.retrospectiveMaxStationaryRadius;
 
-  const meterPoints = sorted.map((p, idx) => ({ ...toMeterPoint(p, refLat, refLon), index: idx }));
+  const meterPoints = sorted.map((p, idx) => ({ ...toMeterPoint(p), index: idx }));
   const len = meterPoints.length;
 
   type StableInterval = {
@@ -279,8 +274,6 @@ export function analyzeMotion(
 export function analyzeAllDevices(
   positions: NormalizedPosition[],
   deviceIds: number[],
-  refLat: number,
-  refLon: number,
   motionProfiles: Record<number, MotionProfileName>
 ): Map<number, RetrospectiveResult> {
   const results = new Map<number, RetrospectiveResult>();
@@ -296,7 +289,7 @@ export function analyzeAllDevices(
   for (const deviceId of deviceIds) {
     const profile = motionProfiles[deviceId] ?? "person";
     const devicePositions = positionsByDevice.get(deviceId) ?? [];
-    const result = analyzeMotion(devicePositions, refLat, refLon, profile);
+    const result = analyzeMotion(devicePositions, profile);
     results.set(deviceId, result);
   }
 

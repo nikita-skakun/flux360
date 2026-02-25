@@ -12,7 +12,6 @@ import UnifiedEditModal from "./ui/UnifiedEditModal";
 export function App() {
   const setRefLat = useStore(state => state.setRefLat);
   const setRefLon = useStore(state => state.setRefLon);
-  const setFirstPosition = useStore(state => state.setFirstPosition);
   const createGroup = useStore(state => state.createGroup);
   const deleteGroup = useStore(state => state.deleteGroup);
   const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
@@ -59,7 +58,6 @@ export function App() {
 
   const positionsAllRef = useStore(state => state.refs.positionsAll);
   const setPositionsAll = useStore(state => state.setPositionsAll);
-  const firstPositionRef = useStore(state => state.refs.firstPosition as { lat: number; lon: number } | null);
   const RECENT_DEVICE_CUTOFF_MS = 96 * 60 * 60 * 1000; // 96 hours
 
   const baseUrlInput = useStore(state => state.settings.inputBaseUrl);
@@ -148,13 +146,12 @@ export function App() {
       const firstPos = positions[0];
       if (firstPos && refLat == null) setRefLat(firstPos.lat);
       if (firstPos && refLon == null) setRefLon(firstPos.lon);
-      if (firstPos && firstPositionRef == null) setFirstPosition({ lat: firstPos.lat, lon: firstPos.lon });
 
       // Run retrospective analysis after positions are processed
       // This corrects motion detection lag by analyzing position history
       runRetrospectiveAnalysis();
     }
-  }, [updateCounter, positions, setPositionsAll, refLat, refLon, firstPositionRef, setRefLat, setRefLon, setFirstPosition, processPositions, runRetrospectiveAnalysis]);
+  }, [updateCounter, positions, setPositionsAll, refLat, refLon, setRefLat, setRefLon, processPositions, runRetrospectiveAnalysis]);
 
   // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
   useEffect(() => {
@@ -420,8 +417,6 @@ export function App() {
               deviceLastSeen={deviceLastSeen}
               groupDevices={groupDevices}
               setSelectedDeviceId={setSelectedDeviceId}
-              refLat={refLat}
-              refLon={refLon}
               enginesRef={enginesRef}
               setEditingTarget={setEditingTarget}
             />
@@ -430,8 +425,6 @@ export function App() {
               <MotionSegmentPanel
                 segment={selectedMotionSegment}
                 debugFrames={[...(enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [])]}
-                refLat={refLat}
-                refLon={refLon}
                 onClose={() => setSelectedMotionSegment(null)}
               />
             )}
