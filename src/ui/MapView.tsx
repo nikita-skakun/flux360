@@ -109,6 +109,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
   const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
   const updateLayersTimeout = useRef<number | null>(null);
+  const lastFeatureState = useRef<string>("");
 
   useEffect(() => {
     componentsRef.current = components;
@@ -154,7 +155,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
   const updateLayers = useCallback(() => {
     const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
+    if (!map) return;
 
     // Determine if a cluster popup is open and which devices it shows
     const hiddenClusterDeviceIds = clusterPopup
@@ -255,7 +256,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (!rep) continue;
 
       // Convert cluster center to lng/lat
-      const centerLL = map.unproject([cl.x, cl.y]);
+      const centerLng = cl.items.reduce((sum, item) => sum + (components[item.idx]?.lon || 0), 0) / cl.size;
+      const centerLat = cl.items.reduce((sum, item) => sum + (components[item.idx]?.lat || 0), 0) / cl.size;
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
@@ -267,7 +269,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       clustersFeatures.push({
         type: 'Feature',
-        geometry: { type: 'Point', coordinates: [centerLL.lng, centerLL.lat] },
+        geometry: { type: 'Point', coordinates: [centerLng, centerLat] },
         properties: {
           clusterIconKey: clusterKey,
           members: cl.items.map(it => it.device),
@@ -275,65 +277,74 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       });
     }
 
-    // Update sources
-    const dotsSrc = map.getSource('dots-source') as GeoJSONSource;
-    if (dotsSrc) dotsSrc.setData({ type: 'FeatureCollection', features: dotsFeatures });
+    // Check if anything fundamentally visually changed
+    const featureStateStr = JSON.stringify({
+      d: dotsFeatures,
+      i: individualsFeatures,
+      c: clustersFeatures
+    });
 
-    const indSrc = map.getSource('individuals-source') as GeoJSONSource;
-    if (indSrc) indSrc.setData({ type: 'FeatureCollection', features: individualsFeatures });
+    try {
+      const hasLayers = !!map.getSource('dots-source');
+      if (hasLayers && lastFeatureState.current === featureStateStr) {
+        return; // Suppress redundant worker calls on MapLibre during pan/zooming
+      }
+      lastFeatureState.current = featureStateStr;
 
-    const clSrc = map.getSource('clusters-source') as GeoJSONSource;
-    if (clSrc) clSrc.setData({ type: 'FeatureCollection', features: clustersFeatures });
+      // Update sources & layers
+      const dotsData = { type: 'FeatureCollection' as const, features: dotsFeatures };
+      if (!map.getSource('dots-source')) {
+        map.addSource('dots-source', { type: 'geojson', data: dotsData });
+        map.addLayer({
+          id: 'dots-layer',
+          type: 'circle',
+          source: 'dots-source',
+          paint: { 'circle-radius': 3, 'circle-color': ['get', 'color'], 'circle-opacity': 1 },
+        });
+      } else {
+        (map.getSource('dots-source') as GeoJSONSource).setData(dotsData);
+      }
+
+      const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
+      if (!map.getSource('individuals-source')) {
+        map.addSource('individuals-source', { type: 'geojson', data: indData });
+        map.addLayer({
+          id: 'individuals-layer',
+          type: 'symbol',
+          source: 'individuals-source',
+          layout: {
+            'icon-image': ['get', 'imageKey'],
+            'icon-size': 1,
+            'icon-anchor': 'bottom',
+            'icon-allow-overlap': true,
+          },
+        });
+      } else {
+        (map.getSource('individuals-source') as GeoJSONSource).setData(indData);
+      }
+
+      const clData = { type: 'FeatureCollection' as const, features: clustersFeatures };
+      if (!map.getSource('clusters-source')) {
+        map.addSource('clusters-source', { type: 'geojson', data: clData });
+        map.addLayer({
+          id: 'clusters-layer',
+          type: 'symbol',
+          source: 'clusters-source',
+          layout: {
+            'icon-image': ['get', 'clusterIconKey'],
+            'icon-size': 1,
+            'icon-anchor': 'bottom',
+            'icon-allow-overlap': true,
+          },
+        });
+      } else {
+        (map.getSource('clusters-source') as GeoJSONSource).setData(clData);
+      }
+    } catch (e: any) {
+      if (e?.message?.includes("Style is not done loading")) return;
+      throw e;
+    }
   }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup]);
-
-  const setupLayers = useCallback(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    // Add sources (if missing)
-    if (!map.getSource('dots-source')) map.addSource('dots-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    if (!map.getSource('individuals-source')) map.addSource('individuals-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    if (!map.getSource('clusters-source')) map.addSource('clusters-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    if (!map.getSource('dots-source')) map.addSource('dots-source', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-
-    // Add layers in order (bottom to top)
-    if (!map.getLayer('dots-layer')) {
-      map.addLayer({
-        id: 'dots-layer',
-        type: 'circle',
-        source: 'dots-source',
-        paint: { 'circle-radius': 3, 'circle-color': ['get', 'color'], 'circle-opacity': 1 },
-      });
-    }
-
-    if (!map.getLayer('individuals-layer')) {
-      map.addLayer({
-        id: 'individuals-layer',
-        type: 'symbol',
-        source: 'individuals-source',
-        layout: {
-          'icon-image': ['get', 'imageKey'],
-          'icon-size': 1,
-          'icon-anchor': 'bottom',
-          'icon-allow-overlap': true,
-        },
-      });
-    }
-
-    if (!map.getLayer('clusters-layer')) {
-      map.addLayer({
-        id: 'clusters-layer',
-        type: 'symbol',
-        source: 'clusters-source',
-        layout: {
-          'icon-image': ['get', 'clusterIconKey'],
-          'icon-size': 1,
-          'icon-anchor': 'bottom',
-          'icon-allow-overlap': true,
-        },
-      });
-    }
-  }, []);
 
   const listenersAttached = useRef(false);
 
@@ -392,6 +403,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (updateLayersTimeout.current) window.cancelAnimationFrame(updateLayersTimeout.current);
       updateLayersTimeout.current = window.requestAnimationFrame(() => {
         updateLayersRef.current();
+        updateLayersTimeout.current = null;
       });
     };
 
@@ -465,20 +477,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     if (!map) return;
 
     const onStyleData = () => {
-      if (map.isStyleLoaded()) {
-        setupLayers();
-        updateLayersRef.current();
-      }
+      updateLayersRef.current();
     };
 
     map.on('styledata', onStyleData);
     return () => { map?.off('styledata', onStyleData); };
-  }, [maptilerApiKey, setupLayers]);
+  }, [maptilerApiKey]);
 
   // Data update effect
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
+    if (!map) return;
     updateLayers();
   }, [components, deviceNames, deviceIcons, deviceColors, darkMode, selectedDeviceId, updateLayers]);
 
