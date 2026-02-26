@@ -200,24 +200,19 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const individualsFeatures: Feature<Point>[] = [];
     const clustersFeatures: Feature<Point>[] = [];
 
-    // Dots: for clustered devices
+    // Track clustered vs individual indices in one pass
     for (let i = 0; i < drawItems.length; i++) {
-      if (clusteredIdxs.has(i)) {
-        const c = components[i]!;
-        const item = drawItems[i]!;
+      const c = components[i]!;
+      const item = drawItems[i]!;
+      const isClustered = clusteredIdxs.has(i);
+
+      if (isClustered) {
         dotsFeatures.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
           properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` },
         });
-      }
-    }
-
-    // Individuals: non-clustered devices
-    for (let i = 0; i < drawItems.length; i++) {
-      if (!clusteredIdxs.has(i)) {
-        const c = components[i]!;
-        const item = drawItems[i]!;
+      } else {
         const imageKey = `${item.iconText}-${item.colorHex}-${darkMode ? 'dark' : 'light'}`;
         if (!map.hasImage(imageKey)) {
           const pinCanvas = createPinImage(item.iconText, item.colorHex, darkMode);
@@ -233,7 +228,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     }
 
-    // Clusters: size > 1
+    // Process clusters
     for (const cl of clusters) {
       if (cl.size <= 1) continue;
 
