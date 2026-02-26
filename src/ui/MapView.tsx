@@ -156,6 +156,11 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
 
+    // Determine if a cluster popup is open and which devices it shows
+    const hiddenClusterDeviceIds = clusterPopup
+      ? new Set(clusterPopup.items.map(item => item.device))
+      : null;
+
     // Project components to screen coords
     const drawItems: (DrawItem & { colorHex: string })[] = components.map((c, idx) => {
       const pt = map.project([c.lon, c.lat]);
@@ -233,6 +238,15 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     for (const cl of clusters) {
       if (cl.size <= 1) continue;
 
+      // Skip the cluster that is currently shown in the popup
+      if (hiddenClusterDeviceIds) {
+        const thisClusterIds = new Set(cl.items.map(it => it.device));
+        if (thisClusterIds.size === hiddenClusterDeviceIds.size &&
+          [...thisClusterIds].every(id => hiddenClusterDeviceIds.has(id))) {
+          continue;
+        }
+      }
+
       // Representative: selected device if in cluster, else most recent
       const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
         cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
@@ -270,7 +284,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     const clSrc = map.getSource('clusters-source') as GeoJSONSource;
     if (clSrc) clSrc.setData({ type: 'FeatureCollection', features: clustersFeatures });
-  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId]);
+  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup]);
 
   const setupLayers = useCallback(() => {
     const map = mapRef.current;
