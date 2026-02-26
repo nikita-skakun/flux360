@@ -108,8 +108,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   const hasFittedInitially = useRef(false);
 
   const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
-  const updateLayersTimeout = useRef<number | null>(null);
-  const lastFeatureState = useRef<string>("");
 
   useEffect(() => {
     componentsRef.current = components;
@@ -277,20 +275,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       });
     }
 
-    // Check if anything fundamentally visually changed
-    const featureStateStr = JSON.stringify({
-      d: dotsFeatures,
-      i: individualsFeatures,
-      c: clustersFeatures
-    });
-
     try {
-      const hasLayers = !!map.getSource('dots-source');
-      if (hasLayers && lastFeatureState.current === featureStateStr) {
-        return; // Suppress redundant worker calls on MapLibre during pan/zooming
-      }
-      lastFeatureState.current = featureStateStr;
-
       // Update sources & layers
       const dotsData = { type: 'FeatureCollection' as const, features: dotsFeatures };
       if (!map.getSource('dots-source')) {
@@ -400,12 +385,15 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     if (!map) return;
 
     const onMove = () => {
-      if (updateLayersTimeout.current) window.cancelAnimationFrame(updateLayersTimeout.current);
-      updateLayersTimeout.current = window.requestAnimationFrame(() => {
-        updateLayersRef.current();
-        updateLayersTimeout.current = null;
-      });
+      updateLayersRef.current();
     };
+
+    // Create an animation loop that fires independently of map tiles loading
+    // MapLibre's 'zoom' and 'move' events get throttled while waiting for tiles.
+    const mapContainer = map.getContainer();
+    const onNativeScroll = () => onMove();
+    mapContainer.addEventListener('wheel', onNativeScroll, { passive: true });
+    mapContainer.addEventListener('touchmove', onNativeScroll, { passive: true });
 
     const onIndividualClick = (e: MapMouseEvent) => {
       e.preventDefault();
@@ -458,6 +446,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       map.on('move', onMove);
       map.on('moveend', onMove);
       map.on('zoom', onMove);
+
       map.on('click', 'individuals-layer', onIndividualClick);
       map.on('click', 'clusters-layer', onClusterClick);
       map.on('click', onMapClick);
@@ -469,6 +458,11 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       listenersAttached.current = true;
     }
+
+    return () => {
+      mapContainer.removeEventListener('wheel', onNativeScroll);
+      mapContainer.removeEventListener('touchmove', onNativeScroll);
+    };
   }, [maptilerApiKey]);
 
   // Style data listener to restore layers after style change
