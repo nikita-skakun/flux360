@@ -1,11 +1,12 @@
 import "@maptiler/sdk/dist/maptiler-sdk.css";
+import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clustering";
+import { ClusterPopup } from "./map/ClusterPopup";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
+import { getColorForDevice } from "./color";
+import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { DevicePoint, Vec2 } from "@/types";
-import type { Feature, Point } from "geojson";
-import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clustering";
-import { getColorForDevice } from "./color";
-import { ClusterPopup } from "./map/ClusterPopup";
+import type { Feature, Point, Polygon } from "geojson";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -199,6 +200,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const dotsFeatures: Feature<Point>[] = [];
     const individualsFeatures: Feature<Point>[] = [];
     const clustersFeatures: Feature<Point>[] = [];
+    const accuracyFeatures: Feature<Polygon>[] = [];
 
     // Track clustered vs individual indices in one pass
     for (let i = 0; i < drawItems.length; i++) {
@@ -226,13 +228,29 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
           properties: { imageKey, device: item.device },
         });
       }
-    }
 
-    // Process clusters
+      // Always draw accuracy circle for selected device regardless of cluster state
+      if (c.device === selectedDeviceId && c.accuracy > 0) {
+        const [cx, cy] = toWebMercator(c.lat, c.lon);
+        const pts = 64;
+        const coords: [number, number][] = [];
+        for (let j = 0; j <= pts; j++) {
+          const angle = (j * 2 * Math.PI) / pts;
+          const { lat, lon } = fromWebMercator(cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle));
+          coords.push([lon, lat]);
+        }
+        accuracyFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [coords] },
+          properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` }
+        });
+      }
+    } // end per-device for loop
+
+    // Process clusters (separate pass after all devices are evaluated)
     for (const cl of clusters) {
       if (cl.size <= 1) continue;
 
-      // Skip the cluster that is currently shown in the popup
       if (hiddenClusterDeviceIds) {
         const thisClusterIds = new Set(cl.items.map(it => it.device));
         if (thisClusterIds.size === hiddenClusterDeviceIds.size &&
@@ -241,16 +259,14 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         }
       }
 
-      // Representative: selected device if in cluster, else most recent
       const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
         cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
       const repIdx = drawItems.findIndex(di => di.device === repItem.device);
       const rep = drawItems[repIdx];
       if (!rep) continue;
 
-      // Convert cluster center to lng/lat
-      const centerLng = cl.items.reduce((sum, item) => sum + (components[item.idx]?.lon || 0), 0) / cl.size;
-      const centerLat = cl.items.reduce((sum, item) => sum + (components[item.idx]?.lat || 0), 0) / cl.size;
+      const centerLng = cl.items.reduce((sum, it) => sum + (components[it.idx]?.lon ?? 0), 0) / cl.size;
+      const centerLat = cl.items.reduce((sum, it) => sum + (components[it.idx]?.lat ?? 0), 0) / cl.size;
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
@@ -271,7 +287,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     }
 
     try {
-      // Update sources & layers
+      // Update sources & layers - initialize on first call, setData on subsequent
       const dotsData = { type: 'FeatureCollection' as const, features: dotsFeatures };
       if (!map.getSource('dots-source')) {
         map.addSource('dots-source', { type: 'geojson', data: dotsData });
@@ -283,6 +299,25 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         (map.getSource('dots-source') as GeoJSONSource).setData(dotsData);
+      }
+
+      const accData = { type: 'FeatureCollection' as const, features: accuracyFeatures };
+      if (!map.getSource('accuracy-source')) {
+        map.addSource('accuracy-source', { type: 'geojson', data: accData });
+        map.addLayer({
+          id: 'accuracy-fill-layer',
+          type: 'fill',
+          source: 'accuracy-source',
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.15 },
+        });
+        map.addLayer({
+          id: 'accuracy-stroke-layer',
+          type: 'line',
+          source: 'accuracy-source',
+          paint: { 'line-color': ['get', 'color'], 'line-width': 1, 'line-opacity': 0.6 },
+        });
+      } else {
+        (map.getSource('accuracy-source') as GeoJSONSource).setData(accData);
       }
 
       const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
@@ -320,8 +355,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       } else {
         (map.getSource('clusters-source') as GeoJSONSource).setData(clData);
       }
-    } catch (e: any) {
-      if (e?.message?.includes("Style is not done loading")) return;
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
   }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup]);
@@ -379,16 +414,16 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
 
+    let rafPending = false;
     const onMove = () => {
-      updateLayersRef.current();
+      if (!rafPending) {
+        rafPending = true;
+        window.requestAnimationFrame(() => {
+          updateLayersRef.current();
+          rafPending = false;
+        });
+      }
     };
-
-    // Create an animation loop that fires independently of map tiles loading
-    // MapLibre's 'zoom' and 'move' events get throttled while waiting for tiles.
-    const mapContainer = map.getContainer();
-    const onNativeScroll = () => onMove();
-    mapContainer.addEventListener('wheel', onNativeScroll, { passive: true });
-    mapContainer.addEventListener('touchmove', onNativeScroll, { passive: true });
 
     const onIndividualClick = (e: MapMouseEvent) => {
       e.preventDefault();
@@ -453,11 +488,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       listenersAttached.current = true;
     }
-
-    return () => {
-      mapContainer.removeEventListener('wheel', onNativeScroll);
-      mapContainer.removeEventListener('touchmove', onNativeScroll);
-    };
   }, [maptilerApiKey]);
 
   // Style data listener to restore layers after style change
