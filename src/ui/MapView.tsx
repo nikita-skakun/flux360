@@ -5,7 +5,7 @@ import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } fr
 import { getColorForDevice } from "./color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2 } from "@/types";
+import type { DevicePoint, Vec2, DebugAnchor } from "@/types";
 import type { Feature, Point, Polygon } from "geojson";
 
 export type MapViewHandle = {
@@ -85,6 +85,7 @@ type Props = {
   onSelectDevice: (id: number) => void;
   maptilerApiKey: string | null;
   darkMode: boolean;
+  debugAnchors?: DebugAnchor[];
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
@@ -100,6 +101,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   onSelectDevice,
   maptilerApiKey,
   darkMode,
+  debugAnchors = [],
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -108,7 +110,11 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   const onSelectDeviceRef = useRef(onSelectDevice);
   const hasFittedInitially = useRef(false);
 
+  type AnchorTooltip = { x: number; y: number; anchor: DebugAnchor };
   const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
+  const [anchorTooltip, setAnchorTooltip] = useState<AnchorTooltip | null>(null);
+  const debugAnchorsRef = useRef<DebugAnchor[]>(debugAnchors);
+  useEffect(() => { debugAnchorsRef.current = debugAnchors; }, [debugAnchors]);
 
   useEffect(() => {
     componentsRef.current = components;
@@ -246,6 +252,31 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     } // end per-device for loop
 
+    // Debug anchor circles
+    const ANCHOR_COLORS: Record<DebugAnchor['type'], string> = {
+      active: '#00bcd4',   // teal
+      closed: '#9e9e9e',   // gray
+    };
+    const anchorCircleFeatures: Feature<Polygon>[] = [];
+    for (let ai = 0; ai < debugAnchors.length; ai++) {
+      const a = debugAnchors[ai]!;
+      const radius = Math.sqrt(Math.max(1, a.variance));
+      const pts = 64;
+      const coords: Vec2[] = [];
+      for (let j = 0; j <= pts; j++) {
+        const angle = (j * 2 * Math.PI) / pts;
+        coords.push(fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]));
+      }
+      anchorCircleFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [coords] },
+        properties: {
+          color: ANCHOR_COLORS[a.type],
+          anchorIndex: ai,
+        },
+      });
+    }
+
     // Process clusters (separate pass after all devices are evaluated)
     for (const cl of clusters) {
       if (cl.size <= 1) continue;
@@ -264,8 +295,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       const rep = drawItems[repIdx];
       if (!rep) continue;
 
-      const centerLng = cl.items.reduce((sum, it) => sum + (components[it.idx]?.lon ?? 0), 0) / cl.size;
-      const centerLat = cl.items.reduce((sum, it) => sum + (components[it.idx]?.lat ?? 0), 0) / cl.size;
+      const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
+      const selComp = selItem ? components[selItem.idx] : null;
+      const markerLng = selComp ? selComp.lon : cl.items.reduce((sum, it) => sum + (components[it.idx]?.lon ?? 0), 0) / cl.size;
+      const markerLat = selComp ? selComp.lat : cl.items.reduce((sum, it) => sum + (components[it.idx]?.lat ?? 0), 0) / cl.size;
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
@@ -277,7 +310,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       clustersFeatures.push({
         type: 'Feature',
-        geometry: { type: 'Point', coordinates: [centerLng, centerLat] },
+        geometry: { type: 'Point', coordinates: [markerLng, markerLat] },
         properties: {
           clusterIconKey: clusterKey,
           members: cl.items.map(it => it.device),
@@ -319,6 +352,31 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         (map.getSource('accuracy-source') as GeoJSONSource).setData(accData);
       }
 
+      const anchorData = { type: 'FeatureCollection' as const, features: anchorCircleFeatures };
+      if (!map.getSource('debug-anchors-source')) {
+        map.addSource('debug-anchors-source', { type: 'geojson', data: anchorData });
+        // Invisible fill for interior hover hit-testing
+        map.addLayer({
+          id: 'debug-anchors-fill-layer',
+          type: 'fill',
+          source: 'debug-anchors-source',
+          paint: { 'fill-opacity': 0 },
+        });
+        // Solid outline — no dasharray so it stays visually consistent across zoom levels
+        map.addLayer({
+          id: 'debug-anchors-layer',
+          type: 'line',
+          source: 'debug-anchors-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 1.5,
+            'line-opacity': 0.85,
+          },
+        });
+      } else {
+        (map.getSource('debug-anchors-source') as GeoJSONSource).setData(anchorData);
+      }
+
       const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
       if (!map.getSource('individuals-source')) {
         map.addSource('individuals-source', { type: 'geojson', data: indData });
@@ -358,7 +416,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup]);
+  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors]);
 
   const listenersAttached = useRef(false);
 
@@ -485,6 +543,26 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       map.on("mouseenter", "clusters-layer", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "clusters-layer", () => { map.getCanvas().style.cursor = ""; });
 
+      // Debug anchor hover — listen on fill layer so tooltip fires anywhere inside the circle
+      map.on("mousemove", "debug-anchors-fill-layer", (e: MapMouseEvent) => {
+        const features = map.queryRenderedFeatures(e.point, { layers: ['debug-anchors-fill-layer'] });
+        let best: DebugAnchor | null = null;
+        for (const f of features) {
+          const idx: unknown = f.properties?.['anchorIndex'];
+          if (typeof idx !== 'number') continue;
+          const anchor = debugAnchorsRef.current[idx];
+          if (anchor && (best === null || anchor.variance < best.variance)) best = anchor;
+        }
+        if (best) {
+          setAnchorTooltip({ x: e.point.x, y: e.point.y, anchor: best });
+          map.getCanvas().style.cursor = 'crosshair';
+        }
+      });
+      map.on("mouseleave", "debug-anchors-fill-layer", () => {
+        setAnchorTooltip(null);
+        map.getCanvas().style.cursor = '';
+      });
+
       listenersAttached.current = true;
     }
   }, [maptilerApiKey]);
@@ -565,6 +643,34 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
           />
         </div>
       )}
+      {anchorTooltip && (() => {
+        const a = anchorTooltip.anchor;
+        const fmt = (ts: number) => { const d = new Date(ts); const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate() ? d.toLocaleTimeString() : d.toLocaleString(); };
+        const radius = Math.round(Math.sqrt(Math.max(1, a.variance)));
+        return (
+          <div style={{
+            position: 'absolute',
+            left: anchorTooltip.x + 12,
+            top: anchorTooltip.y + 12,
+            zIndex: 30,
+            pointerEvents: 'none',
+            background: 'rgba(0,0,0,0.75)',
+            color: '#fff',
+            borderRadius: 6,
+            padding: '6px 10px',
+            fontSize: 12,
+            lineHeight: 1.6,
+            whiteSpace: 'nowrap',
+            borderLeft: `3px solid ${a.type === 'active' ? '#00bcd4' : '#9e9e9e'}`,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>{a.type === 'active' ? '● Active anchor' : '○ Closed anchor'}</div>
+            <div>Radius: {radius} m</div>
+            <div>Confidence: {(a.confidence * 100).toFixed(0)}%</div>
+            <div>Started: {fmt(a.startTimestamp)}</div>
+            {a.endTimestamp && <div>Ended: {fmt(a.endTimestamp)}</div>}
+          </div>
+        );
+      })()}
     </div>
   );
 });

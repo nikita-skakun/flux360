@@ -6,7 +6,7 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment } from "./types";
+import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -215,6 +215,21 @@ export function App() {
 
   const frame = { components: visibleComponents };
 
+  const debugAnchors = useMemo((): DebugAnchor[] => {
+    if (!debugMode || selectedDeviceId == null) return [];
+    const engine = enginesRef.get(selectedDeviceId);
+    if (!engine) return [];
+    const anchors: DebugAnchor[] = [];
+    for (const a of engine.closedAnchors) {
+      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'closed', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp });
+    }
+    if (engine.activeAnchor) {
+      const a = engine.activeAnchor;
+      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'active', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp });
+    }
+    return anchors;
+  }, [debugMode, selectedDeviceId, engineSnapshotsByDevice]);
+
   useEffect(() => {
     if (visibleComponents.length === 0) {
       setWorldBounds(null);
@@ -385,6 +400,7 @@ export function App() {
         deviceColors={deviceColors}
         maptilerApiKey={maptilerApiKey}
         darkMode={isDark}
+        debugAnchors={debugAnchors}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel

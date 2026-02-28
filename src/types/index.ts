@@ -2,6 +2,15 @@ import type { Anchor } from "@/engine/anchor";
 
 export type Vec2 = [number, number];
 
+export type DebugAnchor = {
+  mean: Vec2;        // Web Mercator [x, y]
+  variance: number;  // meters²
+  confidence: number;
+  type: "active" | "closed";
+  startTimestamp: number;
+  endTimestamp: number | null;
+};
+
 export type DevicePoint = {
   device: number;
   sourceDeviceId?: number;
