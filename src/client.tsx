@@ -4,8 +4,7 @@ import { App } from "./App";
 
 const elem = document.getElementById("root")!;
 
-// Wait for fonts to be ready before rendering to ensure canvas icons display correctly
-document.fonts.ready.then(() => {
+const render = () => {
   const app = (
     <StrictMode>
       <App />
@@ -18,4 +17,11 @@ document.fonts.ready.then(() => {
   } else {
     createRoot(elem).render(app);
   }
-});
+};
+
+// Explicitly load icon fonts before first render so ligatures work immediately.
+// Falls back to rendering anyway if fonts fail (e.g. offline).
+Promise.all([
+  document.fonts.load('1em "Material Symbols Outlined"'),
+  document.fonts.load('1em "Material Icons"'),
+]).finally(render);
