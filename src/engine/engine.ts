@@ -96,12 +96,10 @@ export class Engine {
     if (path.length < 2) return 0;
     let total = 0;
     for (let i = 1; i < path.length; i++) {
-      const p1 = path[i - 1]!;
-      const p2 = path[i]!;
       // Convert Web Mercator coordinates to lat/lon and use haversine for accurate distance
-      const geo1 = fromWebMercator(p1[0], p1[1]);
-      const geo2 = fromWebMercator(p2[0], p2[1]);
-      total += this.haversineDistance(geo1.lat, geo1.lon, geo2.lat, geo2.lon);
+      const geo1 = fromWebMercator(path[i - 1]!);
+      const geo2 = fromWebMercator(path[i]!);
+      total += this.haversineDistance(geo1[0], geo1[1], geo2[0], geo2[1]);
     }
     return total;
   }

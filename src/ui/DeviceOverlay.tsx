@@ -164,7 +164,7 @@ function DeviceOverlayComponent({
               {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
               <div>Anchor start: {chosenFrame.anchor?.startTimestamp != null ? humanDurationSince(chosenFrame.anchor.startTimestamp) : '—'}</div>
               <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
-              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const { lat, lon } = fromWebMercator(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1]); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
+              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const [lat, lon] = fromWebMercator(chosenFrame.anchor.mean); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
               <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
             </div>
           ) : null}

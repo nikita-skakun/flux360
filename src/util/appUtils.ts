@@ -88,7 +88,7 @@ export function buildEngineSnapshotsFromByDevice(
           }
 
           // Convert anchor mean to lat/lon from Web Mercator
-          const { lat, lon } = fromWebMercator(snapshot.activeAnchor.mean[0], snapshot.activeAnchor.mean[1]);
+          const [lat, lon] = fromWebMercator(snapshot.activeAnchor.mean);
           const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, lat, lon, anchorAgeMs, snapshot.activeConfidence);
           currentSnapshots[dId] = [point];
         } else {

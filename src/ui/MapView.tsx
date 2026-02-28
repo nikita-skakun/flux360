@@ -231,13 +231,12 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       // Always draw accuracy circle for selected device regardless of cluster state
       if (c.device === selectedDeviceId && c.accuracy > 0) {
-        const [cx, cy] = toWebMercator(c.lat, c.lon);
+        const [cx, cy] = toWebMercator([c.lon, c.lat]);
         const pts = 64;
-        const coords: [number, number][] = [];
+        const coords: Vec2[] = [];
         for (let j = 0; j <= pts; j++) {
           const angle = (j * 2 * Math.PI) / pts;
-          const { lat, lon } = fromWebMercator(cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle));
-          coords.push([lon, lat]);
+          coords.push(fromWebMercator([cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle)]));
         }
         accuracyFeatures.push({
           type: 'Feature',
@@ -454,7 +453,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       const coords = features?.[0]?.geometry as Point;
       if (memberIds && memberIds.length > 0 && coords) {
-        const screen = map.project(coords.coordinates as [number, number]);
+        const screen = map.project(coords.coordinates as Vec2);
         const items: DevicePoint[] = memberIds.map(deviceId => {
           const comp = componentsRef.current.find(c => c.device === deviceId);
           if (comp) return { ...comp };
