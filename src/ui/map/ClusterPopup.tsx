@@ -40,7 +40,7 @@ export const ClusterPopup = React.memo(({
     position: 'absolute', left: `${x}px`, top: `${y}px`, transform: 'translate(-50%, -56%)', opacity: 1,
     transition: `opacity ${CLUSTER_ANIM_MS}ms ease, transform ${CLUSTER_ANIM_MS}ms cubic-bezier(0.16,1,0.3,1)`
   };
-  
+
   if (animationState === 'entering') {
     baseStyle.opacity = 0;
     baseStyle.transform = 'translate(-50%, -46%) scale(0.98)';
@@ -64,12 +64,13 @@ export const ClusterPopup = React.memo(({
           {items.filter(Boolean).map((it, i) => {
             const n = items.length;
             const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
-            const radius = Math.max(40, 22 + n * 6);
+            const radius = Math.max(33, 18 + n * 5);
             const left = Math.round(radius * Math.cos(angle));
             const top = Math.round(radius * Math.sin(angle));
 
             const col: [number, number, number] = getColorForDevice(it.device, deviceColors[it.device]);
             const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
+            const borderColorStr = `rgba(${col[0]}, ${col[1]}, ${col[2]}, 0.7)`;
 
             const enterDelay = i * 20;
             const exitDelay = (n - i - 1) * 15;
@@ -90,12 +91,13 @@ export const ClusterPopup = React.memo(({
             return (
               <div key={`${it.device}-${i}`} style={{ position: 'absolute', left: `${left}px`, top: `${top}px`, transform: 'translate(-50%, -50%)' }}>
                 <div
-                  className="w-10 h-10 rounded-full shadow flex items-center justify-center cursor-pointer hover:scale-110 border-2"
-                  style={{ ...innerStyle, backgroundColor: darkMode ? 'rgb(40,40,40)' : 'rgb(255,255,255)', borderColor: colorStr }}
+                  // PIN_R = 14 in createPinImage → circle diameter = 28 px at icon-size 1
+                  className="rounded-full shadow flex items-center justify-center cursor-pointer hover:scale-110 border-2"
+                  style={{ ...innerStyle, width: 28, height: 28, backgroundColor: darkMode ? 'rgb(40,40,40)' : 'rgb(255,255,255)', borderColor: borderColorStr }}
                   onClick={(e) => { e.stopPropagation(); onSelectDevice(it.device); onClose(); }}
                   title={deviceNames[it.device] ?? String(it.device)}
                 >
-                  <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{deviceIcons[it.device] ?? String(it.device).charAt(0).toUpperCase()}</span>
+                  <span className="material-symbols-outlined select-none" style={{ color: colorStr, fontSize: 14, lineHeight: 1, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{deviceIcons[it.device] ?? String(it.device).charAt(0).toUpperCase()}</span>
                 </div>
               </div>
             );
