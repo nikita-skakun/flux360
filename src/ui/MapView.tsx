@@ -5,7 +5,7 @@ import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } fr
 import { getColorForDevice } from "./color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2, DebugAnchor } from "@/types";
+import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView } from "@/types";
 import type { Feature, Point, Polygon } from "geojson";
 
 export type MapViewHandle = {
@@ -86,6 +86,7 @@ type Props = {
   maptilerApiKey: string | null;
   darkMode: boolean;
   debugAnchors?: DebugAnchor[];
+  debugFrame?: DebugFrameView | null;
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
@@ -102,6 +103,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   maptilerApiKey,
   darkMode,
   debugAnchors = [],
+  debugFrame = null,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -252,6 +254,32 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     } // end per-device for loop
 
+    // Debug frame circles (measurement + anchor at selected frame)
+    type FrameFeature = Feature<Polygon> | Feature<{ type: 'LineString'; coordinates: Vec2[] }>;
+    const debugFrameFeatures: FrameFeature[] = [];
+    if (debugFrame) {
+      const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
+        const pts = 64;
+        const coords: Vec2[] = [];
+        for (let j = 0; j <= pts; j++) {
+          const angle = (j * 2 * Math.PI) / pts;
+          coords.push(fromWebMercator([center[0] + radiusM * Math.cos(angle), center[1] + radiusM * Math.sin(angle)]));
+        }
+        return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } };
+      };
+      if (debugFrame.measurement.accuracy > 0)
+        debugFrameFeatures.push(makeCircle(toWebMercator([debugFrame.measurement.lon, debugFrame.measurement.lat]), debugFrame.measurement.accuracy, 'measurement'));
+      if (debugFrame.anchor) {
+        debugFrameFeatures.push(makeCircle(debugFrame.anchor.mean, Math.sqrt(Math.max(1, debugFrame.anchor.variance)), 'anchor'));
+        // Red line connecting measurement center to anchor center
+        debugFrameFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[debugFrame.measurement.lon, debugFrame.measurement.lat], fromWebMercator(debugFrame.anchor.mean)] },
+          properties: { kind: 'link' },
+        } as FrameFeature);
+      }
+    }
+
     // Debug anchor circles
     const ANCHOR_COLORS: Record<DebugAnchor['type'], string> = {
       active: '#00bcd4',   // teal
@@ -377,6 +405,37 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         (map.getSource('debug-anchors-source') as GeoJSONSource).setData(anchorData);
       }
 
+      const frameData = { type: 'FeatureCollection' as const, features: debugFrameFeatures };
+      if (!map.getSource('debug-frame-source')) {
+        map.addSource('debug-frame-source', { type: 'geojson', data: frameData as never });
+        // Light red fill for measurement circle (no outline)
+        map.addLayer({
+          id: 'debug-frame-fill-layer',
+          type: 'fill',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'measurement'],
+          paint: { 'fill-color': '#f44336', 'fill-opacity': 0.25 },
+        });
+        // Blue outline for anchor-at-frame circle
+        map.addLayer({
+          id: 'debug-frame-anchor-layer',
+          type: 'line',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'anchor'],
+          paint: { 'line-color': '#2196f3', 'line-width': 1.5, 'line-opacity': 0.9 },
+        });
+        // Red line linking measurement center to anchor center
+        map.addLayer({
+          id: 'debug-frame-link-layer',
+          type: 'line',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'link'],
+          paint: { 'line-color': '#f44336', 'line-width': 1.5, 'line-opacity': 0.8 },
+        });
+      } else {
+        (map.getSource('debug-frame-source') as GeoJSONSource).setData(frameData as never);
+      }
+
       const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
       if (!map.getSource('individuals-source')) {
         map.addSource('individuals-source', { type: 'geojson', data: indData });
@@ -416,7 +475,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors]);
+  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame]);
 
   const listenersAttached = useRef(false);
 

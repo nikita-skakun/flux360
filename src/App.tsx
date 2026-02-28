@@ -6,7 +6,7 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor } from "./types";
+import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrameView } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -265,31 +265,20 @@ export function App() {
     setSelectedMotionSegment(null);
   }, [selectedDeviceId]);
 
-  // TODO: Re-enable when MapView supports debug features
-  // // current debug frame to render on the map (if any)
-  // const currentDebugFrame = useMemo(() => {
-  //   if (selectedDeviceId == null || !debugMode) return null;
-  //   const eng = enginesRef.get(selectedDeviceId);
-  //   if (!eng) return null;
-  //   const fr = eng.getDebugFrames();
-  //   if (fr.length === 0) return null;
-  //   return fr[Math.max(0, Math.min(fr.length - 1, debugFrameIndex))] ?? null;
-  // }, [selectedDeviceId, debugMode, enginesRef, debugFrameIndex]);
-
-  // const currentDebugAnchors = useMemo(() => {
-  //   if (selectedDeviceId == null || !debugMode) return [];
-  //   const eng = enginesRef.get(selectedDeviceId);
-  //   if (!eng) return [];
-  //   type AnchorView = { mean: Vec2; variance: number; type: "active" | "candidate" | "closed"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number };
-  //   const anchors: AnchorView[] = [];
-  //   const pushAnchor = (a: typeof eng.activeAnchor, type: AnchorView["type"]) => {
-  //     if (!a) return;
-  //     anchors.push({ mean: a.mean, variance: a.variance, type, startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, confidence: a.confidence, lastUpdateTimestamp: a.lastUpdateTimestamp });
-  //   };
-  //   pushAnchor(eng.activeAnchor, "active");
-  //   for (const a of eng.closedAnchors) pushAnchor(a, "closed");
-  //   return anchors;
-  // }, [selectedDeviceId, debugMode, enginesRef]);
+  // Current debug frame for map rendering
+  const debugFrame = useMemo((): DebugFrameView | null => {
+    if (!debugMode || selectedDeviceId == null) return null;
+    const eng = enginesRef.get(selectedDeviceId);
+    if (!eng) return null;
+    const frames = eng.getDebugFrames();
+    if (frames.length === 0) return null;
+    const f = frames[Math.max(0, Math.min(frames.length - 1, debugFrameIndex))];
+    if (!f) return null;
+    return {
+      measurement: { lat: f.measurement.lat, lon: f.measurement.lon, accuracy: f.measurement.accuracy },
+      anchor: f.anchor ? { mean: f.anchor.mean, variance: f.anchor.variance } : null,
+    };
+  }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
   const deviceList = useMemo(() => {
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
@@ -401,6 +390,7 @@ export function App() {
         maptilerApiKey={maptilerApiKey}
         darkMode={isDark}
         debugAnchors={debugAnchors}
+        debugFrame={debugFrame}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel

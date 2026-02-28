@@ -11,6 +11,14 @@ export type DebugAnchor = {
   endTimestamp: number | null;
 };
 
+/** Snapshot of a single debug frame for map rendering. */
+export type DebugFrameView = {
+  /** GPS measurement: geographic position + accuracy radius in meters. */
+  measurement: { lat: number; lon: number; accuracy: number };
+  /** Anchor state at this frame: Web Mercator center + variance (meters²), or null if no anchor yet. */
+  anchor: { mean: Vec2; variance: number } | null;
+};
+
 export type DevicePoint = {
   device: number;
   sourceDeviceId?: number;
