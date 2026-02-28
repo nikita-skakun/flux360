@@ -85,11 +85,11 @@ function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
 
       <div className="text-xs space-y-1 mb-3 shrink-0">
         <div><strong>Start:</strong> {(() => {
-          const [lat, lon] = fromWebMercator(segment.path[0]!);
+          const [lon, lat] = fromWebMercator(segment.path[0]!);
           return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         })()}</div>
         <div><strong>End:</strong> {(() => {
-          const [lat, lon] = fromWebMercator(segment.path[segment.path.length - 1]!);
+          const [lon, lat] = fromWebMercator(segment.path[segment.path.length - 1]!);
           return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         })()}</div>
       </div>

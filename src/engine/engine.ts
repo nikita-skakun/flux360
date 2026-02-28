@@ -1,7 +1,7 @@
 import { Anchor } from "./anchor";
 import { distanceMeters, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import { fromWebMercator } from "@/util/webMercator";
+import { fromWebMercator, WORLD_R } from "@/util/webMercator";
 import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
@@ -99,20 +99,19 @@ export class Engine {
       // Convert Web Mercator coordinates to lat/lon and use haversine for accurate distance
       const geo1 = fromWebMercator(path[i - 1]!);
       const geo2 = fromWebMercator(path[i]!);
-      total += this.haversineDistance(geo1[0], geo1[1], geo2[0], geo2[1]);
+      total += this.haversineDistance(geo1, geo2);
     }
     return total;
   }
 
-  private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371000; // Earth's radius in meters
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
+  private haversineDistance(v1: Vec2, v2: Vec2): number {
+    const dLon = (v2[0] - v1[0]) * Math.PI / 180;
+    const dLat = (v2[1] - v1[1]) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.cos(v1[1] * Math.PI / 180) * Math.cos(v2[1] * Math.PI / 180) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    return WORLD_R * c;
   }
 
   private arePointsConsistent(points: DevicePoint[], threshold: number): boolean {

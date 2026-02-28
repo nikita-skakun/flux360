@@ -1,6 +1,6 @@
 import type { Vec2 } from "@/types";
 
-const R = 6378137; // Earth's radius in meters for Web Mercator (EPSG:3857)
+export const WORLD_R = 6378137; // Earth's radius in meters for Web Mercator (EPSG:3857)
 
 /**
  * Convert geographic coordinates (lat/lon in degrees) to Web Mercator (meters).
@@ -11,8 +11,8 @@ export function toWebMercator(v: Vec2): Vec2 {
   const longitudeInRadians = (lon * Math.PI) / 180; // longitude in radians
   const latitudeInRadians = (lat * Math.PI) / 180;  // latitude in radians
 
-  const x = R * longitudeInRadians;
-  const y = R * Math.log(Math.tan(Math.PI / 4 + latitudeInRadians / 2));
+  const x = WORLD_R * longitudeInRadians;
+  const y = WORLD_R * Math.log(Math.tan(Math.PI / 4 + latitudeInRadians / 2));
 
   return [x, y];
 }
@@ -22,8 +22,8 @@ export function toWebMercator(v: Vec2): Vec2 {
  */
 export function fromWebMercator(v: Vec2): Vec2 {
   const [x, y] = v;
-  const lon = (x / R) * (180 / Math.PI);
-  const lat = (2 * Math.atan(Math.exp(y / R)) - Math.PI / 2) * (180 / Math.PI);
+  const lon = (x / WORLD_R) * (180 / Math.PI);
+  const lat = (2 * Math.atan(Math.exp(y / WORLD_R)) - Math.PI / 2) * (180 / Math.PI);
 
-  return [lat, lon];
+  return [lon, lat];
 }

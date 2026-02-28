@@ -16,13 +16,12 @@ export function createDevicePoint(
   variance: number,
   timestamp: number,
   deviceId: number,
-  lat: number,
-  lon: number,
+  geo: Vec2,
   anchorAgeMs: number,
   confidence: number
 ): DevicePoint {
   const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, variance))));
-  return { mean, variance, timestamp, device: deviceId, lat, lon, accuracy: accuracyVal, anchorAgeMs, confidence };
+  return { mean, variance, timestamp, device: deviceId, lat: geo[1], lon: geo[0], accuracy: accuracyVal, anchorAgeMs, confidence };
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -88,8 +87,7 @@ export function buildEngineSnapshotsFromByDevice(
           }
 
           // Convert anchor mean to lat/lon from Web Mercator
-          const [lat, lon] = fromWebMercator(snapshot.activeAnchor.mean);
-          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, lat, lon, anchorAgeMs, snapshot.activeConfidence);
+          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, fromWebMercator(snapshot.activeAnchor.mean), anchorAgeMs, snapshot.activeConfidence);
           currentSnapshots[dId] = [point];
         } else {
           currentSnapshots[Number(deviceId)] = [];

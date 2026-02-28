@@ -222,11 +222,9 @@ export function computeProcessedPositions(
     const rawByDevice: Record<number, DevicePoint[]> = {};
     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
         const deviceId = Number(deviceKey);
-        const isGroup = groupIds.has(deviceId);
         const rawArr: DevicePoint[] = arr.map((p) => {
-            const [x, y] = toWebMercator(p.lat, p.lon);
             const comp: DevicePoint = {
-                mean: [x, y],
+                mean: toWebMercator([p.lon, p.lat]),
                 variance: measurementVarianceFromAccuracy(p.accuracy),
                 accuracy: p.accuracy,
                 lat: p.lat,
@@ -235,7 +233,7 @@ export function computeProcessedPositions(
                 timestamp: p.timestamp,
                 anchorAgeMs: 0,
                 confidence: 0,
-                ...(isGroup ? { sourceDeviceId: p.device } : {}),
+                ...(groupIds.has(deviceId) ? { sourceDeviceId: p.device } : {}),
             };
             return comp;
         });
