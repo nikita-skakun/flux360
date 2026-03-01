@@ -135,19 +135,6 @@ const result = await Bun.build({
   ...cliConfig,
 });
 
-// Copy static assets (fonts, images, etc.)
-if (existsSync("src/assets")) {
-  console.log("📁 Copying assets...");
-  const assetFiles = [...new Bun.Glob("**/*").scanSync("src/assets")];
-  for (const assetFile of assetFiles) {
-    const srcPath = path.join("src", "assets", assetFile);
-    const destPath = path.join(outdir, "assets", assetFile);
-    const destDir = path.dirname(destPath);
-    mkdirSync(destDir, { recursive: true });
-    await Bun.write(destPath, await Bun.file(srcPath).arrayBuffer());
-  }
-}
-
 const end = performance.now();
 
 const outputTable = result.outputs.map(output => ({
