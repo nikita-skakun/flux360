@@ -8,10 +8,11 @@ type TraccarConnectionOptions = {
   secure: boolean;
   token: string | null;
   onDevices?: (devices: TraccarDevice[]) => Promise<void>;
+  onPositions?: (positions: NormalizedPosition[]) => void;
 };
 
 export function useTraccarConnection(options: TraccarConnectionOptions) {
-  const { baseUrl, secure, token, onDevices } = options;
+  const { baseUrl, secure, token, onDevices, onPositions } = options;
 
   const [wsStatus, setWsStatus] = useState<"Unknown" | "Connecting" | "Connected" | "Disconnected" | "Error">("Unknown");
   const [wsError, setWsError] = useState<string | null>(null);
@@ -19,9 +20,7 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
 
   const clientCloseRef = useRef<(() => void) | null>(null);
   const seenRef = useRef<Set<string>>(new Set());
-  const positionsAllRef = useRef<NormalizedPosition[]>([]);
   const knownDevices = useRef<Set<number>>(new Set());
-  const [updateCounter, setUpdateCounter] = useState(0);
 
   function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
     return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -37,17 +36,6 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
 
     setWsStatus("Connecting");
     setWsError(null);
-
-    function insertSortedByTimestamp(arr: NormalizedPosition[], item: NormalizedPosition) {
-      let lo = 0;
-      let hi = arr.length;
-      while (lo < hi) {
-        const mid = (lo + hi) >> 1;
-        if ((arr[mid]?.timestamp ?? 0) <= item.timestamp) lo = mid + 1;
-        else hi = mid;
-      }
-      arr.splice(lo, 0, item);
-    }
 
     clientCloseRef.current?.();
 
@@ -67,9 +55,8 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
             const key = dedupeKey(p);
             if (seenRef.current.has(key)) return;
             seenRef.current.add(key);
-            insertSortedByTimestamp(positionsAllRef.current, p);
             knownDevices.current.add(p.device);
-            setUpdateCounter(c => c + 1);
+            if (onPositions) onPositions([p]);
           },
           onOpen: async (): Promise<void> => {
             setWsStatus("Connected");
@@ -101,16 +88,19 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
               });
 
               const results = await Promise.allSettled(fetches);
+              const newPositions: NormalizedPosition[] = [];
               for (const res of results) {
                 if (res.status !== "fulfilled") continue;
                 for (const p of res.value) {
                   const key = dedupeKey(p);
                   if (seenRef.current.has(key)) continue;
                   seenRef.current.add(key);
-                  positionsAllRef.current.push(p);
+                  newPositions.push(p);
                 }
               }
-              setUpdateCounter(c => c + 1);
+              if (onPositions && newPositions.length > 0) {
+                onPositions(newPositions);
+              }
             }
           },
           onClose: (ev) => {
@@ -163,8 +153,6 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
   return {
     wsStatus,
     wsError,
-    positions: positionsAllRef.current,
-    updateCounter,
     reconnect,
     disconnect,
   };

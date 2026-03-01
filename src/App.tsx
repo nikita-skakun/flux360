@@ -13,12 +13,10 @@ export function App() {
   const createGroup = useStore(state => state.createGroup);
   const deleteGroup = useStore(state => state.deleteGroup);
   const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
-  const processPositions = useStore(state => state.processPositions);
+  const addPositions = useStore(state => state.addPositions);
   const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
-
   const groupDevices = useStore(state => state.groups);
-  const deviceToGroupsMapRef = useStore(state => state.refs.deviceToGroupsMap);
-  const groupIdsRef = useStore(state => state.refs.groupIds);
+  const deviceToGroupsMap = useStore(state => state.refs.deviceToGroupsMap);
 
   const enginesRef = useStore(state => state.refs.engines);
   const devices = useStore(state => state.devices);
@@ -50,8 +48,6 @@ export function App() {
     return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
   }, [devices, groupDevices]);
 
-  const positionsAllRef = useStore(state => state.refs.positionsAll);
-  const setPositionsAll = useStore(state => state.setPositionsAll);
   const RECENT_DEVICE_CUTOFF_MS = 96 * 60 * 60 * 1000; // 96 hours
 
   const baseUrlInput = useStore(state => state.settings.inputBaseUrl);
@@ -116,58 +112,18 @@ export function App() {
 
   const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | RetrospectiveMotionSegment | null>(null);
 
-  const { wsStatus, wsError, updateCounter, reconnect, positions } = useTraccarConnection({
+  const { wsStatus, wsError, reconnect } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
     token: traccarToken,
     onDevices: setDevicesFromApi,
+    onPositions: addPositions,
   });
 
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
-  const runRetrospectiveAnalysis = useStore(state => state.runRetrospectiveAnalysis);
-
   const mapViewRef = useRef<MapViewHandle>(null);
-
-  useEffect(() => {
-    if (positions.length > 0) {
-      setPositionsAll(prev => [...prev, ...positions]);
-      processPositions();
-
-      // Run retrospective analysis after positions are processed
-      // This corrects motion detection lag by analyzing position history
-      runRetrospectiveAnalysis();
-    }
-  }, [updateCounter, positions, setPositionsAll, processPositions, runRetrospectiveAnalysis]);
-
-  // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
-  useEffect(() => {
-    deviceToGroupsMapRef.clear();
-    groupIdsRef.clear();
-    for (const groupDevice of groupDevices) {
-      groupIdsRef.add(groupDevice.id);
-      for (const memberId of groupDevice.memberDeviceIds) {
-        if (!deviceToGroupsMapRef.has(memberId)) {
-          deviceToGroupsMapRef.set(memberId, []);
-        }
-        enginesRef.delete(groupDevice.id);
-        const groups = deviceToGroupsMapRef.get(memberId)!;
-        if (!groups.includes(groupDevice.id)) {
-          groups.push(groupDevice.id);
-        }
-      }
-    }
-    // Re-process all existing positions to add them to any new groups
-    // This ensures positions that arrived before the group was created get added to the group
-    // IMPORTANT: Don't filter by processedKeysRef - we need to add positions to NEW groups even if they were already processed for individual devices
-    if (positionsAllRef.length > 0) {
-      for (const groupDevice of groupDevices) {
-        enginesRef.delete(groupDevice.id);
-      }
-      processPositions();
-    }
-  }, [groupDevices, processPositions]);
 
   const applySettings = () => {
     useStore.getState().applySettings();
@@ -198,8 +154,8 @@ export function App() {
       }
     }
 
-    return allComps.filter((comp) => activeDevices.has(comp.device) && !deviceToGroupsMapRef.has(comp.device));
-  }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
+    return allComps.filter((comp) => activeDevices.has(comp.device) && !deviceToGroupsMap.has(comp.device));
+  }, [engineSnapshotsByDevice, deviceLastSeen, deviceToGroupsMap]);
 
   const frame = { components: visibleComponents };
 
@@ -217,24 +173,6 @@ export function App() {
     }
     return anchors;
   }, [debugMode, selectedDeviceId, engineSnapshotsByDevice]);
-
-  const worldBounds = useMemo(() => {
-    if (visibleComponents.length === 0) return null;
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const c of visibleComponents) {
-      const m = c.mean;
-      minX = Math.min(minX, m[0]);
-      minY = Math.min(minY, m[1]);
-      maxX = Math.max(maxX, m[0]);
-      maxY = Math.max(maxY, m[1]);
-    }
-
-    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
-      return null;
-    }
-    return { minX, minY, maxX, maxY };
-  }, [visibleComponents]);
 
   // Reset debug index when device or frame count changes
   useEffect(() => {
@@ -351,7 +289,6 @@ export function App() {
       <MapView
         ref={mapViewRef}
         components={frame.components}
-        worldBounds={worldBounds}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           mapViewRef.current?.flyToDevice(id);

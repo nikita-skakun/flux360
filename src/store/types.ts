@@ -8,7 +8,6 @@ export type Refs = {
   engines: Map<number, Engine>;
   processedKeys: Set<string>;
   positionsAll: NormalizedPosition[];
-  snapshots: Record<number, DevicePoint[]>;
   engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>;
 };
 
@@ -82,12 +81,9 @@ export type StoreActions = {
   // Positions
   addPositions: (positions: NormalizedPosition[]) => void;
   processPositions: () => { lat: number; lon: number } | null;
-  setSnapshots: (snapshots: Record<number, DevicePoint[]>) => void;
-  setPositionsAll: (updater: (prev: NormalizedPosition[]) => NormalizedPosition[]) => void;
 
   // Settings
   applySettings: () => void;
-  clearSettings: () => void;
   setInputBaseUrl: (value: string) => void;
   setInputSecure: (value: boolean) => void;
   setInputToken: (value: string) => void;
@@ -96,20 +92,13 @@ export type StoreActions = {
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;
-  toggleSidePanel: () => void;
   setIsSidePanelOpen: (open: boolean) => void;
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
-  setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
-
-  // Motion segments
-  setMotionSegments: (segments: Record<number, MotionSegment[]>) => void;
 
   // Retrospective analysis actions
   runRetrospectiveAnalysis: () => void;
-  setRetrospectiveResults: (results: Map<number, RetrospectiveResult>) => void;
-  clearRetrospectiveResults: () => void;
 };
 
 export type Store = StoreState & StoreActions;

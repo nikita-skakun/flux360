@@ -11,19 +11,17 @@ export class Anchor {
   confidence: number;
   lastUpdateTimestamp: number;
 
-  constructor(mean: Vec2, variance: number, startTimestamp: number, lastUpdateTimestamp: number, confidence: number = 0.25) {
+  constructor(mean: Vec2, variance: number, startTimestamp: number, lastUpdateTimestamp: number, confidence: number = 0.25, endTimestamp: number | null = null) {
     this.mean = mean;
     this.variance = variance;
     this.startTimestamp = startTimestamp;
-    this.endTimestamp = null;
+    this.endTimestamp = endTimestamp;
     this.confidence = confidence;
     this.lastUpdateTimestamp = lastUpdateTimestamp;
   }
 
   clone(): Anchor {
-    const cloned = new Anchor([this.mean[0], this.mean[1]], this.variance, this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
-    cloned.endTimestamp = this.endTimestamp;
-    return cloned;
+    return new Anchor([this.mean[0], this.mean[1]], this.variance, this.startTimestamp, this.lastUpdateTimestamp, this.confidence, this.endTimestamp);
   }
 
   getConfidence(timestamp: number, decayRate: number): number {

@@ -297,7 +297,6 @@ export function computeProcessedPositions(
 
     return {
         engineSnapshotsByDevice: result.positionsByDevice,
-        dominantAnchors: result.dominantAnchors,
         motionSegments: result.motionSegments,
     };
 }

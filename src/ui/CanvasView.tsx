@@ -17,7 +17,6 @@ export type CanvasViewProps = {
   refMeters: { x: number; y: number };
   zoom: number | null;
   fitToBounds: boolean;
-  worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   selectedDeviceId: number | null;
   openClusterPoint: { x: number; y: number } | null;
   debugFrame: DebugFrame | null;
@@ -53,7 +52,7 @@ function interpolateColor(c1: [number, number, number], c2: [number, number, num
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], selectedMotionSegment, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], selectedMotionSegment, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -231,12 +230,6 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           maxX = Math.max(maxX, p.mean[0]);
           minY = Math.min(minY, p.mean[1]);
           maxY = Math.max(maxY, p.mean[1]);
-        }
-        if (worldBounds) {
-          minX = Math.min(minX, worldBounds.minX);
-          minY = Math.min(minY, worldBounds.minY);
-          maxX = Math.max(maxX, worldBounds.maxX);
-          maxY = Math.max(maxY, worldBounds.maxY);
         }
         const widthMeters = Math.max(1, maxX - minX);
         const heightMeters = Math.max(1, maxY - minY);
@@ -575,7 +568,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none" }} />;
 });

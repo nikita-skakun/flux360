@@ -77,7 +77,6 @@ type Props = {
   deviceNames: Record<number, string>;
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
-  worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
@@ -93,7 +92,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   deviceNames,
   deviceIcons,
   deviceColors,
-  worldBounds,
   overlay,
   selectedDeviceId,
   onSelectDevice,
@@ -711,7 +709,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     if (!map || hasFittedInitially.current) return;
 
     const c = componentsRef.current;
-    if (c.length === 0 && !worldBounds) return;
+    if (c.length === 0) return;
 
     let sw: { lat: number, lon: number }, ne: { lat: number, lon: number };
 
@@ -726,13 +724,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       const padding = 0.005;
       sw = { lat: minLat - padding, lon: minLon - padding };
       ne = { lat: maxLat + padding, lon: maxLon + padding };
-    } else if (worldBounds) {
-      // Fallback to worldBounds if no components yet (not typical)
-      const paddingMeters = 500;
-      const corner1 = fromWebMercator([worldBounds.minX - paddingMeters, worldBounds.minY - paddingMeters]);
-      const corner2 = fromWebMercator([worldBounds.maxX + paddingMeters, worldBounds.maxY + paddingMeters]);
-      sw = { lat: Math.min(corner1[1], corner2[1]), lon: Math.min(corner1[0], corner2[0]) };
-      ne = { lat: Math.max(corner1[1], corner2[1]), lon: Math.max(corner1[0], corner2[0]) };
     } else {
       return;
     }
@@ -743,7 +734,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     );
 
     hasFittedInitially.current = true;
-  }, [worldBounds]);
+  }, []);
 
   return (
     <div style={{ height: "100vh", position: "relative", width: "100%" }}>

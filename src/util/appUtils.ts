@@ -1,5 +1,4 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
-import type { Anchor } from "@/engine/anchor";
 import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2 } from "@/types";
 import { fromWebMercator } from "@/util/webMercator";
 
@@ -21,7 +20,7 @@ export function createDevicePoint(
   confidence: number
 ): DevicePoint {
   const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, variance))));
-  return { mean, variance, timestamp, device: deviceId, lat: geo[1], lon: geo[0], accuracy: accuracyVal, anchorAgeMs, confidence };
+  return { mean, variance, timestamp, device: deviceId, lat: geo[1], lon: geo[0], accuracy: accuracyVal, anchorAgeMs, confidence, sourceDeviceId: undefined };
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -31,7 +30,7 @@ export function buildEngineSnapshotsFromByDevice(
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
   positionsAll: NormalizedPosition[]
-): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; dominantAnchors: Map<number, Anchor | null>; motionSegments: Record<number, MotionSegment[]> } {
+): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; motionSegments: Record<number, MotionSegment[]> } {
   try {
     const measurementsByDevice: Record<number, DevicePoint[]> = {};
 
@@ -53,7 +52,6 @@ export function buildEngineSnapshotsFromByDevice(
 
     const currentSnapshots: Record<number, DevicePoint[]> = {};
     const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
-    const dominantAnchors = new Map<number, Anchor | null>();
     const motionSegments: Record<number, MotionSegment[]> = {};
     for (const deviceId of enginesRef.keys()) {
       try {
@@ -61,7 +59,6 @@ export function buildEngineSnapshotsFromByDevice(
         if (!engine) continue;
         const snapshot = engine.getCurrentSnapshot();
         snapshotsByDevice.set(Number(deviceId), [snapshot]);
-        dominantAnchors.set(Number(deviceId), engine.getDominantAnchorAt(Date.now()));
         motionSegments[deviceId] = engine.motionSegments;
         if (snapshot.activeAnchor) {
           // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
@@ -80,7 +77,7 @@ export function buildEngineSnapshotsFromByDevice(
           if (engine.motionActive) {
             const latestRaw = positionsAll.filter(p => p.device === dId).pop();
             if (latestRaw) {
-              const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1 };
+              const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1, sourceDeviceId: undefined };
               currentSnapshots[dId] = [point];
               continue;
             }
@@ -97,9 +94,9 @@ export function buildEngineSnapshotsFromByDevice(
         // Continue to next device, don't crash everything
       }
     }
-    return { positionsByDevice: currentSnapshots, snapshotsByDevice, dominantAnchors, motionSegments };
+    return { positionsByDevice: currentSnapshots, snapshotsByDevice, motionSegments };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
-    return { positionsByDevice: {}, snapshotsByDevice: new Map(), dominantAnchors: new Map(), motionSegments: {} };
+    return { positionsByDevice: {}, snapshotsByDevice: new Map(), motionSegments: {} };
   }
 }
