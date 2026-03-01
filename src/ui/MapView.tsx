@@ -582,9 +582,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         map.setPaintProperty('pulsing-layer', 'circle-radius', 8 + t * MAX_RADIUS);
         map.setPaintProperty('pulsing-layer', 'circle-stroke-opacity', 1 - t);
       }
-      if (running) requestAnimationFrame(tick);
+      if (running) window.requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    window.requestAnimationFrame(tick);
     return () => { running = false; };
   }, [pulsingDeviceIds]);
 
