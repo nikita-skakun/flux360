@@ -2,7 +2,7 @@ import { Engine, type EngineState } from '@/engine/engine';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
 import { toWebMercator } from '@/util/webMercator';
 import { rgbToHex } from '@/util/color';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 type ColorFunction = (id: number) => [number, number, number];
@@ -13,7 +13,7 @@ export function parseDevices(
 ) {
     const nameMap: Record<number, string> = {};
     const iconMap: Record<number, string> = {};
-    const lastSeenMap: Record<number, number | null> = {};
+    const lastSeenMap: Record<number, Timestamp | null> = {};
     const motionProfileMap: Record<number, MotionProfileName> = {};
     const motionProfileAttributeMap: Record<number, MotionProfileName | null> = {};
     const colorAttributeMap: Record<number, string | null> = {};
@@ -98,7 +98,7 @@ export function computeProcessedPositions(
     deviceToGroupsMap: Map<number, number[]>,
     groupDevices: GroupDevice[],
     engines: Map<number, Engine>,
-    engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>,
+    engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>,
     groupIds: Set<number>,
     motionProfiles: Record<number, MotionProfileName>
 ) {
@@ -187,7 +187,7 @@ export function computeProcessedPositions(
                 }
             }
 
-            let replayFrom = 0;
+            let replayFrom: Timestamp = 0;
             if (cp) {
                 engine.restoreSnapshot(cp.snapshot);
                 replayFrom = cp.timestamp;
@@ -263,7 +263,7 @@ export function computeProcessedPositions(
     // Prune old motion segments from engines based on the current data window
     if (positionsAll.length > 0) {
         // Find the oldest timestamp in the current dataset
-        let minTimestamp = Infinity;
+        let minTimestamp: Timestamp = Infinity;
         for (const p of positionsAll) {
             if (p.timestamp < minTimestamp) minTimestamp = p.timestamp;
         }

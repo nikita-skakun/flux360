@@ -6,7 +6,7 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrameView, UiDevice } from "./types";
+import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -24,7 +24,7 @@ export function App() {
     const names: Record<number, string> = {};
     const colors: Record<number, string> = {};
     const icons: Record<number, string> = {};
-    const lastSeen: Record<number, number | null> = {};
+    const lastSeen: Record<number, Timestamp | null> = {};
     for (const id of Object.keys(devices)) {
       const numId = Number(id);
       const d = devices[numId];
@@ -36,7 +36,7 @@ export function App() {
     }
     // Add groups to deviceLastSeen
     for (const group of groupDevices) {
-      let maxLastSeen: number | null = null;
+      let maxLastSeen: Timestamp | null = null;
       for (const memberId of group.memberDeviceIds) {
         const ts = lastSeen[memberId];
         if (ts && (maxLastSeen == null || ts > maxLastSeen)) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import plugin from "bun-plugin-tailwind";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync } from "fs";
 import { rm } from "fs/promises";
 import path from "path";
 

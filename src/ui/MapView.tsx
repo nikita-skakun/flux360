@@ -7,7 +7,7 @@ import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView } from "@/types";
+import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp } from "@/types";
 import type { Feature, Point, Polygon } from "geojson";
 
 export type MapViewHandle = {
@@ -708,7 +708,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       )}
       {anchorTooltip && (() => {
         const a = anchorTooltip.anchor;
-        const fmt = (ts: number) => { const d = new Date(ts); const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate() ? d.toLocaleTimeString() : d.toLocaleString(); };
+        const fmt = (ts: Timestamp) => { const d = new Date(ts); const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate() ? d.toLocaleTimeString() : d.toLocaleString(); };
         const radius = Math.round(getRadiusFromVariance(a.variance));
         return (
           <div style={{

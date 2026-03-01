@@ -1,8 +1,8 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
-import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2 } from "@/types";
+import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2, Timestamp } from "@/types";
 import { fromWebMercator } from "@/util/webMercator";
 
-export function dedupeKey(p: { device: number; timestamp: number; lat: number; lon: number }) {
+export function dedupeKey(p: { device: number; timestamp: Timestamp; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
 }
 
@@ -13,7 +13,7 @@ export function measurementVarianceFromAccuracy(accuracyMeters: number) {
 export function createDevicePoint(
   mean: Vec2,
   variance: number,
-  timestamp: number,
+  timestamp: Timestamp,
   deviceId: number,
   geo: Vec2,
   anchorAgeMs: number,
@@ -64,13 +64,7 @@ export function buildEngineSnapshotsFromByDevice(
           // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
           const dId = Number(deviceId);
           const measurements: DevicePoint[] = measurementsByDevice[dId] ?? [];
-          const lastTs = engine.lastTimestamp ?? Date.now();
-          let latestMeasurementTime = lastTs;
-          if (measurements.length > 0) {
-            latestMeasurementTime = measurements.at(-1)?.timestamp ?? lastTs;
-          }
-
-          const timestamp = latestMeasurementTime;
+          const timestamp = measurements.at(-1)?.timestamp ?? engine.lastTimestamp ?? Date.now();
           const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
           const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
 

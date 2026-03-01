@@ -9,9 +9,9 @@ import { Separator } from "@/components/ui/separator";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 
-import type { UiDevice } from "@/types";
+import type { UiDevice, Timestamp } from "@/types";
 
-const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
+const LastSeenDisplay: React.FC<{ timestamp: Timestamp | null }> = ({ timestamp }) => {
   const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
   return <>{timeAgo}</>;
 };

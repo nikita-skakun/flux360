@@ -1,10 +1,11 @@
 import { performGet, performPost, performPut, performDelete, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
+import type { Timestamp } from "@/types";
 
 export type TraccarDevice = {
   id: number;
   name: string;
   emoji: string;
-  lastSeen: number | null;
+  lastSeen: Timestamp | null;
   attributes: Record<string, unknown>;
 };
 

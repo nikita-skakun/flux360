@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
+import type { Timestamp } from "@/types";
 
-function humanDurationSince(ts: number, now: number = Date.now()): string {
+function humanDurationSince(ts: Timestamp, now: Timestamp = Date.now() as Timestamp): string {
   const sec = Math.round((now - ts) / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.round(sec / 60);
@@ -10,7 +11,7 @@ function humanDurationSince(ts: number, now: number = Date.now()): string {
   return `${Math.round(hrs / 24)}d`;
 }
 
-function getUpdateInterval(ts: number): number {
+function getUpdateInterval(ts: Timestamp): number {
   const sec = (Date.now() - ts) / 1000;
   if (sec < 60) return 1000;
   if (sec < 3600) return 60000;
@@ -18,18 +19,18 @@ function getUpdateInterval(ts: number): number {
   return 86400000;
 }
 
-export function useTimeAgo(ts: number): string {
+export function useTimeAgo(ts: Timestamp): string {
   const [, setTick] = useState(0);
-  
+
   const interval = useMemo(() => getUpdateInterval(ts), [ts]);
-  
-  useEffect(() => {   
+
+  useEffect(() => {
     const id = setInterval(() => {
       setTick(t => t + 1);
     }, interval);
-    
+
     return () => clearInterval(id);
   }, [ts, interval]);
-  
+
   return humanDurationSince(ts) + " ago";
 }

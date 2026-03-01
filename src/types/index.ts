@@ -1,5 +1,7 @@
 import type { Anchor } from "@/engine/anchor";
 
+export type Timestamp = number & { readonly __u?: 'timestamp' };
+
 export type Vec2 = [number, number];
 
 export type DebugAnchor = {
@@ -7,9 +9,9 @@ export type DebugAnchor = {
   variance: number;  // meters²
   confidence: number;
   type: "active" | "candidate" | "closed" | "frame";
-  startTimestamp: number;
-  endTimestamp: number | null;
-  lastUpdateTimestamp: number;
+  startTimestamp: Timestamp;
+  endTimestamp: Timestamp | null;
+  lastUpdateTimestamp: Timestamp;
 };
 
 /** Snapshot of a single debug frame for map rendering. */
@@ -27,10 +29,10 @@ export type DebugFrameView = {
     mean: Vec2;
     variance: number;
     confidence: number;
-    startTimestamp: number;
-    lastUpdateTimestamp: number;
+    startTimestamp: Timestamp;
+    lastUpdateTimestamp: Timestamp;
   } | null;
-  timestamp: number;
+  timestamp: Timestamp;
 };
 
 export type DevicePoint = {
@@ -40,7 +42,7 @@ export type DevicePoint = {
   lon: number;
   mean: Vec2;
   variance: number;
-  timestamp: number;
+  timestamp: Timestamp;
   accuracy: number;
   anchorAgeMs: number;
   confidence: number;
@@ -48,7 +50,7 @@ export type DevicePoint = {
 
 export type NormalizedPosition = {
   device: number;
-  timestamp: number; // epoch ms
+  timestamp: Timestamp;
   lat: number;
   lon: number;
   accuracy: number; // meters
@@ -72,7 +74,7 @@ export type UiDevice = {
   isGroup: boolean;
   name: string;
   emoji: string;
-  lastSeen: number | null;
+  lastSeen: Timestamp | null;
   hasPosition: boolean;
   memberDeviceIds: number[];
   color: string | null;
@@ -82,14 +84,14 @@ export type MotionSegment = {
   startAnchor: Anchor;
   endAnchor: Anchor | null;
   path: Vec2[];
-  startTime: number;
-  endTime: number | null;
+  startTime: Timestamp;
+  endTime: Timestamp | null;
 };
 
 // Retrospective analysis types
 export type RetrospectiveMotionSegment = {
-  startTime: number;
-  endTime: number;
+  startTime: Timestamp;
+  endTime: Timestamp;
   startPosition: Vec2;
   endPosition: Vec2;
   path: Vec2[];

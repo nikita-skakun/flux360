@@ -1,11 +1,11 @@
 import { distanceSquared } from "@/util/geo";
 import { MOTION_PROFILES } from "./motionDetector";
 import { toWebMercator } from "@/util/webMercator";
-import type { NormalizedPosition, Vec2, MotionProfileName } from "@/types";
+import type { NormalizedPosition, Vec2, MotionProfileName, Timestamp } from "@/types";
 
 export type RetrospectiveMotionSegment = {
-  startTime: number;
-  endTime: number;
+  startTime: Timestamp;
+  endTime: Timestamp;
   startPosition: Vec2;
   endPosition: Vec2;
   path: Vec2[];
@@ -39,7 +39,7 @@ function computePathExtent(points: Vec2[]): number {
 
 function toMeterPoint(
   p: NormalizedPosition
-): { mean: Vec2; timestamp: number; accuracy: number } {
+): { mean: Vec2; timestamp: Timestamp; accuracy: number } {
   return { mean: toWebMercator([p.lon, p.lat]), timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
@@ -69,8 +69,8 @@ export function analyzeMotion(
     startIndex: number;
     endIndex: number;
     center: Vec2;
-    startTime: number;
-    endTime: number;
+    startTime: Timestamp;
+    endTime: Timestamp;
     avgAccuracy: number;
   };
 

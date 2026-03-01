@@ -6,7 +6,7 @@ import { fromWebMercator } from "@/util/webMercator";
 import { Slider } from "@/components/ui/slider";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React from "react";
-import type { DevicePoint } from "@/types";
+import type { DevicePoint, Timestamp } from "@/types";
 
 type Props = {
   selectedDeviceId: number | null;
@@ -15,14 +15,14 @@ type Props = {
   debugFrameIndex: number;
   setDebugFrameIndex: (value: number) => void;
   deviceNames: Record<number, string>;
-  deviceLastSeen: Record<number, number | null>;
+  deviceLastSeen: Record<number, Timestamp | null>;
   groupDevices: Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>;
   setSelectedDeviceId: (id: number | null) => void;
   enginesRef: Map<number, Engine>;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
 
-function humanDurationSince(ts: number, now: number = Date.now()): string {
+function humanDurationSince(ts: Timestamp, now: Timestamp = Date.now() as Timestamp): string {
   const s = Math.round((now - (ts ?? now)) / 1000);
   if (s < 5) return "just now";
   if (s < 60) return `${s}s`;
@@ -34,7 +34,7 @@ function humanDurationSince(ts: number, now: number = Date.now()): string {
   return `${d}d`;
 }
 
-const DurationDisplay: React.FC<{ timestamp: number }> = ({ timestamp }) => {
+const DurationDisplay: React.FC<{ timestamp: Timestamp }> = ({ timestamp }) => {
   const timeAgo = useTimeAgo(timestamp);
   return <>{timeAgo}</>;
 };

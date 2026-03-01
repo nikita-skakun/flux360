@@ -1,4 +1,6 @@
-export type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: number; iconText: string; color: [number, number, number]; };
+import type { Timestamp } from "@/types";
+
+export type DrawItem = { idx: number; device: number; x: number; y: number; r: number; timestamp: Timestamp; iconText: string; color: [number, number, number]; };
 export type Cluster = { items: DrawItem[]; x: number; y: number; size: number; radius: number };
 
 export const CLUSTER_DISTANCE_PX = 36;

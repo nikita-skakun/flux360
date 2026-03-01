@@ -2,19 +2,19 @@ import { Anchor } from "./anchor";
 import { distance, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
 import { fromWebMercator, WORLD_R } from "@/util/webMercator";
-import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
+import type { DevicePoint, MotionProfileName, MotionSegment, Timestamp, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
-export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: number | null; activeConfidence: number };
+export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: Timestamp | null; activeConfidence: number };
 
 // Full engine state for checkpointing
 export type EngineState = {
   activeAnchor: Anchor | null;
   closedAnchors: Anchor[];
-  lastTimestamp: number | null;
+  lastTimestamp: Timestamp | null;
   motionProfile: MotionProfileName;
   motionActive: boolean;
-  motionStartTimestamp: number | null;
+  motionStartTimestamp: Timestamp | null;
   outliers: OutlierSample[];
   recentMotionPoints: DevicePoint[];
   debugFrames: DebugFrame[];
@@ -28,10 +28,10 @@ const GAIN_RATE = 2.0;
 
 export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
 export type DebugFrame = {
-  timestamp: number;
+  timestamp: Timestamp;
   sourceDeviceId: number | undefined;
   motionActive: boolean;
-  motionStartTimestamp: number | null;
+  motionStartTimestamp: Timestamp | null;
   outlierCount: number;
   motionScore: number | null;
   motionScoreSum: number | null;
@@ -41,7 +41,7 @@ export type DebugFrame = {
   motionSinglePointOverride: boolean | null;
   anchorVarianceScale: number | null;
   measurement: { lat: number; lon: number; accuracy: number; mean: Vec2; variance: number; };
-  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: Timestamp; lastUpdateTimestamp: Timestamp } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
   trendSeparation: number | null;
@@ -50,10 +50,10 @@ export type DebugFrame = {
 export class Engine {
   activeAnchor: Anchor | null = null;
   closedAnchors: Anchor[] = [];
-  lastTimestamp: number | null = null;
+  lastTimestamp: Timestamp | null = null;
   motionProfile: MotionProfileName = "person";
   motionActive: boolean = false;
-  motionStartTimestamp: number | null = null;
+  motionStartTimestamp: Timestamp | null = null;
   private outliers: OutlierSample[] = [];
   private recentMotionPoints: DevicePoint[] = [];
   // debug buffer (per-engine)
@@ -378,10 +378,10 @@ export class Engine {
   }
 
   getCurrentSnapshot(): EngineSnapshot {
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
+    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as Timestamp, DECAY_RATE_ACTIVE) : 0 };
   }
 
-  getDominantAnchorAt(timestamp: number): Anchor | null {
+  getDominantAnchorAt(timestamp: Timestamp): Anchor | null {
     const candidates: Anchor[] = [];
     if (this.activeAnchor && this.activeAnchor.startTimestamp <= timestamp) {
       candidates.push(this.activeAnchor);
@@ -433,7 +433,7 @@ export class Engine {
     };
   }
 
-  pruneHistory(olderThan: number) {
+  pruneHistory(olderThan: Timestamp) {
     // Remove completed segments that ended before the cutoff time
     this.motionSegments = this.motionSegments.filter(s => {
       // Keep active segments

@@ -3,7 +3,7 @@ import { fromWebMercator } from "@/util/webMercator";
 import { X } from "lucide-react";
 import React from "react";
 import type { DebugFrame } from "@/engine/engine";
-import type { MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
+import type { MotionSegment, RetrospectiveMotionSegment, Timestamp, Vec2 } from "@/types";
 
 type Props = {
   segment: MotionSegment | RetrospectiveMotionSegment;
@@ -22,7 +22,7 @@ function formatDuration(ms: number): string {
   return `${h}h ${min}m`;
 }
 
-function formatTimestamp(ts: number): string {
+function formatTimestamp(ts: Timestamp): string {
   return new Date(ts).toLocaleString();
 }
 
