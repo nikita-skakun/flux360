@@ -157,7 +157,7 @@ function DeviceOverlayComponent({
               {chosenFrame.motionTimeFactor != null ? <div>Time factor: {chosenFrame.motionTimeFactor.toFixed(2)}</div> : null}
               {chosenFrame.motionCoherent != null ? <div>Coherent: {chosenFrame.motionCoherent ? 'yes' : 'no'}</div> : null}
               {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
-              <div>Outliers: {chosenFrame.outlierCount}</div>
+              {chosenFrame.outlierCount > 0 ? <div>Outliers: {chosenFrame.outlierCount}</div> : null}
               {chosenFrame.anchorVarianceScale != null ? <div>Anchor var inflate: ×{chosenFrame.anchorVarianceScale.toFixed(2)}</div> : null}
               <div>Confidence: {chosenFrame.anchor ? chosenFrame.anchor.confidence.toFixed(2) : '—'}</div>
               <div>Decision: <strong>{chosenFrame.decision}</strong></div>
