@@ -61,7 +61,7 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
 
     ws.onmessage = (ev: MessageEvent) => {
       try {
-        const raw: unknown = typeof ev.data === "string" ? JSON.parse(ev.data) as unknown : ev.data;
+        const raw: unknown = typeof ev.data === "string" ? JSON.parse(ev.data) as unknown : ev.data as unknown;
         const positions = extractPositionsFromMessage(raw);
         if (positions.length > 0) {
           for (const p of positions) opts.onPosition?.(p);
@@ -166,8 +166,9 @@ export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] 
       return;
     }
     const obj = node as Record<string, unknown>;
-    for (const k of ["positions", "data", "payload", "body", "message"]) {
-      if (obj[k] !== undefined) walk(obj[k]);
+    const searchKeys = ["positions", "data", "payload", "body", "message"] as const;
+    for (const k of searchKeys) {
+      if (k in obj) walk(obj[k]);
     }
     for (const v of Object.values(obj)) walk(v);
   }

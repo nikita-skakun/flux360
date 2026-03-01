@@ -21,7 +21,7 @@ export type DebugFrameView = {
 
 export type DevicePoint = {
   device: number;
-  sourceDeviceId?: number;
+  sourceDeviceId: number | undefined;
   lat: number;
   lon: number;
   mean: Vec2;
@@ -51,6 +51,17 @@ export type GroupDevice = {
   color: string;
   memberDeviceIds: number[];
   motionProfile: MotionProfileName | null;
+};
+
+export type UiDevice = {
+  id: number;
+  isGroup: boolean;
+  name: string;
+  emoji: string;
+  lastSeen: number | null;
+  hasPosition: boolean;
+  memberDeviceIds: number[];
+  color: string | null;
 };
 
 export type MotionSegment = {

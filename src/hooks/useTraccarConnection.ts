@@ -1,13 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { NormalizedPosition } from "@/types";
 
-interface TraccarDevice {
-  id: number;
-  name: string;
-  emoji: string;
-  lastSeen: number | null;
-  attributes: Record<string, unknown>;
-}
+import type { TraccarDevice } from "@/api/devices";
 
 type TraccarConnectionOptions = {
   baseUrl: string | null;

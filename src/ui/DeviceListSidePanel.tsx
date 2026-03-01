@@ -9,16 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 
-type Device = {
-  id: number;
-  isGroup: boolean;
-  name: string;
-  emoji: string;
-  lastSeen: number | null;
-  hasPosition: boolean;
-  memberDeviceIds: number[];
-  color: string | null;
-};
+import type { UiDevice } from "@/types";
 
 const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
   const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
@@ -26,7 +17,7 @@ const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) 
 };
 
 const DeviceListSidePanel: React.FC<{
-  devices: Device[];
+  devices: UiDevice[];
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   isOpen: boolean;
@@ -88,15 +79,15 @@ const DeviceListSidePanel: React.FC<{
 
     const { topLevel, memberMap, sort } = useMemo(() => {
       const memberIds = new Set<number>();
-      const map = new Map<number, Device>();
+      const map = new Map<number, UiDevice>();
       devices.forEach(d => {
         map.set(d.id, d);
-        d.memberDeviceIds?.forEach(id => memberIds.add(id));
+        d.memberDeviceIds?.forEach((id: number) => memberIds.add(id));
       });
       const top = devices.filter(d => !(typeof d.id === "number" && memberIds.has(d.id)));
 
       // Sort logic
-      const sort = (list: Device[]) => [...list].sort((a, b) => {
+      const sort = (list: UiDevice[]) => [...list].sort((a, b) => {
         const aOn = a.lastSeen ? Date.now() - a.lastSeen < 300000 : false;
         const bOn = b.lastSeen ? Date.now() - b.lastSeen < 300000 : false;
         if (aOn !== bOn) return aOn ? -1 : 1;
@@ -141,13 +132,13 @@ const DeviceListSidePanel: React.FC<{
       setContextMenu({ groupId, x, y });
     };
 
-    const renderItem = (device: Device, depth: number = 0, isLast = false, isFirst = false) => {
+    const renderItem = (device: UiDevice, depth: number = 0, isLast = false, isFirst = false) => {
       const [r, g, b] = colorForDevice(device.id);
       const defaultColor = `rgb(${r}, ${g}, ${b})`;
       const colorStr = device.color ?? defaultColor;
       const displayName = device.name || `Device ${device.id}`;
       const children = (device.isGroup ? device.memberDeviceIds ?? [] : [])
-        .map(id => memberMap.get(id)).filter((d): d is Device => !!d);
+        .map(id => memberMap.get(id)).filter((d: UiDevice | undefined): d is UiDevice => !!d);
 
       const sortedChildren = sort(children);
 

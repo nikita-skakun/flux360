@@ -624,7 +624,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       let memberIds: number[] = [];
       if (typeof membersProp === 'string') {
         try {
-          const parsed: unknown = JSON.parse(membersProp);
+          const parsed: unknown = JSON.parse(membersProp) as unknown;
           if (Array.isArray(parsed)) memberIds = parsed as number[];
         } catch { /* ignore */ }
       } else if (Array.isArray(membersProp)) {
@@ -637,7 +637,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         const items: DevicePoint[] = memberIds.map(deviceId => {
           const comp = componentsRef.current.find(c => c.device === deviceId);
           if (comp) return { ...comp };
-          return { device: deviceId, mean: [0, 0] as Vec2, variance: 100, lat: 0, lon: 0, timestamp: 0, accuracy: 0, anchorAgeMs: 0, confidence: 0 };
+          return { device: deviceId, sourceDeviceId: undefined, mean: [0, 0] as Vec2, variance: 100, lat: 0, lon: 0, timestamp: 0, accuracy: 0, anchorAgeMs: 0, confidence: 0 };
         });
         setClusterPopup({ x: screen.x, y: screen.y, items });
       }

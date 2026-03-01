@@ -39,7 +39,7 @@ export function parseDevices(
         if (typeof memberDeviceIdsAttr === "string") {
             try {
                 const memberDeviceIds = JSON.parse(memberDeviceIdsAttr) as unknown;
-                if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((id): id is number => typeof id === "number")) {
+                if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((id: unknown): id is number => typeof id === "number")) {
                     let color = rgbToHex(...colorForDevice(device.id));
                     const colorAttr = device.attributes["color"];
                     if (typeof colorAttr === "string") {
@@ -233,7 +233,7 @@ export function computeProcessedPositions(
                 timestamp: p.timestamp,
                 anchorAgeMs: 0,
                 confidence: 0,
-                ...(groupIds.has(deviceId) ? { sourceDeviceId: p.device } : {}),
+                sourceDeviceId: groupIds.has(deviceId) ? p.device : undefined,
             };
             return comp;
         });

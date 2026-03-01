@@ -73,11 +73,11 @@ export class Engine {
     this.motionProfile = profile;
   }
 
-  private normalizeProfileName(profile?: MotionProfileName | null): MotionProfileName {
+  private normalizeProfileName(profile: MotionProfileName | null): MotionProfileName {
     return profile === "car" ? "car" : "person";
   }
 
-  private getProfile(profile?: MotionProfileName | null): MotionProfileConfig {
+  private getProfile(profile: MotionProfileName | null): MotionProfileConfig {
     return MOTION_PROFILES[this.normalizeProfileName(profile)];
   }
 
@@ -201,7 +201,7 @@ export class Engine {
 
       if (this.activeAnchor === null) {
         // Initialize with the first measurement
-        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp);
+        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp, m.timestamp);
 
         this.motionActive = false;
         this.motionStartTimestamp = null;
@@ -322,7 +322,7 @@ export class Engine {
               const newVariance = this.computeAverageVariance(points);
               this.activeAnchor.endTimestamp = m.timestamp;
               this.closedAnchors.push(this.activeAnchor);
-              const newAnchor = new Anchor(newMean, newVariance, m.timestamp);
+              const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
               this.activeAnchor = newAnchor;
               this.motionActive = false;
               this.motionStartTimestamp = null;

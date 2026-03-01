@@ -20,7 +20,7 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
     lat,
     lon,
     accuracy: typeof obj["accuracy"] === "number" ? obj["accuracy"] : 100,
-  } as NormalizedPosition;
+  };
 }
 
 export async function fetchPositions(

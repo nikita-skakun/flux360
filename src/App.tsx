@@ -6,7 +6,7 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrameView } from "./types";
+import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrameView, UiDevice } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -279,16 +279,7 @@ export function App() {
 
   const deviceList = useMemo(() => {
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-    const result: Array<{
-      id: number;
-      isGroup: boolean;
-      name: string;
-      emoji: string;
-      lastSeen: number | null;
-      hasPosition: boolean;
-      memberDeviceIds: number[];
-      color: string | null;
-    }> = [];
+    const result: UiDevice[] = [];
 
     // Track seen IDs to prevent duplicates
     const seenIds = new Set<number>();
