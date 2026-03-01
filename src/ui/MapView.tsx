@@ -2,8 +2,10 @@ import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clustering";
 import { ClusterPopup } from "./map/ClusterPopup";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
-import { getColorForDevice } from "./color";
+import { getColorForDevice, type Color } from "@/util/color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
+import { distance, getRadiusFromVariance } from "@/util/geo";
+import { drawPin, PIN_R } from "@/util/rendering";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView } from "@/types";
 import type { Feature, Point, Polygon } from "geojson";
@@ -11,66 +13,6 @@ import type { Feature, Point, Polygon } from "geojson";
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
 };
-
-function createPinImage(icon: string, color: string, darkMode: boolean, badgeText?: string): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  const size = 48;
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d")!;
-
-  const PIN_R = 14;
-  const tipX = size / 2;
-  const tipY = 36;
-  const bodyHeight = PIN_R * 1.5;
-  const headY = tipY - bodyHeight;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(tipX - PIN_R, headY);
-  ctx.arc(tipX, headY, PIN_R, Math.PI, 0);
-  ctx.bezierCurveTo(tipX + PIN_R, headY + PIN_R * 0.9, tipX + PIN_R * 0.35, headY + bodyHeight * 0.65, tipX, tipY);
-  ctx.bezierCurveTo(tipX - PIN_R * 0.35, headY + bodyHeight * 0.65, tipX - PIN_R, headY + PIN_R * 0.9, tipX - PIN_R, headY);
-  ctx.closePath();
-
-  ctx.fillStyle = darkMode ? "rgb(40,40,40)" : "rgb(255,255,255)";
-  ctx.fill();
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = color;
-  ctx.lineJoin = "round";
-  ctx.globalAlpha = 0.7;
-  ctx.stroke();
-  ctx.globalAlpha = 1.0;
-
-  if (icon) {
-    ctx.fillStyle = color;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = `${PIN_R}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
-    ctx.fillText(String(icon), tipX, headY + 1);
-  }
-
-  // small badge (bottom-right) for cluster size
-  if (badgeText) {
-    const badgeRadius = 10;
-    const bx = tipX + PIN_R * 0.75;
-    const by = headY + PIN_R * 0.6;
-    ctx.beginPath();
-    // Badge background: light gray in light mode, dark gray in dark mode
-    ctx.fillStyle = darkMode ? "rgb(30,30,30)" : "rgb(230, 230, 230)";
-    ctx.arc(bx, by, badgeRadius, 0, Math.PI * 2);
-    ctx.fill();
-    // Badge text: black in light mode, white in dark mode
-    ctx.fillStyle = darkMode ? "rgb(255,255,255)" : "rgb(0,0,0)";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = `${Math.round(badgeRadius)}px -apple-system, system-ui, Arial`;
-    ctx.fillText(String(badgeText), bx, by);
-  }
-
-  ctx.restore();
-  return canvas;
-}
 
 type Props = {
   components: DevicePoint[];
@@ -138,9 +80,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const center = map.getCenter();
     let duration = 800;
     if (center) {
-      const dLat = target[1] - center.lat;
-      const dLon = target[0] - center.lng;
-      const distanceDeg = Math.sqrt(dLat * dLat + dLon * dLon);
+      const distanceDeg = distance([target[0], target[1]], [center.lng, center.lat]);
 
       const minDuration = 300;
       const maxDuration = 2500;
@@ -221,9 +161,11 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       } else {
         const imageKey = `${item.iconText}-${item.colorHex}-${darkMode ? 'dark' : 'light'}`;
         if (!map.hasImage(imageKey)) {
-          const pinCanvas = createPinImage(item.iconText, item.colorHex, darkMode);
-          const ctx = pinCanvas.getContext("2d");
-          const imageData = ctx?.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+          const pinCanvas = document.createElement("canvas");
+          pinCanvas.width = 48; pinCanvas.height = 48;
+          const pctx = pinCanvas.getContext("2d")!;
+          drawPin(pctx, 24, 36, PIN_R, item.iconText, item.color as Color, darkMode);
+          const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
           if (imageData) map.addImage(imageKey, imageData);
         }
         individualsFeatures.push({
@@ -264,9 +206,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } };
       };
       if (debugFrame.measurement.accuracy > 0)
-        debugFrameFeatures.push(makeCircle(toWebMercator([debugFrame.measurement.lon, debugFrame.measurement.lat]), debugFrame.measurement.accuracy, 'measurement'));
+        debugFrameFeatures.push(makeCircle(debugFrame.measurement.mean, debugFrame.measurement.accuracy, 'measurement'));
       if (debugFrame.anchor) {
-        debugFrameFeatures.push(makeCircle(debugFrame.anchor.mean, Math.sqrt(Math.max(1, debugFrame.anchor.variance)), 'anchor'));
+        debugFrameFeatures.push(makeCircle(debugFrame.anchor.mean, getRadiusFromVariance(debugFrame.anchor.variance), 'anchor'));
         // Red line connecting measurement center to anchor center
         debugFrameFeatures.push({
           type: 'Feature',
@@ -280,11 +222,13 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const ANCHOR_COLORS: Record<DebugAnchor['type'], string> = {
       active: '#00bcd4',   // teal
       closed: '#9e9e9e',   // gray
+      candidate: '#ff9800', // orange
+      frame: '#2196f3',    // blue
     };
     const anchorCircleFeatures: Feature<Polygon>[] = [];
     for (let ai = 0; ai < debugAnchors.length; ai++) {
       const a = debugAnchors[ai]!;
-      const radius = Math.sqrt(Math.max(1, a.variance));
+      const radius = getRadiusFromVariance(a.variance);
       const pts = 64;
       const coords: Vec2[] = [];
       for (let j = 0; j <= pts; j++) {
@@ -326,9 +270,11 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
-        const pinCanvas = createPinImage(rep.iconText, rep.colorHex, darkMode, String(cl.size));
-        const ctx = pinCanvas.getContext("2d");
-        const imageData = ctx?.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+        const pinCanvas = document.createElement("canvas");
+        pinCanvas.width = 48; pinCanvas.height = 48;
+        const pctx = pinCanvas.getContext("2d")!;
+        drawPin(pctx, 24, 36, PIN_R, rep.iconText, rep.color as Color, darkMode, false, String(cl.size));
+        const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
         if (imageData) map.addImage(clusterKey, imageData);
       }
 
@@ -763,7 +709,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       {anchorTooltip && (() => {
         const a = anchorTooltip.anchor;
         const fmt = (ts: number) => { const d = new Date(ts); const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate() ? d.toLocaleTimeString() : d.toLocaleString(); };
-        const radius = Math.round(Math.sqrt(Math.max(1, a.variance)));
+        const radius = Math.round(getRadiusFromVariance(a.variance));
         return (
           <div style={{
             position: 'absolute',

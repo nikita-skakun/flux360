@@ -1,4 +1,4 @@
-import { getColorForDevice } from "../color";
+import { getColorForDevice } from "@/util/color";
 import React from "react";
 import type { DevicePoint } from "@/types";
 

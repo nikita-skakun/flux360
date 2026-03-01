@@ -16,13 +16,6 @@ export type RetrospectiveResult = {
   motionSegments: RetrospectiveMotionSegment[];
 };
 
-// Local distanceMeters is still needed for computePathExtent and actual distance in path length
-function distanceMeters(a: Vec2, b: Vec2): number {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
 function computePathExtent(points: Vec2[]): number {
   if (points.length < 2) return 0;
 
@@ -35,20 +28,19 @@ function computePathExtent(points: Vec2[]): number {
   cx /= points.length;
   cy /= points.length;
 
-  let maxDist = 0;
+  let maxDistSq = 0;
   for (const p of points) {
-    const d = distanceMeters([cx, cy], p);
-    if (d > maxDist) maxDist = d;
+    const dSq = distanceSquared([cx, cy], p);
+    if (dSq > maxDistSq) maxDistSq = dSq;
   }
 
-  return maxDist * 2;
+  return Math.sqrt(maxDistSq) * 2;
 }
 
 function toMeterPoint(
   p: NormalizedPosition
 ): { mean: Vec2; timestamp: number; accuracy: number } {
-  const [x, y] = toWebMercator(p.lat, p.lon);
-  return { mean: [x, y], timestamp: p.timestamp, accuracy: p.accuracy };
+  return { mean: toWebMercator([p.lon, p.lat]), timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
 function getDynamicRadius(accuracy: number, maxStationaryRadius: number): number {

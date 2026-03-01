@@ -165,11 +165,11 @@ export function App() {
     if (!engine) return [];
     const anchors: DebugAnchor[] = [];
     for (const a of engine.closedAnchors) {
-      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'closed', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp });
+      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'closed', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, lastUpdateTimestamp: a.lastUpdateTimestamp });
     }
     if (engine.activeAnchor) {
       const a = engine.activeAnchor;
-      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'active', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp });
+      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'active', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, lastUpdateTimestamp: a.lastUpdateTimestamp });
     }
     return anchors;
   }, [debugMode, selectedDeviceId, engineSnapshotsByDevice]);
@@ -197,8 +197,9 @@ export function App() {
     const f = frames[Math.max(0, Math.min(frames.length - 1, debugFrameIndex))];
     if (!f) return null;
     return {
-      measurement: { lat: f.measurement.lat, lon: f.measurement.lon, accuracy: f.measurement.accuracy },
-      anchor: f.anchor ? { mean: f.anchor.mean, variance: f.anchor.variance } : null,
+      measurement: { ...f.measurement },
+      anchor: f.anchor ? { ...f.anchor } : null,
+      timestamp: f.timestamp,
     };
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 

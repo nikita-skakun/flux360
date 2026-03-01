@@ -6,17 +6,31 @@ export type DebugAnchor = {
   mean: Vec2;        // Web Mercator [x, y]
   variance: number;  // meters²
   confidence: number;
-  type: "active" | "closed";
+  type: "active" | "candidate" | "closed" | "frame";
   startTimestamp: number;
   endTimestamp: number | null;
+  lastUpdateTimestamp: number;
 };
 
 /** Snapshot of a single debug frame for map rendering. */
 export type DebugFrameView = {
   /** GPS measurement: geographic position + accuracy radius in meters. */
-  measurement: { lat: number; lon: number; accuracy: number };
+  measurement: {
+    lat: number;
+    lon: number;
+    accuracy: number;
+    mean: Vec2;
+    variance: number;
+  };
   /** Anchor state at this frame: Web Mercator center + variance (meters²), or null if no anchor yet. */
-  anchor: { mean: Vec2; variance: number } | null;
+  anchor: {
+    mean: Vec2;
+    variance: number;
+    confidence: number;
+    startTimestamp: number;
+    lastUpdateTimestamp: number;
+  } | null;
+  timestamp: number;
 };
 
 export type DevicePoint = {

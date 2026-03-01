@@ -1,7 +1,7 @@
 import { Engine, type EngineState } from '@/engine/engine';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
 import { toWebMercator } from '@/util/webMercator';
-import { rgbToHex } from '@/ui/color';
+import { rgbToHex } from '@/util/color';
 import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 

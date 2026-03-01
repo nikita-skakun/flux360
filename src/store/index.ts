@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
-import { rgbToHex } from '@/ui/color';
+import { rgbToHex } from '@/util/color';
 import type { GroupDevice, MotionProfileName, NormalizedPosition } from '@/types';
 import type { Store, StoreState } from './types';
 import type { TraccarDevice } from '@/api/devices';
@@ -52,7 +52,7 @@ export const useStore = create<Store>()(
 
       // Device/Group Management
       setDevicesFromApi: async (devices: TraccarDevice[]) => {
-        const { colorForDevice } = await import("@/ui/color");
+        const { colorForDevice } = await import("@/util/color");
 
         const {
           nameMap,
@@ -95,7 +95,7 @@ export const useStore = create<Store>()(
       createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
         const state = get();
         const { createGroupDevice } = await import("@/api/devices");
-        const { colorForDevice } = await import("@/ui/color");
+        const { colorForDevice } = await import("@/util/color");
 
         // Optimistic update
         const tempId = Date.now(); // Temporary ID until API response
@@ -323,7 +323,7 @@ export const useStore = create<Store>()(
 
         let defaultColor: string | null = null;
         if (updates.color === null) {
-          const { colorForDevice } = await import("@/ui/color");
+          const { colorForDevice } = await import("@/util/color");
           defaultColor = rgbToHex(...colorForDevice(groupId));
         }
 

@@ -1,8 +1,8 @@
 import { ArrowLeft, ChevronLeft, ChevronUp, ChevronDown, Smartphone, Plus, Settings, UserPlus, ChevronRight, Trash2, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { colorForDevice } from "./color";
-import { EMOJI_OPTIONS } from "./constants";
+import { colorForDevice } from "@/util/color";
+import { EMOJI_OPTIONS } from "@/util/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -265,7 +265,7 @@ const DeviceListSidePanel: React.FC<{
                   <div>
                     <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 text-center">Icon</Label>
                     <div className="grid grid-cols-4 gap-2 pb-2">
-                      {(showAllIcons ? EMOJI_OPTIONS : EMOJI_OPTIONS.slice(0, 7)).map(icon => (
+                      {(showAllIcons ? EMOJI_OPTIONS : EMOJI_OPTIONS.slice(0, 7)).map((icon: string) => (
                         <Button
                           key={icon}
                           variant={selectedEmoji === icon ? "default" : "ghost"}

@@ -1,5 +1,5 @@
 import { Anchor } from "./anchor";
-import { distanceMeters, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
+import { distance, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
 import { fromWebMercator, WORLD_R } from "@/util/webMercator";
 import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
@@ -216,7 +216,7 @@ export class Engine {
           if (dist2Active < profile.stationaryMahalanobisThreshold) {
             // Detect stationary drift: when reports consistently fall outside the anchor's accuracy circle,
             // we inflate the anchor's variance to allow it to move toward the new position.
-            const dist = distanceMeters(this.activeAnchor.mean, m.mean);
+            const dist = distance(this.activeAnchor.mean, m.mean);
             const anchorRadius = Math.sqrt(this.activeAnchor.variance);
             const reportRadius = m.accuracy;
             const separation = dist - (anchorRadius + reportRadius);
@@ -238,8 +238,8 @@ export class Engine {
             decision = 'resisted';
             const lastConfirm = this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
             const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
-            const distance = distanceMeters(this.activeAnchor.mean, m.mean);
-            if (distance < m.accuracy * profile.minDistanceAccuracyRatio || distance <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
+            const distToMean = distance(this.activeAnchor.mean, m.mean);
+            if (distToMean < m.accuracy * profile.minDistanceAccuracyRatio || distToMean <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
               // Center is within the noise-gate radius, OR the GPS circles still overlap —
               // both cases are geometrically consistent with being stationary.
               const weakVariance = m.variance * profile.weakVarianceInflation;
@@ -250,7 +250,7 @@ export class Engine {
               decision = 'noise-weak-update';
             } else {
               const timeFactor = Math.log1p(dtMinutes + 1);
-              const score = (distance / (m.accuracy + profile.accuracyK)) * timeFactor;
+              const score = (distToMean / (m.accuracy + profile.accuracyK)) * timeFactor;
               const direction = directionFromPoints(this.activeAnchor.mean, m.mean);
               this.insertOutlier({ point: m, score, direction });
 
@@ -261,10 +261,10 @@ export class Engine {
               motionScore = score;
               motionScoreSum = adjustedScore;
               motionCoherent = coherence;
-              motionDistance = distance;
+              motionDistance = distToMean;
               motionTimeFactor = timeFactor;
               const overrideByScore = score >= profile.singlePointScoreThreshold * profile.singlePointOverrideMultiplier;
-              const overrideByAccuracy = distance >= m.accuracy * profile.singlePointAccuracyRatio;
+              const overrideByAccuracy = distToMean >= m.accuracy * profile.singlePointAccuracyRatio;
               motionSinglePointOverride = overrideByScore && overrideByAccuracy;
 
               const singlePointTriggers = (score >= profile.singlePointScoreThreshold) && motionSinglePointOverride;

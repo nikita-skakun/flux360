@@ -39,6 +39,7 @@ export function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_
     const item = items[i];
     if (item === undefined) continue;
     const cx = Math.floor(item.x / threshold), cy = Math.floor(item.y / threshold);
+    const thresholdSq = threshold * threshold;
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
         const cell = grid.get(cellKey(cx + dx, cy + dy));
@@ -46,7 +47,11 @@ export function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_
         for (const j of cell) {
           if (j <= i) continue;
           const other = items[j];
-          if (other !== undefined && Math.hypot(item.x - other.x, item.y - other.y) <= threshold) union(i, j);
+          if (other !== undefined) {
+            const dx = item.x - other.x;
+            const dy = item.y - other.y;
+            if (dx * dx + dy * dy <= thresholdSq) union(i, j);
+          }
         }
       }
     }
