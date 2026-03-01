@@ -246,6 +246,16 @@ export class Engine {
               this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
               anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
               decision = 'noise-weak-update';
+            } else if (distance <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
+              // GPS circles still overlap even though the Mahalanobis² exceeds the stationary
+              // threshold — the report is geometrically consistent with being stationary.
+              // Treat as a weak update rather than a motion outlier.
+              const weakVariance = m.variance * profile.weakVarianceInflation;
+              const weakPoint: DevicePoint = { ...m, variance: weakVariance };
+              this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
+              this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
+              anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
+              decision = 'noise-weak-update';
             } else {
               const timeFactor = Math.log1p(dtMinutes + 1);
               const score = (distance / (m.accuracy + profile.accuracyK)) * timeFactor;
