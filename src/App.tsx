@@ -20,8 +20,6 @@ export function App() {
   const deviceToGroupsMapRef = useStore(state => state.refs.deviceToGroupsMap);
   const groupIdsRef = useStore(state => state.refs.groupIds);
 
-  const worldBounds = useStore(state => state.ui.worldBounds);
-  const setWorldBounds = useStore(state => state.setWorldBounds);
   const enginesRef = useStore(state => state.refs.engines);
   const devices = useStore(state => state.devices);
   const { deviceNames, deviceColors, deviceIcons, deviceLastSeen } = useMemo(() => {
@@ -220,11 +218,8 @@ export function App() {
     return anchors;
   }, [debugMode, selectedDeviceId, engineSnapshotsByDevice]);
 
-  useEffect(() => {
-    if (visibleComponents.length === 0) {
-      setWorldBounds(null);
-      return;
-    }
+  const worldBounds = useMemo(() => {
+    if (visibleComponents.length === 0) return null;
 
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const c of visibleComponents) {
@@ -236,10 +231,9 @@ export function App() {
     }
 
     if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
-      setWorldBounds(null);
-    } else {
-      setWorldBounds({ minX, minY, maxX, maxY });
+      return null;
     }
+    return { minX, minY, maxX, maxY };
   }, [visibleComponents]);
 
   // Reset debug index when device or frame count changes

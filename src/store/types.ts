@@ -1,6 +1,5 @@
-import type { Anchor } from '@/engine/anchor';
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName, MotionSegment, RetrospectiveResult } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, MotionSegment, RetrospectiveResult } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -9,6 +8,7 @@ export type Refs = {
   engines: Map<number, Engine>;
   processedKeys: Set<string>;
   positionsAll: NormalizedPosition[];
+  snapshots: Record<number, DevicePoint[]>;
   engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>;
 };
 
@@ -26,9 +26,6 @@ export type StoreState = {
   // Groups slice
   groups: GroupDevice[];
 
-  // Motion profiles slice
-  motionProfiles: Record<number, MotionProfileName>;
-
   // Settings slice (persisted)
   settings: {
     baseUrl: string;
@@ -43,19 +40,12 @@ export type StoreState = {
     inputDarkMode: 'light' | 'dark' | 'system';
   };
 
-  // Positions slice
-  positions: {
-    allPositions: NormalizedPosition[];
-    snapshots: Record<number, DevicePoint[]>;
-  };
-
   // UI State slice
   ui: {
     selectedDeviceId: number | null;
     isSidePanelOpen: boolean;
     debugMode: boolean;
     debugFrameIndex: number;
-    worldBounds: WorldBounds | null;
     editingTarget: { type: 'device' | 'group', id: number } | null;
   };
 
@@ -64,7 +54,6 @@ export type StoreState = {
 
   // Engine snapshots and anchors
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
-  dominantAnchors: Map<number, Anchor | null>;
 
   // Motion segments
   motionSegments: Record<number, MotionSegment[]>;
@@ -111,9 +100,7 @@ export type StoreActions = {
   setIsSidePanelOpen: (open: boolean) => void;
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
-  setWorldBounds: (bounds: WorldBounds | null) => void;
   setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
-  setDominantAnchors: (anchors: Map<number, Anchor | null>) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 
   // Motion segments
