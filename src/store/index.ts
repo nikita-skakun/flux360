@@ -32,8 +32,6 @@ const initialState: StoreState = {
     isSidePanelOpen: true,
     debugMode: false,
     debugFrameIndex: 0,
-    refLat: null,
-    refLon: null,
     worldBounds: null,
     editingTarget: null,
   },
@@ -562,24 +560,6 @@ export const useStore = create<Store>()(
           ui: {
             ...state.ui,
             debugFrameIndex: value,
-          }
-        }));
-      },
-
-      setRefLat: (lat: number | null) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            refLat: lat,
-          }
-        }));
-      },
-
-      setRefLon: (lon: number | null) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            refLon: lon,
           }
         }));
       },

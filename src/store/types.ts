@@ -55,8 +55,6 @@ export type StoreState = {
     isSidePanelOpen: boolean;
     debugMode: boolean;
     debugFrameIndex: number;
-    refLat: number | null;
-    refLon: number | null;
     worldBounds: WorldBounds | null;
     editingTarget: { type: 'device' | 'group', id: number } | null;
   };
@@ -113,8 +111,6 @@ export type StoreActions = {
   setIsSidePanelOpen: (open: boolean) => void;
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
-  setRefLat: (lat: number | null) => void;
-  setRefLon: (lon: number | null) => void;
   setWorldBounds: (bounds: WorldBounds | null) => void;
   setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
   setDominantAnchors: (anchors: Map<number, Anchor | null>) => void;

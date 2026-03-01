@@ -10,8 +10,6 @@ import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrame
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
-  const setRefLat = useStore(state => state.setRefLat);
-  const setRefLon = useStore(state => state.setRefLon);
   const createGroup = useStore(state => state.createGroup);
   const deleteGroup = useStore(state => state.deleteGroup);
   const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
@@ -22,8 +20,6 @@ export function App() {
   const deviceToGroupsMapRef = useStore(state => state.refs.deviceToGroupsMap);
   const groupIdsRef = useStore(state => state.refs.groupIds);
 
-  const refLat = useStore(state => state.ui.refLat);
-  const refLon = useStore(state => state.ui.refLon);
   const worldBounds = useStore(state => state.ui.worldBounds);
   const setWorldBounds = useStore(state => state.setWorldBounds);
   const enginesRef = useStore(state => state.refs.engines);
@@ -140,15 +136,12 @@ export function App() {
     if (positions.length > 0) {
       setPositionsAll(prev => [...prev, ...positions]);
       processPositions();
-      const firstPos = positions[0];
-      if (firstPos && refLat == null) setRefLat(firstPos.lat);
-      if (firstPos && refLon == null) setRefLon(firstPos.lon);
 
       // Run retrospective analysis after positions are processed
       // This corrects motion detection lag by analyzing position history
       runRetrospectiveAnalysis();
     }
-  }, [updateCounter, positions, setPositionsAll, refLat, refLon, setRefLat, setRefLon, processPositions, runRetrospectiveAnalysis]);
+  }, [updateCounter, positions, setPositionsAll, processPositions, runRetrospectiveAnalysis]);
 
   // Build reverse map: deviceId -> array of groupDeviceIds it belongs to
   useEffect(() => {
@@ -364,8 +357,6 @@ export function App() {
       <MapView
         ref={mapViewRef}
         components={frame.components}
-        refLat={refLat}
-        refLon={refLon}
         worldBounds={worldBounds}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {

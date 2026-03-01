@@ -77,17 +77,15 @@ type Props = {
   deviceNames: Record<number, string>;
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
-  refLat: number | null;
-  refLon: number | null;
   worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   maptilerApiKey: string | null;
   darkMode: boolean;
-  debugAnchors?: DebugAnchor[];
-  debugFrame?: DebugFrameView | null;
-  pulsingDeviceIds?: number[];
+  debugAnchors: DebugAnchor[];
+  debugFrame: DebugFrameView | null;
+  pulsingDeviceIds: number[];
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
@@ -95,8 +93,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   deviceNames,
   deviceIcons,
   deviceColors,
-  refLat,
-  refLon,
   worldBounds,
   overlay,
   selectedDeviceId,
@@ -525,8 +521,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     let initialCenter: Vec2 = [0, 0];
     let initialZoom = 2;
 
-    if (refLat != null && refLon != null) {
-      initialCenter = [refLon, refLat];
+    const firstComp = componentsRef.current[0];
+    if (firstComp) {
+      initialCenter = [firstComp.lon, firstComp.lat];
       initialZoom = 15;
     }
 
@@ -709,14 +706,14 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     updateLayers();
   }, [components, deviceNames, deviceIcons, deviceColors, darkMode, selectedDeviceId, updateLayers]);
 
-  // Initial fit bounds
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !worldBounds || refLat == null || refLon == null || hasFittedInitially.current) return;
+    if (!map || hasFittedInitially.current) return;
 
     const c = componentsRef.current;
-    const sw = { lat: refLat - 0.01, lon: refLon - 0.01 };
-    const ne = { lat: refLat + 0.01, lon: refLon + 0.01 };
+    if (c.length === 0 && !worldBounds) return;
+
+    let sw: { lat: number, lon: number }, ne: { lat: number, lon: number };
 
     if (c.length > 0) {
       let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
@@ -727,10 +724,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         maxLon = Math.max(maxLon, comp.lon);
       }
       const padding = 0.005;
-      sw.lat = minLat - padding;
-      sw.lon = minLon - padding;
-      ne.lat = maxLat + padding;
-      ne.lon = maxLon + padding;
+      sw = { lat: minLat - padding, lon: minLon - padding };
+      ne = { lat: maxLat + padding, lon: maxLon + padding };
+    } else if (worldBounds) {
+      // Fallback to worldBounds if no components yet (not typical)
+      const paddingMeters = 500;
+      const corner1 = fromWebMercator([worldBounds.minX - paddingMeters, worldBounds.minY - paddingMeters]);
+      const corner2 = fromWebMercator([worldBounds.maxX + paddingMeters, worldBounds.maxY + paddingMeters]);
+      sw = { lat: Math.min(corner1[1], corner2[1]), lon: Math.min(corner1[0], corner2[0]) };
+      ne = { lat: Math.max(corner1[1], corner2[1]), lon: Math.max(corner1[0], corner2[0]) };
+    } else {
+      return;
     }
 
     map.fitBounds(
@@ -739,7 +743,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     );
 
     hasFittedInitially.current = true;
-  }, [worldBounds, refLat, refLon]);
+  }, [worldBounds]);
 
   return (
     <div style={{ height: "100vh", position: "relative", width: "100%" }}>
