@@ -121,7 +121,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                     )}
                                 </button>
                                 {showColorPicker && createPortal(
-                                    <div className="fixed inset-0 z-[9999] isolate border-0">
+                                    <div className="fixed inset-0 z-[9999]" style={{ pointerEvents: 'auto' }}>
                                         <div className="fixed inset-0" onClick={() => setShowColorPicker(false)} />
                                         <div
                                             className="fixed z-[10000] bg-background p-2 rounded-lg shadow-xl flex flex-col gap-2 border border-border"
@@ -130,6 +130,7 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
                                                 top: popoverPos.top,
                                                 bottom: popoverPos.bottom
                                             }}
+                                            onClick={e => e.stopPropagation()}
                                         >
                                             <HexColorPicker color={color ?? defaultHex} onChange={setColor} />
                                             <Button
