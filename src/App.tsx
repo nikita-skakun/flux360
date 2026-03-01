@@ -129,12 +129,9 @@ export function App() {
     onDevices: setDevicesFromApi,
   });
 
-  const [, setPulsingDeviceIds] = useState<number[]>([]);
+  const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
-  // TODO: Re-enable when MapView supports debug features
-  // const motionSegments = useStore(state => state.motionSegments);
-  // const retrospectiveByDevice = useStore(state => state.retrospective.byDevice);
   const runRetrospectiveAnalysis = useStore(state => state.runRetrospectiveAnalysis);
 
   const mapViewRef = useRef<MapViewHandle>(null);
@@ -391,6 +388,7 @@ export function App() {
         darkMode={isDark}
         debugAnchors={debugAnchors}
         debugFrame={debugFrame}
+        pulsingDeviceIds={pulsingDeviceIds}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel

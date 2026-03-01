@@ -87,6 +87,7 @@ type Props = {
   darkMode: boolean;
   debugAnchors?: DebugAnchor[];
   debugFrame?: DebugFrameView | null;
+  pulsingDeviceIds?: number[];
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
@@ -104,6 +105,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   darkMode,
   debugAnchors = [],
   debugFrame = null,
+  pulsingDeviceIds = [],
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -346,6 +348,18 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       });
     }
 
+    // Pulsing device points (drawn under pins)
+    const pulsingPointFeatures: Feature<Point>[] = [];
+    for (const comp of components) {
+      if (pulsingDeviceIds.includes(comp.device)) {
+        pulsingPointFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [comp.lon, comp.lat] },
+          properties: {},
+        });
+      }
+    }
+
     try {
       // Update sources & layers - initialize on first call, setData on subsequent
       const dotsData = { type: 'FeatureCollection' as const, features: dotsFeatures };
@@ -359,6 +373,28 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         (map.getSource('dots-source') as GeoJSONSource).setData(dotsData);
+      }
+
+      const pulsingData = { type: 'FeatureCollection' as const, features: pulsingPointFeatures };
+      if (!map.getSource('pulsing-source')) {
+        map.addSource('pulsing-source', { type: 'geojson', data: pulsingData });
+        map.addLayer({
+          id: 'pulsing-layer',
+          type: 'circle',
+          source: 'pulsing-source',
+          paint: {
+            'circle-radius': 8,
+            'circle-color': 'transparent',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#2196f3',
+            'circle-stroke-opacity': 0,
+            'circle-pitch-alignment': 'map',
+            'circle-radius-transition': { duration: 0, delay: 0 },
+            'circle-stroke-opacity-transition': { duration: 0, delay: 0 },
+          },
+        }, 'dots-layer');
+      } else {
+        (map.getSource('pulsing-source') as GeoJSONSource).setData(pulsingData);
       }
 
       const accData = { type: 'FeatureCollection' as const, features: accuracyFeatures };
@@ -475,7 +511,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame]);
+  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds]);
 
   const listenersAttached = useRef(false);
 
@@ -524,6 +560,33 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   // Ref to hold updateLayers to avoid stale closure in event listeners
   const updateLayersRef = useRef(updateLayers);
   useEffect(() => { updateLayersRef.current = updateLayers; }, [updateLayers]);
+
+  // rAF animation loop: update pulsing-layer paint properties each frame
+  useEffect(() => {
+    if (pulsingDeviceIds.length === 0) {
+      // Clear the layer if no devices pulsing
+      const map = mapRef.current;
+      if (map?.getLayer('pulsing-layer')) {
+        map.setPaintProperty('pulsing-layer', 'circle-radius', 8);
+        map.setPaintProperty('pulsing-layer', 'circle-stroke-opacity', 0);
+      }
+      return;
+    }
+    const PERIOD = 1200; // ms per ping
+    const MAX_RADIUS = 60;
+    let running = true;
+    const tick = () => {
+      const map = mapRef.current;
+      if (map?.getLayer('pulsing-layer')) {
+        const t = (Date.now() % PERIOD) / PERIOD;
+        map.setPaintProperty('pulsing-layer', 'circle-radius', 8 + t * MAX_RADIUS);
+        map.setPaintProperty('pulsing-layer', 'circle-stroke-opacity', 1 - t);
+      }
+      if (running) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return () => { running = false; };
+  }, [pulsingDeviceIds]);
 
   // Listeners setup
   useEffect(() => {
