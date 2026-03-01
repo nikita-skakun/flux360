@@ -239,17 +239,9 @@ export class Engine {
             const lastConfirm = this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
             const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
             const distance = distanceMeters(this.activeAnchor.mean, m.mean);
-            if (distance < m.accuracy * profile.minDistanceAccuracyRatio) {
-              const weakVariance = m.variance * profile.weakVarianceInflation;
-              const weakPoint: DevicePoint = { ...m, variance: weakVariance };
-              this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
-              this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
-              anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
-              decision = 'noise-weak-update';
-            } else if (distance <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
-              // GPS circles still overlap even though the Mahalanobis² exceeds the stationary
-              // threshold — the report is geometrically consistent with being stationary.
-              // Treat as a weak update rather than a motion outlier.
+            if (distance < m.accuracy * profile.minDistanceAccuracyRatio || distance <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
+              // Center is within the noise-gate radius, OR the GPS circles still overlap —
+              // both cases are geometrically consistent with being stationary.
               const weakVariance = m.variance * profile.weakVarianceInflation;
               const weakPoint: DevicePoint = { ...m, variance: weakVariance };
               this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
