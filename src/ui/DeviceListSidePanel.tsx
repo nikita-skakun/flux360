@@ -1,41 +1,32 @@
 import { ArrowLeft, ChevronLeft, ChevronUp, ChevronDown, Smartphone, Plus, Settings, UserPlus, ChevronRight, Trash2, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { colorForDevice } from "./color";
-import { EMOJI_OPTIONS } from "./constants";
+import { colorForDevice } from "@/util/color";
+import { EMOJI_OPTIONS } from "@/util/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 
-type Device = {
-  id: number | string;
-  isGroup?: boolean;
-  name: string;
-  emoji: string;
-  lastSeen: number | null;
-  hasPosition: boolean;
-  memberDeviceIds?: number[];
-  color?: string | null;
-};
+import type { UiDevice, Timestamp } from "@/types";
 
-const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
+const LastSeenDisplay: React.FC<{ timestamp: Timestamp | null }> = ({ timestamp }) => {
   const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
   return <>{timeAgo}</>;
 };
 
 const DeviceListSidePanel: React.FC<{
-  devices: Device[];
-  selectedDeviceId: number | string | null;
-  onSelectDevice: (id: number | string) => void;
+  devices: UiDevice[];
+  selectedDeviceId: number | null;
+  onSelectDevice: (id: number) => void;
   isOpen: boolean;
   onToggle: () => void;
   onCreateGroup: (name: string, memberDeviceIds: number[], emoji: string) => Promise<void>;
   onDeleteGroup: (groupId: number) => Promise<void>;
   onAddDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
   onEditGroup: (groupId: number) => void;
-  onCreateGroupSelectionChange?: (selectedIds: number[]) => void;
+  onCreateGroupSelectionChange: (selectedIds: number[]) => void;
   allDevices: Array<{ id: number; name: string; emoji: string }>;
 }> = ({
   devices,
@@ -50,7 +41,7 @@ const DeviceListSidePanel: React.FC<{
   onCreateGroupSelectionChange,
   allDevices
 }) => {
-    const [expanded, setExpanded] = useState<Set<number | string>>(new Set());
+    const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [mode, setMode] = useState<"list" | "create">("list");
 
     // Context Menu State
@@ -88,15 +79,15 @@ const DeviceListSidePanel: React.FC<{
 
     const { topLevel, memberMap, sort } = useMemo(() => {
       const memberIds = new Set<number>();
-      const map = new Map<number | string, Device>();
+      const map = new Map<number, UiDevice>();
       devices.forEach(d => {
         map.set(d.id, d);
-        d.memberDeviceIds?.forEach(id => memberIds.add(id));
+        d.memberDeviceIds?.forEach((id: number) => memberIds.add(id));
       });
       const top = devices.filter(d => !(typeof d.id === "number" && memberIds.has(d.id)));
 
       // Sort logic
-      const sort = (list: Device[]) => [...list].sort((a, b) => {
+      const sort = (list: UiDevice[]) => [...list].sort((a, b) => {
         const aOn = a.lastSeen ? Date.now() - a.lastSeen < 300000 : false;
         const bOn = b.lastSeen ? Date.now() - b.lastSeen < 300000 : false;
         if (aOn !== bOn) return aOn ? -1 : 1;
@@ -106,7 +97,7 @@ const DeviceListSidePanel: React.FC<{
       return { topLevel: sort(top), memberMap: map, sort };
     }, [devices]);
 
-    const toggle = (e: React.MouseEvent, id: number | string) => {
+    const toggle = (e: React.MouseEvent, id: number) => {
       e.stopPropagation();
       setExpanded(prev => {
         const next = new Set(prev);
@@ -141,22 +132,20 @@ const DeviceListSidePanel: React.FC<{
       setContextMenu({ groupId, x, y });
     };
 
-    const renderItem = (device: Device, depth: number = 0, isLast = false, isFirst = false) => {
-      const colorId = typeof device.id === "string" ? device.id.split("-").pop()?.charCodeAt(0) ?? 0 : Number(device.id);
-      const [r, g, b] = colorForDevice(colorId);
+    const renderItem = (device: UiDevice, depth: number = 0, isLast = false, isFirst = false) => {
+      const [r, g, b] = colorForDevice(device.id);
       const defaultColor = `rgb(${r}, ${g}, ${b})`;
       const colorStr = device.color ?? defaultColor;
       const displayName = device.name || `Device ${device.id}`;
       const children = (device.isGroup ? device.memberDeviceIds ?? [] : [])
-        .map(id => memberMap.get(id)).filter((d): d is Device => !!d);
+        .map(id => memberMap.get(id)).filter((d: UiDevice | undefined): d is UiDevice => !!d);
 
       const sortedChildren = sort(children);
-      const isGroup = !!device.isGroup;
 
       return (
-        <React.Fragment key={`${isGroup ? "g" : "d"}-${device.id}`}>
+        <React.Fragment key={`${device.isGroup ? "g" : "d"}-${device.id}`}>
           <li onContextMenu={(e) => {
-            if (isGroup && typeof device.id === 'number') {
+            if (device.isGroup) {
               handleContextMenu(e, device.id);
             }
           }}>
@@ -175,8 +164,8 @@ const DeviceListSidePanel: React.FC<{
                 </div>
               )}
 
-              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => isGroup && toggle(e, device.id)}>
-                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
+              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => device.isGroup && toggle(e, device.id)}>
+                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${device.isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
                   {device.emoji?.length > 1 ? (
                     <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.emoji}</span>
                   ) : (
@@ -276,7 +265,7 @@ const DeviceListSidePanel: React.FC<{
                   <div>
                     <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 text-center">Icon</Label>
                     <div className="grid grid-cols-4 gap-2 pb-2">
-                      {(showAllIcons ? EMOJI_OPTIONS : EMOJI_OPTIONS.slice(0, 7)).map(icon => (
+                      {(showAllIcons ? EMOJI_OPTIONS : EMOJI_OPTIONS.slice(0, 7)).map((icon: string) => (
                         <Button
                           key={icon}
                           variant={selectedEmoji === icon ? "default" : "ghost"}

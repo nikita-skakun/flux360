@@ -1,4 +1,6 @@
 @import "../styles/globals.css";
+@import "material-icons/iconfont/filled.css";
+@import "material-symbols/outlined.css";
 
 @layer base {
   :root {

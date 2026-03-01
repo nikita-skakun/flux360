@@ -1,4 +1,4 @@
-export const EMOJI_OPTIONS = [
+export const EMOJI_OPTIONS: string[] = [
     "group",
     "groups",
     "directions_car",

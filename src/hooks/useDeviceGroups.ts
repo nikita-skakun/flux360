@@ -47,7 +47,7 @@ export function useDeviceGroups(deviceMotionProfiles: Record<number, MotionProfi
     try {
       const devices = await import("@/api/devices");
       const { createGroupDevice } = devices;
-      const { colorForDevice } = await import("@/ui/color");
+      const { colorForDevice } = await import("@/util/color");
 
       const newGroup = await createGroupDevice(buildApiOpts(), name, emoji, memberDeviceIds);
       const colorRgb = colorForDevice(newGroup.id);

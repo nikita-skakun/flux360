@@ -1,7 +1,9 @@
 import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters, type DrawItem, type Cluster } from "@/util/clustering";
-import { getColorForDevice, rgbaString, type Color } from "./color";
+import { getColorForDevice, rgbaString } from "@/util/color";
+import { distanceSquared, getRadiusFromVariance } from "@/util/geo";
+import { drawPin, interpolateColor } from "@/util/rendering";
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
+import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2, DebugAnchor, DebugFrameView as DebugFrame } from "@/types";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
@@ -17,7 +19,6 @@ export type CanvasViewProps = {
   refMeters: { x: number; y: number };
   zoom: number | null;
   fitToBounds: boolean;
-  worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
   selectedDeviceId: number | null;
   openClusterPoint: { x: number; y: number } | null;
   debugFrame: DebugFrame | null;
@@ -30,30 +31,7 @@ export type CanvasViewProps = {
   memberDeviceIds: Set<number>;
 };
 
-type DebugAnchor = {
-  mean: Vec2;
-  variance: number;
-  type: "active" | "candidate" | "closed" | "frame";
-  startTimestamp: number;
-  endTimestamp: number | null;
-  confidence: number;
-  lastUpdateTimestamp: number;
-};
-
-type DebugFrame = {
-  measurement: { lat: number; lon: number; accuracy: number; mean: Vec2; variance: number; };
-  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
-  timestamp: number;
-};
-
-function interpolateColor(c1: [number, number, number], c2: [number, number, number], t: number): string {
-  const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
-  const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
-  const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], selectedMotionSegment, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], selectedMotionSegment, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -120,14 +98,14 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     },
     hitTestAnchor: (px: number, py: number) => {
       if (!debugAnchorsRef.current.length) return null;
-      let best: { anchor: DebugAnchor; x: number; y: number; dist: number } | null = null;
+      let best: { anchor: DebugAnchor; x: number; y: number; distSq: number } | null = null;
       for (const it of debugAnchorsRef.current) {
-        const dist = Math.hypot(it.x - px, it.y - py);
         const extra = it.anchor.type === "frame" ? 12 : 6;
         const pick = Math.max(10, it.r + extra);
-        if (dist > pick) continue;
-        if (!best || dist < best.dist) {
-          best = { anchor: it.anchor, x: it.x, y: it.y, dist };
+        const distSq = distanceSquared([it.x, it.y], [px, py]);
+        if (distSq > pick * pick) continue;
+        if (!best || distSq < best.distSq) {
+          best = { anchor: it.anchor, x: it.x, y: it.y, distSq };
         }
       }
       return best ? { anchor: best.anchor, x: best.x, y: best.y } : null;
@@ -136,7 +114,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       if (!motionSegmentsRef.current.length) return null;
 
       const HIT_THRESHOLD = 8;
-      let best: { segment: MotionSegment; dist: number; x: number; y: number } | null = null;
+      let best: { segment: MotionSegment; distSq: number; x: number; y: number } | null = null;
 
       for (const { segment, screenPoints } of motionSegmentsRef.current) {
         if (screenPoints.length < 2) continue;
@@ -174,13 +152,11 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
             yy = y1 + param * D;
           }
 
-          const dx = px - xx;
-          const dy = py - yy;
-          const dist = Math.sqrt(dx * dx + dy * dy);
+          const distSq = distanceSquared([px, py], [xx, yy]);
 
-          if (dist < HIT_THRESHOLD) {
-            if (!best || dist < best.dist) {
-              best = { segment, dist: dist, x: xx, y: yy };
+          if (distSq < HIT_THRESHOLD * HIT_THRESHOLD) {
+            if (!best || distSq < best.distSq) {
+              best = { segment, distSq, x: xx, y: yy };
             }
           }
         }
@@ -214,7 +190,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       .map(c => {
         const mean: Vec2 = Array.isArray(c.mean) && c.mean.length === 2 ? c.mean : [0, 0];
         const variance = typeof c.variance === 'number' ? c.variance : 100;
-        return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: Math.sqrt(Math.max(1e-6, variance)), color: getColorForDevice(c.device, deviceColors[c.device]) };
+        return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: getRadiusFromVariance(variance), color: getColorForDevice(c.device, deviceColors[c.device]) };
       });
 
     // Store processed components for hit testing (indices in drawItems refer to this array)
@@ -231,12 +207,6 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           maxX = Math.max(maxX, p.mean[0]);
           minY = Math.min(minY, p.mean[1]);
           maxY = Math.max(maxY, p.mean[1]);
-        }
-        if (worldBounds) {
-          minX = Math.min(minX, worldBounds.minX);
-          minY = Math.min(minY, worldBounds.minY);
-          maxX = Math.max(maxX, worldBounds.maxX);
-          maxY = Math.max(maxY, worldBounds.maxY);
         }
         const widthMeters = Math.max(1, maxX - minX);
         const heightMeters = Math.max(1, maxY - minY);
@@ -269,69 +239,6 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       const sel = cl.items.find((it) => it.device === selectedDeviceId);
       return sel ? { ...cl, x: sel.x, y: sel.y } : cl;
     });
-
-    // helper to draw a pin-shaped marker (tip at tipY). Head is drawn as a single path for crisp antialiasing.
-    function drawPin(ctx: CanvasRenderingContext2D, tipX: number, tipY: number, iconText: string, iconColor: Color, isSelected = false, badgeText?: string) {
-      // overall proportions tuned to SVG
-      const bodyHeight = PIN_R * 1.5;
-      const headY = tipY - bodyHeight;
-
-      ctx.save();
-      ctx.beginPath();
-
-      // head
-      ctx.moveTo(tipX - PIN_R, headY);
-      ctx.arc(tipX, headY, PIN_R, Math.PI, 0);
-
-      // right side
-      ctx.bezierCurveTo(tipX + PIN_R, headY + PIN_R * 0.9, tipX + PIN_R * 0.35, headY + bodyHeight * 0.65, tipX, tipY);
-
-      // left side
-      ctx.bezierCurveTo(tipX - PIN_R * 0.35, headY + bodyHeight * 0.65, tipX - PIN_R, headY + PIN_R * 0.9, tipX - PIN_R, headY);
-
-      ctx.closePath();
-
-      // Marker background color: white in light mode, dark gray in dark mode
-      ctx.fillStyle = darkMode ? "rgb(40,40,40)" : "rgb(255,255,255)";
-      ctx.fill();
-
-      ctx.lineWidth = isSelected ? 3 : 2;
-      // Use the device color for the outline
-      ctx.strokeStyle = rgbaString(iconColor, 0.7);
-      ctx.lineJoin = "round";
-      ctx.stroke();
-
-      // icon (material symbol name or fallback letter)
-      if (iconText) {
-        ctx.save();
-        ctx.fillStyle = rgbaString(iconColor, 1);
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.font = `${PIN_R}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
-        ctx.fillText(String(iconText), tipX, headY + 1);
-        ctx.restore();
-      }
-
-      // small badge (bottom-right) for cluster size
-      if (badgeText) {
-        const badgeRadius = 10;
-        const bx = tipX + PIN_R * 0.75;
-        const by = headY + PIN_R * 0.6;
-        ctx.beginPath();
-        // Badge background: light gray in light mode, dark gray in dark mode
-        ctx.fillStyle = darkMode ? "rgb(30,30,30)" : "rgb(230, 230, 230)";
-        ctx.arc(bx, by, badgeRadius, 0, Math.PI * 2);
-        ctx.fill();
-        // Badge text: black in light mode, white in dark mode
-        ctx.fillStyle = darkMode ? "rgb(255,255,255)" : "rgb(0,0,0)";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.font = `${Math.round(badgeRadius)}px -apple-system, system-ui, Arial`;
-        ctx.fillText(String(badgeText), bx, by);
-      }
-
-      ctx.restore();
-    }
 
     function shouldHideAt(x: number, y: number) {
       if (!openClusterPoint) return false;
@@ -412,22 +319,6 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         }
       }
 
-      // Draw circle highlight for the selected device (if any)
-      for (const item of drawItems) {
-        const { x, y, r, color } = item;
-        if (selectedDeviceId == null || item.device !== selectedDeviceId) continue;
-
-        ctx.save();
-        ctx.fillStyle = rgbaString(color, 0.25);
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = rgbaString(color, 0.4);
-        ctx.stroke();
-        ctx.restore();
-      }
-
       // determine cluster membership
       const clusteredIdxs = new Set<number>();
       for (const cl of clustersRef.current) {
@@ -455,7 +346,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
             ctx.fill();
             ctx.restore();
           } else {
-            drawPin(ctx, x, y, item.iconText, color, selectedDeviceId != null && item.device === selectedDeviceId, undefined);
+            drawPin(ctx, x, y, PIN_R, item.iconText, color, darkMode, selectedDeviceId != null && item.device === selectedDeviceId, undefined);
           }
         }
       }
@@ -466,7 +357,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
         for (const anchor of debugAnchors) {
           const ax = width / 2 + (anchor.mean[0] - anchorX) * localZoom;
           const ay = height / 2 - (anchor.mean[1] - anchorY) * localZoom;
-          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, anchor.variance));
+          const anchorRadiusMeters = getRadiusFromVariance(anchor.variance);
           const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
           debugAnchorsRef.current.push({ anchor, x: ax, y: ay, r: anchorR });
           const stroke = anchor.type === "active" ? 'rgba(0,120,255,0.9)'
@@ -496,8 +387,8 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       if (debugFrame) {
         try {
           const df = debugFrame;
-          const mean = df.anchor?.mean ?? df.measurement.mean;
           const meas = df.measurement.mean;
+          const mean = df.anchor?.mean ?? meas;
 
           const ax = width / 2 + (mean[0] - anchorX) * localZoom;
           const ay = height / 2 - (mean[1] - anchorY) * localZoom;
@@ -507,7 +398,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
 
           // approximate anchor ellipse using diagonal variances
           const anchorVariance = df.anchor?.variance ?? 100;
-          const anchorRadiusMeters = Math.sqrt(Math.max(1e-6, anchorVariance));
+          const anchorRadiusMeters = getRadiusFromVariance(anchorVariance);
           const anchorR = Math.max(3, anchorRadiusMeters * localZoom);
           debugAnchorsRef.current.push({
             anchor: {
@@ -583,7 +474,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
           ctx.fill();
           ctx.restore();
         } else {
-          drawPin(ctx, x, y, rep.iconText, rep.color, selectedDeviceId != null && rep.device === selectedDeviceId, String(size));
+          drawPin(ctx, x, y, PIN_R, rep.iconText, rep.color, darkMode, selectedDeviceId != null && rep.device === selectedDeviceId, String(size));
         }
       }
     }
@@ -591,9 +482,9 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, worldBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
 
-  return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none", zIndex: 1000 }} />;
+  return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none" }} />;
 });
 
 export default React.memo(CanvasView);

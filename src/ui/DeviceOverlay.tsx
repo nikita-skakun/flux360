@@ -2,11 +2,11 @@ import { Button } from "@/components/ui/button";
 import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import { Pencil, X } from "lucide-react";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { fromWebMercator } from "@/util/webMercator";
 import { Slider } from "@/components/ui/slider";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React from "react";
-import type { DevicePoint } from "@/types";
+import type { DevicePoint, Timestamp } from "@/types";
 
 type Props = {
   selectedDeviceId: number | null;
@@ -15,16 +15,14 @@ type Props = {
   debugFrameIndex: number;
   setDebugFrameIndex: (value: number) => void;
   deviceNames: Record<number, string>;
-  deviceLastSeen: Record<number, number | null>;
+  deviceLastSeen: Record<number, Timestamp | null>;
   groupDevices: Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>;
   setSelectedDeviceId: (id: number | null) => void;
-  refLat: number | null;
-  refLon: number | null;
   enginesRef: Map<number, Engine>;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
 
-function humanDurationSince(ts: number, now: number = Date.now()): string {
+function humanDurationSince(ts: Timestamp, now: Timestamp = Date.now() as Timestamp): string {
   const s = Math.round((now - (ts ?? now)) / 1000);
   if (s < 5) return "just now";
   if (s < 60) return `${s}s`;
@@ -36,7 +34,7 @@ function humanDurationSince(ts: number, now: number = Date.now()): string {
   return `${d}d`;
 }
 
-const DurationDisplay: React.FC<{ timestamp: number }> = ({ timestamp }) => {
+const DurationDisplay: React.FC<{ timestamp: Timestamp }> = ({ timestamp }) => {
   const timeAgo = useTimeAgo(timestamp);
   return <>{timeAgo}</>;
 };
@@ -51,8 +49,6 @@ function DeviceOverlayComponent({
   deviceLastSeen,
   groupDevices,
   setSelectedDeviceId,
-  refLat,
-  refLon,
   enginesRef,
   setEditingTarget,
 }: Props) {
@@ -90,7 +86,7 @@ function DeviceOverlayComponent({
   const mostRecentSourceName = mostRecentSourceId ? (deviceNames[mostRecentSourceId] ?? `Device ${mostRecentSourceId}`) : null;
 
   return (
-    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
+    <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
       <div className="flex items-start">
         <div className="flex-1">
           {(() => {
@@ -161,14 +157,14 @@ function DeviceOverlayComponent({
               {chosenFrame.motionTimeFactor != null ? <div>Time factor: {chosenFrame.motionTimeFactor.toFixed(2)}</div> : null}
               {chosenFrame.motionCoherent != null ? <div>Coherent: {chosenFrame.motionCoherent ? 'yes' : 'no'}</div> : null}
               {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
-              <div>Outliers: {chosenFrame.outlierCount}</div>
+              {chosenFrame.outlierCount > 0 ? <div>Outliers: {chosenFrame.outlierCount}</div> : null}
               {chosenFrame.anchorVarianceScale != null ? <div>Anchor var inflate: ×{chosenFrame.anchorVarianceScale.toFixed(2)}</div> : null}
               <div>Confidence: {chosenFrame.anchor ? chosenFrame.anchor.confidence.toFixed(2) : '—'}</div>
               <div>Decision: <strong>{chosenFrame.decision}</strong></div>
               {chosenFrame.sourceDeviceId !== undefined ? <div>Source: <strong>{deviceNames[chosenFrame.sourceDeviceId] ?? `Device ${chosenFrame.sourceDeviceId}`}</strong></div> : null}
               <div>Anchor start: {chosenFrame.anchor?.startTimestamp != null ? humanDurationSince(chosenFrame.anchor.startTimestamp) : '—'}</div>
               <div>Raw lat/lon: {chosenFrame.measurement.lat.toFixed(5)}, {chosenFrame.measurement.lon.toFixed(5)}</div>
-              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const cs = new ProjectedCoordinateSystem(refLat ?? 0, refLon ?? 0); const { lat, lon } = cs.unproject(chosenFrame.anchor.mean[0], chosenFrame.anchor.mean[1]); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
+              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const [lon, lat] = fromWebMercator(chosenFrame.anchor.mean); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
               <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
             </div>
           ) : null}

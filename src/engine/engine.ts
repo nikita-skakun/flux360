@@ -1,28 +1,26 @@
 import { Anchor } from "./anchor";
-import { distanceMeters, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
+import { distance, distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
 import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
-import type { DevicePoint, MotionProfileName, MotionSegment, Vec2 } from "@/types";
+import { fromWebMercator, WORLD_R } from "@/util/webMercator";
+import type { DevicePoint, MotionProfileName, MotionSegment, Timestamp, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
-export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: number | null; activeConfidence: number };
+export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: Timestamp | null; activeConfidence: number };
 
 // Full engine state for checkpointing
 export type EngineState = {
   activeAnchor: Anchor | null;
   closedAnchors: Anchor[];
-  lastTimestamp: number | null;
+  lastTimestamp: Timestamp | null;
   motionProfile: MotionProfileName;
   motionActive: boolean;
-  motionStartTimestamp: number | null;
+  motionStartTimestamp: Timestamp | null;
   outliers: OutlierSample[];
   recentMotionPoints: DevicePoint[];
   debugFrames: DebugFrame[];
   seenDebugKeys: Set<string>;
   motionSegments: MotionSegment[];
   currentMotionSegment: MotionSegment | null;
-  refLat: number | null;
-  refLon: number | null;
 };
 
 const DECAY_RATE_ACTIVE = 0.001;
@@ -30,10 +28,10 @@ const GAIN_RATE = 2.0;
 
 export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
 export type DebugFrame = {
-  timestamp: number;
+  timestamp: Timestamp;
   sourceDeviceId: number | undefined;
   motionActive: boolean;
-  motionStartTimestamp: number | null;
+  motionStartTimestamp: Timestamp | null;
   outlierCount: number;
   motionScore: number | null;
   motionScoreSum: number | null;
@@ -43,7 +41,7 @@ export type DebugFrame = {
   motionSinglePointOverride: boolean | null;
   anchorVarianceScale: number | null;
   measurement: { lat: number; lon: number; accuracy: number; mean: Vec2; variance: number; };
-  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: number; lastUpdateTimestamp: number } | null;
+  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: Timestamp; lastUpdateTimestamp: Timestamp } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
   trendSeparation: number | null;
@@ -52,10 +50,10 @@ export type DebugFrame = {
 export class Engine {
   activeAnchor: Anchor | null = null;
   closedAnchors: Anchor[] = [];
-  lastTimestamp: number | null = null;
+  lastTimestamp: Timestamp | null = null;
   motionProfile: MotionProfileName = "person";
   motionActive: boolean = false;
-  motionStartTimestamp: number | null = null;
+  motionStartTimestamp: Timestamp | null = null;
   private outliers: OutlierSample[] = [];
   private recentMotionPoints: DevicePoint[] = [];
   // debug buffer (per-engine)
@@ -63,9 +61,6 @@ export class Engine {
   private seenDebugKeys = new Set<string>();
   motionSegments: MotionSegment[] = [];
   private currentMotionSegment: MotionSegment | null = null;
-  // Reference coordinates for distance calculations
-  private refLat: number | null = null;
-  private refLon: number | null = null;
 
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
 
@@ -78,11 +73,11 @@ export class Engine {
     this.motionProfile = profile;
   }
 
-  private normalizeProfileName(profile?: MotionProfileName | null): MotionProfileName {
+  private normalizeProfileName(profile: MotionProfileName | null): MotionProfileName {
     return profile === "car" ? "car" : "person";
   }
 
-  private getProfile(profile?: MotionProfileName | null): MotionProfileConfig {
+  private getProfile(profile: MotionProfileName | null): MotionProfileConfig {
     return MOTION_PROFILES[this.normalizeProfileName(profile)];
   }
 
@@ -99,36 +94,24 @@ export class Engine {
 
   private computePathLength(path: Vec2[]): number {
     if (path.length < 2) return 0;
-    if (this.refLat === null || this.refLon === null) {
-      // Fall back to Euclidean if no reference available
-      let total = 0;
-      for (let i = 1; i < path.length; i++) {
-        total += distanceMeters(path[i - 1]!, path[i]!);
-      }
-      return total;
-    }
     let total = 0;
     for (let i = 1; i < path.length; i++) {
-      const p1 = path[i - 1]!;
-      const p2 = path[i]!;
-      // Convert back to lat/lon and use haversine for accurate distance
-      const cs = new ProjectedCoordinateSystem(this.refLat, this.refLon);
-      const geo1 = cs.unproject(p1[0], p1[1]);
-      const geo2 = cs.unproject(p2[0], p2[1]);
-      total += this.haversineDistance(geo1.lat, geo1.lon, geo2.lat, geo2.lon);
+      // Convert Web Mercator coordinates to lat/lon and use haversine for accurate distance
+      const geo1 = fromWebMercator(path[i - 1]!);
+      const geo2 = fromWebMercator(path[i]!);
+      total += this.haversineDistance(geo1, geo2);
     }
     return total;
   }
 
-  private haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371000; // Earth's radius in meters
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
+  private haversineDistance(v1: Vec2, v2: Vec2): number {
+    const dLon = (v2[0] - v1[0]) * Math.PI / 180;
+    const dLat = (v2[1] - v1[1]) * Math.PI / 180;
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.cos(v1[1] * Math.PI / 180) * Math.cos(v2[1] * Math.PI / 180) *
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    return WORLD_R * c;
   }
 
   private arePointsConsistent(points: DevicePoint[], threshold: number): boolean {
@@ -203,11 +186,7 @@ export class Engine {
   processMeasurements(ms: DevicePoint[]): EngineSnapshot[] {
     const snapshots: EngineSnapshot[] = [];
     for (const m of ms) {
-      // Capture reference coordinates from first measurement
-      if (this.refLat === null || this.refLon === null) {
-        this.refLat = m.lat;
-        this.refLon = m.lon;
-      }
+      // No reference coordinates needed with Web Mercator
       const profile = this.getProfile(this.motionProfile);
       let motionScore: number | null = null;
       let motionScoreSum: number | null = null;
@@ -222,7 +201,7 @@ export class Engine {
 
       if (this.activeAnchor === null) {
         // Initialize with the first measurement
-        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp);
+        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp, m.timestamp);
 
         this.motionActive = false;
         this.motionStartTimestamp = null;
@@ -237,7 +216,7 @@ export class Engine {
           if (dist2Active < profile.stationaryMahalanobisThreshold) {
             // Detect stationary drift: when reports consistently fall outside the anchor's accuracy circle,
             // we inflate the anchor's variance to allow it to move toward the new position.
-            const dist = distanceMeters(this.activeAnchor.mean, m.mean);
+            const dist = distance(this.activeAnchor.mean, m.mean);
             const anchorRadius = Math.sqrt(this.activeAnchor.variance);
             const reportRadius = m.accuracy;
             const separation = dist - (anchorRadius + reportRadius);
@@ -259,8 +238,10 @@ export class Engine {
             decision = 'resisted';
             const lastConfirm = this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
             const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
-            const distance = distanceMeters(this.activeAnchor.mean, m.mean);
-            if (distance < m.accuracy * profile.minDistanceAccuracyRatio) {
+            const distToMean = distance(this.activeAnchor.mean, m.mean);
+            if (distToMean < m.accuracy * profile.minDistanceAccuracyRatio || distToMean <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
+              // Center is within the noise-gate radius, OR the GPS circles still overlap —
+              // both cases are geometrically consistent with being stationary.
               const weakVariance = m.variance * profile.weakVarianceInflation;
               const weakPoint: DevicePoint = { ...m, variance: weakVariance };
               this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
@@ -269,7 +250,7 @@ export class Engine {
               decision = 'noise-weak-update';
             } else {
               const timeFactor = Math.log1p(dtMinutes + 1);
-              const score = (distance / (m.accuracy + profile.accuracyK)) * timeFactor;
+              const score = (distToMean / (m.accuracy + profile.accuracyK)) * timeFactor;
               const direction = directionFromPoints(this.activeAnchor.mean, m.mean);
               this.insertOutlier({ point: m, score, direction });
 
@@ -280,10 +261,10 @@ export class Engine {
               motionScore = score;
               motionScoreSum = adjustedScore;
               motionCoherent = coherence;
-              motionDistance = distance;
+              motionDistance = distToMean;
               motionTimeFactor = timeFactor;
               const overrideByScore = score >= profile.singlePointScoreThreshold * profile.singlePointOverrideMultiplier;
-              const overrideByAccuracy = distance >= m.accuracy * profile.singlePointAccuracyRatio;
+              const overrideByAccuracy = distToMean >= m.accuracy * profile.singlePointAccuracyRatio;
               motionSinglePointOverride = overrideByScore && overrideByAccuracy;
 
               const singlePointTriggers = (score >= profile.singlePointScoreThreshold) && motionSinglePointOverride;
@@ -341,7 +322,7 @@ export class Engine {
               const newVariance = this.computeAverageVariance(points);
               this.activeAnchor.endTimestamp = m.timestamp;
               this.closedAnchors.push(this.activeAnchor);
-              const newAnchor = new Anchor(newMean, newVariance, m.timestamp);
+              const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
               this.activeAnchor = newAnchor;
               this.motionActive = false;
               this.motionStartTimestamp = null;
@@ -397,10 +378,10 @@ export class Engine {
   }
 
   getCurrentSnapshot(): EngineSnapshot {
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as number, DECAY_RATE_ACTIVE) : 0 };
+    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as Timestamp, DECAY_RATE_ACTIVE) : 0 };
   }
 
-  getDominantAnchorAt(timestamp: number): Anchor | null {
+  getDominantAnchorAt(timestamp: Timestamp): Anchor | null {
     const candidates: Anchor[] = [];
     if (this.activeAnchor && this.activeAnchor.startTimestamp <= timestamp) {
       candidates.push(this.activeAnchor);
@@ -449,12 +430,10 @@ export class Engine {
         startTime: this.currentMotionSegment.startTime,
         endTime: this.currentMotionSegment.endTime,
       } : null,
-      refLat: this.refLat,
-      refLon: this.refLon,
     };
   }
 
-  pruneHistory(olderThan: number) {
+  pruneHistory(olderThan: Timestamp) {
     // Remove completed segments that ended before the cutoff time
     this.motionSegments = this.motionSegments.filter(s => {
       // Keep active segments
@@ -490,7 +469,5 @@ export class Engine {
       startTime: state.currentMotionSegment.startTime,
       endTime: state.currentMotionSegment.endTime,
     } : null;
-    this.refLat = state.refLat ?? null;
-    this.refLon = state.refLon ?? null;
   }
 }

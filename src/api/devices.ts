@@ -1,10 +1,11 @@
 import { performGet, performPost, performPut, performDelete, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
+import type { Timestamp } from "@/types";
 
 export type TraccarDevice = {
   id: number;
   name: string;
   emoji: string;
-  lastSeen: number | null;
+  lastSeen: Timestamp | null;
   attributes: Record<string, unknown>;
 };
 
@@ -25,13 +26,13 @@ function parseTraccarDevice(d: unknown): TraccarDevice | null {
   if (!d || typeof d !== "object") return null;
   const o = d as Record<string, unknown>;
 
-  const id = o["id"];
-  if (typeof id !== "number") return null;
+  const id = typeof o["id"] === "number" ? o["id"] : undefined;
+  if (id === undefined) return null;
 
   const name = (typeof o["name"] === "string" ? o["name"] : null) ??
     (typeof o["uniqueId"] === "string" ? o["uniqueId"] : null) ??
     String(id);
-  const attrs = typeof o["attributes"] === "object" ? (o["attributes"] as Record<string, unknown>) : {};
+  const attrs = (o["attributes"] && typeof o["attributes"] === "object") ? (o["attributes"] as Record<string, unknown>) : {};
   const emoji = typeof attrs["emoji"] === "string" ? attrs["emoji"] : name.toUpperCase().charAt(0);
 
   const lastUpdate = o["lastUpdate"];

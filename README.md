@@ -9,7 +9,7 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 - **Motion Detection**: Supports configurable motion profiles (e.g., pedestrian or vehicle) to adapt tracking behavior based on device type.
 - **Settling Logic**: Automatically detects when motion has ceased by analyzing a sliding window of recent position points. If points are spatially consistent (clustered) and movement directions appear random (indicating noise rather than directed travel), the engine establishes a new stable anchor at the centroid of the windowed points, smoothing transitions in noisy GPS environments.
 - **Device Grouping**: Aggregate multiple devices into virtual groups for combined tracking (e.g., family or fleet views).
-- **Interactive Mapping**: Leaflet-based map with visual overlays for accuracy circles, device icons, and clustering.
+- **Interactive Mapping**: MapTiler SDK-based map with visual overlays for accuracy circles, device icons, and clustering.
 - **Debug Mode**: Inspect processing frames, anchor history, and motion decisions for troubleshooting.
 - **Settings UI**: In-app configuration for server connection, authentication, and device management.
 
@@ -32,4 +32,4 @@ See [AGENTS.md](AGENTS.md) for development guidelines and coding conventions.
 
 ---
 
-Built with Bun, React, TypeScript, Tailwind CSS, and Leaflet.
+Built with Bun, React, TypeScript, Tailwind CSS, and MapTiler SDK.

@@ -1,7 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { Sun, Moon, Monitor, ChevronDown, ChevronRight } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import React, { useState } from "react";
@@ -84,48 +83,40 @@ export const SettingsPanel = React.memo(function SettingsPanel({
 
   return (
     <div className="w-full">
-      <div className="p-2 rounded-lg bg-muted/30 border border-border transition-colors duration-300">
-        {/* Header: Spoiler Toggle + Debug + Status + Theme */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="p-2 rounded-lg bg-muted/90 border border-border transition-colors duration-300">
+        <div className="flex flex-col gap-2">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-1 text-sm font-medium hover:opacity-80 transition-opacity"
+            className="flex items-center gap-1 text-sm font-medium hover:opacity-80 transition-opacity w-fit"
           >
             {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
             Connection Settings
           </Button>
 
-          <div className="flex items-center gap-4">
-            <div className="text-xs flex items-center gap-2">
-              <span>
-                <strong className="text-foreground">{wsStatus}</strong>
-              </span>
-              {wsError ? <span className="text-destructive font-semibold">Error: {wsError}</span> : null}
-            </div>
+          <div className="flex items-center justify-between text-xs">
+            <span>
+              <strong className="text-foreground">{wsStatus}</strong>
+            </span>
+            {wsError ? <span className="text-destructive font-semibold">Error: {wsError}</span> : null}
 
-            <Separator orientation="vertical" />
-
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               <Switch
                 id="debug-mode"
                 checked={debugMode}
                 onCheckedChange={setDebugMode}
               />
-              <Label htmlFor="debug-mode" className="text-xs font-medium cursor-pointer">
+              <Label htmlFor="debug-mode" className="cursor-pointer">
                 Debug
               </Label>
             </div>
 
-            <Separator orientation="vertical" />
-
-            {/* Theme Toggle Button */}
             <Button
               variant="outline"
               size="icon"
               onClick={cycleTheme}
-              className="h-8 w-8 rounded-full"
+              className="h-7 w-7 rounded-full"
               title={`Theme: ${getThemeLabel()} (click to cycle)`}
             >
               {getThemeIcon()}

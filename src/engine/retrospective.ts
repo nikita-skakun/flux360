@@ -1,11 +1,11 @@
 import { distanceSquared } from "@/util/geo";
 import { MOTION_PROFILES } from "./motionDetector";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
-import type { NormalizedPosition, Vec2, MotionProfileName } from "@/types";
+import { toWebMercator } from "@/util/webMercator";
+import type { NormalizedPosition, Vec2, MotionProfileName, Timestamp } from "@/types";
 
 export type RetrospectiveMotionSegment = {
-  startTime: number;
-  endTime: number;
+  startTime: Timestamp;
+  endTime: Timestamp;
   startPosition: Vec2;
   endPosition: Vec2;
   path: Vec2[];
@@ -15,13 +15,6 @@ export type RetrospectiveMotionSegment = {
 export type RetrospectiveResult = {
   motionSegments: RetrospectiveMotionSegment[];
 };
-
-// Local distanceMeters is still needed for computePathExtent and actual distance in path length
-function distanceMeters(a: Vec2, b: Vec2): number {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.sqrt(dx * dx + dy * dy);
-}
 
 function computePathExtent(points: Vec2[]): number {
   if (points.length < 2) return 0;
@@ -35,23 +28,19 @@ function computePathExtent(points: Vec2[]): number {
   cx /= points.length;
   cy /= points.length;
 
-  let maxDist = 0;
+  let maxDistSq = 0;
   for (const p of points) {
-    const d = distanceMeters([cx, cy], p);
-    if (d > maxDist) maxDist = d;
+    const dSq = distanceSquared([cx, cy], p);
+    if (dSq > maxDistSq) maxDistSq = dSq;
   }
 
-  return maxDist * 2;
+  return Math.sqrt(maxDistSq) * 2;
 }
 
 function toMeterPoint(
-  p: NormalizedPosition,
-  refLat: number,
-  refLon: number
-): { mean: Vec2; timestamp: number; accuracy: number } {
-  const cs = new ProjectedCoordinateSystem(refLat, refLon);
-  const [x, y] = cs.project(p.lat, p.lon);
-  return { mean: [x, y], timestamp: p.timestamp, accuracy: p.accuracy };
+  p: NormalizedPosition
+): { mean: Vec2; timestamp: Timestamp; accuracy: number } {
+  return { mean: toWebMercator([p.lon, p.lat]), timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
 function getDynamicRadius(accuracy: number, maxStationaryRadius: number): number {
@@ -62,8 +51,6 @@ function getDynamicRadius(accuracy: number, maxStationaryRadius: number): number
 
 export function analyzeMotion(
   positions: NormalizedPosition[],
-  refLat: number,
-  refLon: number,
   motionProfile: MotionProfileName = "person"
 ): RetrospectiveResult {
   if (positions.length === 0) {
@@ -75,15 +62,15 @@ export function analyzeMotion(
   const minStationaryDuration = profile.retrospectiveMinStationaryDuration;
   const maxStationaryRadius = profile.retrospectiveMaxStationaryRadius;
 
-  const meterPoints = sorted.map((p, idx) => ({ ...toMeterPoint(p, refLat, refLon), index: idx }));
+  const meterPoints = sorted.map((p, idx) => ({ ...toMeterPoint(p), index: idx }));
   const len = meterPoints.length;
 
   type StableInterval = {
     startIndex: number;
     endIndex: number;
     center: Vec2;
-    startTime: number;
-    endTime: number;
+    startTime: Timestamp;
+    endTime: Timestamp;
     avgAccuracy: number;
   };
 
@@ -279,8 +266,6 @@ export function analyzeMotion(
 export function analyzeAllDevices(
   positions: NormalizedPosition[],
   deviceIds: number[],
-  refLat: number,
-  refLon: number,
   motionProfiles: Record<number, MotionProfileName>
 ): Map<number, RetrospectiveResult> {
   const results = new Map<number, RetrospectiveResult>();
@@ -296,7 +281,7 @@ export function analyzeAllDevices(
   for (const deviceId of deviceIds) {
     const profile = motionProfiles[deviceId] ?? "person";
     const devicePositions = positionsByDevice.get(deviceId) ?? [];
-    const result = analyzeMotion(devicePositions, refLat, refLon, profile);
+    const result = analyzeMotion(devicePositions, profile);
     results.set(deviceId, result);
   }
 

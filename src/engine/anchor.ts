@@ -1,4 +1,4 @@
-import type { DevicePoint, Vec2 } from "@/types";
+import type { DevicePoint, Timestamp, Vec2 } from "@/types";
 
 export const CONFIDENCE_HIGH_THRESHOLD = 0.8;
 export const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
@@ -6,32 +6,30 @@ export const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
 export class Anchor {
   mean: Vec2;
   variance: number;
-  startTimestamp: number;
-  endTimestamp: number | null;
+  startTimestamp: Timestamp;
+  endTimestamp: Timestamp | null;
   confidence: number;
-  lastUpdateTimestamp: number;
+  lastUpdateTimestamp: Timestamp;
 
-  constructor(mean: Vec2, variance: number, startTimestamp: number, confidence: number = 0.25, lastUpdateTimestamp?: number) {
+  constructor(mean: Vec2, variance: number, startTimestamp: Timestamp, lastUpdateTimestamp: Timestamp, confidence: number = 0.25, endTimestamp: Timestamp | null = null) {
     this.mean = mean;
     this.variance = variance;
     this.startTimestamp = startTimestamp;
-    this.endTimestamp = null;
+    this.endTimestamp = endTimestamp;
     this.confidence = confidence;
-    this.lastUpdateTimestamp = lastUpdateTimestamp ?? startTimestamp;
+    this.lastUpdateTimestamp = lastUpdateTimestamp;
   }
 
   clone(): Anchor {
-    const cloned = new Anchor([this.mean[0], this.mean[1]], this.variance, this.startTimestamp, this.confidence, this.lastUpdateTimestamp);
-    cloned.endTimestamp = this.endTimestamp;
-    return cloned;
+    return new Anchor([this.mean[0], this.mean[1]], this.variance, this.startTimestamp, this.lastUpdateTimestamp, this.confidence, this.endTimestamp);
   }
 
-  getConfidence(timestamp: number, decayRate: number): number {
+  getConfidence(timestamp: Timestamp, decayRate: number): number {
     const timeDiffMinutes = (timestamp - this.lastUpdateTimestamp) / 60000;
     return Math.max(0, Math.min(1, this.confidence * Math.exp(-decayRate * timeDiffMinutes)));
   }
 
-  getConfidenceLevel(timestamp: number, decayRate: number): "high" | "medium" | "low" {
+  getConfidenceLevel(timestamp: Timestamp, decayRate: number): "high" | "medium" | "low" {
     const conf = this.getConfidence(timestamp, decayRate);
     if (conf >= CONFIDENCE_HIGH_THRESHOLD) return "high";
     if (conf >= CONFIDENCE_MEDIUM_THRESHOLD) return "medium";

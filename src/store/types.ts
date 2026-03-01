@@ -1,6 +1,5 @@
-import type { Anchor } from '@/engine/anchor';
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, WorldBounds, MotionProfileName, MotionSegment, RetrospectiveResult } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, MotionSegment, RetrospectiveResult, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -9,8 +8,7 @@ export type Refs = {
   engines: Map<number, Engine>;
   processedKeys: Set<string>;
   positionsAll: NormalizedPosition[];
-  firstPosition: { lat: number; lon: number } | null;
-  engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>;
+  engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>;
 };
 
 export type StoreState = {
@@ -18,7 +16,7 @@ export type StoreState = {
   devices: Record<number, {
     name: string;
     emoji: string;
-    lastSeen: number | null;
+    lastSeen: Timestamp | null;
     effectiveMotionProfile: MotionProfileName;
     motionProfile: MotionProfileName | null;
     color: string | null;
@@ -26,9 +24,6 @@ export type StoreState = {
 
   // Groups slice
   groups: GroupDevice[];
-
-  // Motion profiles slice
-  motionProfiles: Record<number, MotionProfileName>;
 
   // Settings slice (persisted)
   settings: {
@@ -44,22 +39,12 @@ export type StoreState = {
     inputDarkMode: 'light' | 'dark' | 'system';
   };
 
-  // Positions slice
-  positions: {
-    allPositions: NormalizedPosition[];
-    snapshots: Record<number, DevicePoint[]>;
-    firstPosition: { lat: number; lon: number } | null;
-  };
-
   // UI State slice
   ui: {
     selectedDeviceId: number | null;
     isSidePanelOpen: boolean;
     debugMode: boolean;
     debugFrameIndex: number;
-    refLat: number | null;
-    refLon: number | null;
-    worldBounds: WorldBounds | null;
     editingTarget: { type: 'device' | 'group', id: number } | null;
   };
 
@@ -68,7 +53,6 @@ export type StoreState = {
 
   // Engine snapshots and anchors
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
-  dominantAnchors: Map<number, Anchor | null>;
 
   // Motion segments
   motionSegments: Record<number, MotionSegment[]>;
@@ -76,7 +60,7 @@ export type StoreState = {
   // Retrospective analysis state
   retrospective: {
     byDevice: Map<number, RetrospectiveResult>;
-    lastUpdate: number;
+    lastUpdate: Timestamp;
     isAnalyzing: boolean;
   };
 };
@@ -97,13 +81,9 @@ export type StoreActions = {
   // Positions
   addPositions: (positions: NormalizedPosition[]) => void;
   processPositions: () => { lat: number; lon: number } | null;
-  setSnapshots: (snapshots: Record<number, DevicePoint[]>) => void;
-  setFirstPosition: (pos: { lat: number; lon: number } | null) => void;
-  setPositionsAll: (updater: (prev: NormalizedPosition[]) => NormalizedPosition[]) => void;
 
   // Settings
   applySettings: () => void;
-  clearSettings: () => void;
   setInputBaseUrl: (value: string) => void;
   setInputSecure: (value: boolean) => void;
   setInputToken: (value: string) => void;
@@ -112,24 +92,13 @@ export type StoreActions = {
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;
-  toggleSidePanel: () => void;
   setIsSidePanelOpen: (open: boolean) => void;
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
-  setRefLat: (lat: number | null) => void;
-  setRefLon: (lon: number | null) => void;
-  setWorldBounds: (bounds: WorldBounds | null) => void;
-  setEngineSnapshotsByDevice: (snapshots: Record<number, DevicePoint[]>) => void;
-  setDominantAnchors: (anchors: Map<number, Anchor | null>) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
-
-  // Motion segments
-  setMotionSegments: (segments: Record<number, MotionSegment[]>) => void;
 
   // Retrospective analysis actions
   runRetrospectiveAnalysis: () => void;
-  setRetrospectiveResults: (results: Map<number, RetrospectiveResult>) => void;
-  clearRetrospectiveResults: () => void;
 };
 
 export type Store = StoreState & StoreActions;

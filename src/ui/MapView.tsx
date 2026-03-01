@@ -1,11 +1,14 @@
+import "@maptiler/sdk/dist/maptiler-sdk.css";
+import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clustering";
 import { ClusterPopup } from "./map/ClusterPopup";
-import { MaptilerLayer } from "@maptiler/leaflet-maptilersdk";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
-import { PulsingMarker } from "./map/PulsingMarker";
-import CanvasView, { type CanvasViewHandle } from "./CanvasView";
-import L from "leaflet";
-import React, { useEffect, useMemo, useRef, useState, useImperativeHandle } from "react";
-import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
+import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
+import { getColorForDevice, type Color } from "@/util/color";
+import { toWebMercator, fromWebMercator } from "@/util/webMercator";
+import { distance, getRadiusFromVariance } from "@/util/geo";
+import { drawPin, PIN_R } from "@/util/rendering";
+import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp } from "@/types";
+import type { Feature, Point, Polygon } from "geojson";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -16,780 +19,721 @@ type Props = {
   deviceNames: Record<number, string>;
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
-  refLat: number | null;
-  refLon: number | null;
-  worldBounds: { minX: number; minY: number; maxX: number; maxY: number } | null;
-  height: number | string;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
-  selectedMotionSegment?: MotionSegment | RetrospectiveMotionSegment | null;
   onSelectDevice: (id: number) => void;
-  onSelectMotionSegment?: (segment: MotionSegment | RetrospectiveMotionSegment) => void;
-  debugFrame?: import("@/engine/engine").DebugFrame | null;
-  debugAnchors?: Array<{ mean: Vec2; variance: number; type: "active" | "candidate" | "closed" | "frame"; startTimestamp: number; endTimestamp: number | null; confidence: number; lastUpdateTimestamp: number }>;
-  motionSegments?: MotionSegment[];
-  retrospectiveMotionSegments?: RetrospectiveMotionSegment[];
-  pulsingDeviceIds?: number[];
-  maptilerApiKey?: string;
+  maptilerApiKey: string | null;
   darkMode: boolean;
-  memberDeviceIds: Set<number>;
+  debugAnchors: DebugAnchor[];
+  debugFrame: DebugFrameView | null;
+  pulsingDeviceIds: number[];
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({ components, refLat, refLon, worldBounds, height, overlay, onSelectDevice, onSelectMotionSegment, selectedDeviceId, selectedMotionSegment, deviceNames, deviceIcons, deviceColors, debugFrame, debugAnchors, motionSegments = [], retrospectiveMotionSegments = [], pulsingDeviceIds, maptilerApiKey, darkMode, memberDeviceIds = new Set() }, ref) => {
-  // Always use retrospective segments when available, fall back to real-time
-  const effectiveMotionSegments = useMemo(() => {
-    if (retrospectiveMotionSegments.length > 0) {
-      // Convert RetrospectiveMotionSegment to MotionSegment format
-      // Retrospective segments don't have anchor objects, so we create minimal anchors
-      return retrospectiveMotionSegments.map((rs): MotionSegment => {
-        // Create minimal anchor-like objects for compatibility
-        // These will be used for rendering only
-        const startAnchor = {
-          mean: rs.startPosition,
-          variance: 1,
-          startTimestamp: rs.startTime,
-          endTimestamp: null,
-          confidence: rs.confidence,
-          lastUpdateTimestamp: rs.startTime,
-          clone() { return { ...this }; },
-          getConfidence() { return rs.confidence; },
-          getConfidenceLevel() { return "medium" as const; },
-          mahalanobis2() { return 0; },
-          kalmanUpdate() { },
-        };
-
-        const endAnchor = rs.endTime ? {
-          mean: rs.endPosition,
-          variance: 1,
-          startTimestamp: rs.endTime,
-          endTimestamp: rs.endTime,
-          confidence: rs.confidence,
-          lastUpdateTimestamp: rs.endTime,
-          clone() { return { ...this }; },
-          getConfidence() { return rs.confidence; },
-          getConfidenceLevel() { return "medium" as const; },
-          mahalanobis2() { return 0; },
-          kalmanUpdate() { },
-        } : null;
-
-        return {
-          startAnchor: startAnchor as MotionSegment["startAnchor"],
-          endAnchor: endAnchor as MotionSegment["endAnchor"],
-          path: rs.path,
-          startTime: rs.startTime,
-          endTime: rs.endTime,
-        };
-      });
-    }
-    return motionSegments;
-  }, [motionSegments, retrospectiveMotionSegments]);
-
+const MapView = React.forwardRef<MapViewHandle, Props>(({
+  components,
+  deviceNames,
+  deviceIcons,
+  deviceColors,
+  overlay,
+  selectedDeviceId,
+  onSelectDevice,
+  maptilerApiKey,
+  darkMode,
+  debugAnchors = [],
+  debugFrame = null,
+  pulsingDeviceIds = [],
+}, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapDivRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const tileLayerRef = useRef<L.Layer | null>(null);
-
-  const [size, setSize] = useState({ width: 800, height: 600 });
-  const [centerMeters, setCenterMeters] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [pixelsPerMeter, setPixelsPerMeter] = useState<number | null>(null);
-
-  const canvasApiRef = useRef<CanvasViewHandle | null>(null);
-  const deviceNamesRef = useRef<Record<number, string>>(deviceNames);
-  const [clusterPopup, setClusterPopup] = useState<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
-  const [clusterAnimation, setClusterAnimation] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle');
-  const clusterAnimationTimerRef = useRef<number | null>(null);
-  const CLUSTER_ANIM_MS = 150;
-  const [anchorHover, setAnchorHover] = useState<{ x: number; y: number; anchor: NonNullable<Props["debugAnchors"]>[number] } | null>(null);
-  const [motionHover, setMotionHover] = useState<{ x: number; y: number; segment: MotionSegment | RetrospectiveMotionSegment } | null>(null);
-  const [timeTick, setTimeTick] = useState(0);
-
-  // Coordinate system for transforming between lat/lon and meters
-  const coordinateSystemRef = useRef<ProjectedCoordinateSystem | null>(null);
-
-  useEffect(() => {
-    if (refLat != null && refLon != null) {
-      coordinateSystemRef.current = new ProjectedCoordinateSystem(refLat, refLon);
-    } else {
-      coordinateSystemRef.current = null;
-    }
-  }, [refLat, refLon]);
-
-  // Animation tracking refs for smooth marker updates during animations
-  const animFrameRef = useRef<number | null>(null);
-  const animationInProgressRef = useRef(false);
-  const lastCenterRef = useRef<L.LatLng | null>(null);
-  const lastZoomRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!debugAnchors?.length && anchorHover) {
-      setAnchorHover(null);
-    }
-  }, [debugAnchors, anchorHover]);
-
-  useEffect(() => {
-    if (!motionHover || motionHover.segment.endTime) return;
-    const id = setInterval(() => setTimeTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [motionHover]);
-
-  const clusterPopupRef = useRef<{ lat: number; lng: number; items: DevicePoint[] } | null>(null);
-  const clusterAnimationRef = useRef<typeof clusterAnimation>('idle');
-  const prevMaptilerApiKeyRef = useRef<string | undefined>(undefined);
+  const mapRef = useRef<MaptilerMap | null>(null);
+  const componentsRef = useRef<DevicePoint[]>(components);
+  const selectedDeviceIdRef = useRef(selectedDeviceId);
   const onSelectDeviceRef = useRef(onSelectDevice);
-  const onSelectMotionSegmentRef = useRef(onSelectMotionSegment);
+  const hasFittedInitially = useRef(false);
+
+  type AnchorTooltip = { x: number; y: number; anchor: DebugAnchor };
+  const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
+  const [anchorTooltip, setAnchorTooltip] = useState<AnchorTooltip | null>(null);
+  const debugAnchorsRef = useRef<DebugAnchor[]>(debugAnchors);
+  useEffect(() => { debugAnchorsRef.current = debugAnchors; }, [debugAnchors]);
 
   useEffect(() => {
-    clusterPopupRef.current = clusterPopup;
-    clusterAnimationRef.current = clusterAnimation;
-  }, [clusterPopup, clusterAnimation]);
+    componentsRef.current = components;
+  }, [components]);
 
   useEffect(() => {
-    deviceNamesRef.current = deviceNames;
-  }, [deviceNames]);
+    selectedDeviceIdRef.current = selectedDeviceId;
+  }, [selectedDeviceId]);
 
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
 
-  useEffect(() => {
-    onSelectMotionSegmentRef.current = onSelectMotionSegment;
-  }, [onSelectMotionSegment]);
-
-  const openClusterPopupAnimated = (popup: { lat: number; lng: number; items: DevicePoint[] }) => {
-    if (clusterAnimationTimerRef.current) {
-      window.clearTimeout(clusterAnimationTimerRef.current);
-      clusterAnimationTimerRef.current = null;
-    }
-    clusterPopupRef.current = popup;
-    setClusterPopup(popup);
-    clusterAnimationRef.current = 'entering';
-    setClusterAnimation('entering');
-    clusterAnimationTimerRef.current = window.setTimeout(() => {
-      clusterAnimationRef.current = 'visible';
-      setClusterAnimation('visible');
-      clusterAnimationTimerRef.current = null;
-    }, 10);
-  };
-
-  const closeClusterPopupAnimated = () => {
-    if (!clusterPopupRef.current || clusterAnimationRef.current === 'exiting') return;
-    if (clusterAnimationTimerRef.current) {
-      window.clearTimeout(clusterAnimationTimerRef.current);
-      clusterAnimationTimerRef.current = null;
-    }
-    clusterAnimationRef.current = 'exiting';
-    setClusterAnimation('exiting');
-    clusterAnimationTimerRef.current = window.setTimeout(() => {
-      clusterPopupRef.current = null;
-      setClusterPopup(null);
-      clusterAnimationRef.current = 'idle';
-      setClusterAnimation('idle');
-      clusterAnimationTimerRef.current = null;
-    }, CLUSTER_ANIM_MS);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (clusterAnimationTimerRef.current) {
-        window.clearTimeout(clusterAnimationTimerRef.current);
-        clusterAnimationTimerRef.current = null;
-      }
-      clusterPopupRef.current = null;
-      clusterAnimationRef.current = 'idle';
-    };
-  }, []);
-
-  const refLatRef = useRef<number | null>(refLat);
-  const refLonRef = useRef<number | null>(refLon);
-  useEffect(() => {
-    refLatRef.current = refLat;
-    refLonRef.current = refLon;
-  }, [refLat, refLon]);
-
-  const prevSelectedRef = useRef<number | null>(selectedDeviceId);
-  const skipNextAutoFitRef = useRef(false);
-  const selectedZoomedRef = useRef(false);
-
-  const flyDurationForMeters = (meters: number) => {
-    const m = Math.max(1, meters);
-    const v = Math.log10(m);
-    return Math.max(0.25, Math.min(1.5, v * 0.22 + 0.15));
-  };
-
-  const componentsRef = useRef(components);
-  useEffect(() => { componentsRef.current = components; }, [components]);
-
-  useImperativeHandle(ref, () => ({
-    flyToDevice: (id: number) => {
-      const map = mapRef.current;
-      if (!map || refLatRef.current == null || refLonRef.current == null) return;
-
-      const sel = componentsRef.current.find((c) => Number(c.device) === Number(id));
-      if (!sel?.mean) return;
-
-      const deg = coordinateSystemRef.current?.unproject(sel.mean[0], sel.mean[1]) ?? { lat: 0, lon: 0 };
-      const ZOOM_FOR_SELECTED = 18;
-
-      try {
-        if (map.stop) map.stop();
-        const center = map.getCenter();
-        const centerLatLng = L.latLng(center.lat, center.lng);
-        const targetLatLng = L.latLng(deg.lat, deg.lon);
-        const distMeters = centerLatLng.distanceTo(targetLatLng);
-
-        const dur = flyDurationForMeters(distMeters);
-        const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
-
-        map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
-        // Set this to true so we don't double-animate if selectedDeviceId changes right after
-        selectedZoomedRef.current = true;
-      } catch {
-        // ignore map animation errors
-      }
-    }
-  }));
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !pulsingDeviceIds || pulsingDeviceIds.length === 0 || refLatRef.current == null || refLonRef.current == null) return;
-
-    // Defer slightly to allow render to settle if needed, but synchronous is usually fine for map events
-    // Logic: Find all selected devices in CURRENT components (latest known positions)
-    const points: L.LatLng[] = [];
-    for (const id of pulsingDeviceIds) {
-      const comp = componentsRef.current.find(c => Number(c.device) === id);
-      if (comp?.mean) {
-        const deg = coordinateSystemRef.current?.unproject(comp.mean[0], comp.mean[1]) ?? { lat: 0, lon: 0 };
-        points.push(L.latLng(deg.lat, deg.lon));
-      }
-    }
-
-    if (points.length === 0) return;
-
-    try {
-      if (map.stop) map.stop();
-      // Use fitBounds for all cases (single or multiple) to ensure consistent behavior
-      // maxZoom: 18 allows close zoom for single or clusters of devices
-      const bounds = L.latLngBounds(points);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 18, animate: true, duration: 1.5 });
-    } catch {
-      // ignore map errors
-    }
-  }, [pulsingDeviceIds]);
-
-  useEffect(() => {
-    if (prevSelectedRef.current != null && selectedDeviceId == null) {
-      skipNextAutoFitRef.current = true;
-    }
-    if (prevSelectedRef.current !== selectedDeviceId) selectedZoomedRef.current = false;
-    prevSelectedRef.current = selectedDeviceId;
-  }, [selectedDeviceId]);
-
-  const updateTransform = () => {
+  const flyToDevice = useCallback((id: number) => {
     const map = mapRef.current;
     if (!map) return;
+
+    const device = componentsRef.current.find(c => c.device === id);
+    if (!device) return;
+
+    const target = [device.lon, device.lat] as Vec2;
+
+    const center = map.getCenter();
+    let duration = 800;
+    if (center) {
+      const distanceDeg = distance([target[0], target[1]], [center.lng, center.lat]);
+
+      const minDuration = 300;
+      const maxDuration = 2500;
+      const maxDistanceDeg = 0.045; // ~0.045 degrees ≈ 5km in latitude
+      const t = Math.min(1, distanceDeg / maxDistanceDeg);
+      duration = Math.round(minDuration + t * (maxDuration - minDuration));
+    }
+
+    map.flyTo({ center: target, zoom: 18, duration });
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    flyToDevice,
+  }));
+
+  const updateLayers = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Determine if a cluster popup is open and which devices it shows
+    const hiddenClusterDeviceIds = clusterPopup
+      ? new Set(clusterPopup.items.map(item => item.device))
+      : null;
+
+    // Project components to screen coords
+    const drawItems: (DrawItem & { colorHex: string })[] = components.map((c, idx) => {
+      const pt = map.project([c.lon, c.lat]);
+      const colorHex = deviceColors[c.device] ?? '#3b82f6';
+      const colorRgb = getColorForDevice(c.device, colorHex);
+      return {
+        idx,
+        device: c.device,
+        x: pt.x,
+        y: pt.y,
+        r: 0,
+        iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(),
+        timestamp: c.timestamp,
+        color: colorRgb,
+        colorHex,
+      };
+    });
+
+    // Compute clusters
+    let clusters = computeClusters(drawItems, CLUSTER_DISTANCE_PX);
+
+    // Handle selected device: reposition cluster to selected device's location
+    if (selectedDeviceId != null) {
+      clusters = clusters.map(cl => {
+        const sel = cl.items.find(it => it.device === selectedDeviceId);
+        return sel ? { ...cl, x: sel.x, y: sel.y } : cl;
+      });
+    }
+
+    // Build clustered indices set
+    const clusteredIdxs = new Set<number>();
+    clusters.forEach(cl => {
+      if (cl.size > 1) cl.items.forEach(it => clusteredIdxs.add(it.idx));
+    });
+
+    // Build GeoJSON features
+    const dotsFeatures: Feature<Point>[] = [];
+    const individualsFeatures: Feature<Point>[] = [];
+    const clustersFeatures: Feature<Point>[] = [];
+    const accuracyFeatures: Feature<Polygon>[] = [];
+
+    // Track clustered vs individual indices in one pass
+    for (let i = 0; i < drawItems.length; i++) {
+      const c = components[i]!;
+      const item = drawItems[i]!;
+      const isClustered = clusteredIdxs.has(i);
+
+      if (isClustered) {
+        dotsFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
+          properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` },
+        });
+      } else {
+        const imageKey = `${item.iconText}-${item.colorHex}-${darkMode ? 'dark' : 'light'}`;
+        if (!map.hasImage(imageKey)) {
+          const pinCanvas = document.createElement("canvas");
+          pinCanvas.width = 48; pinCanvas.height = 48;
+          const pctx = pinCanvas.getContext("2d")!;
+          drawPin(pctx, 24, 36, PIN_R, item.iconText, item.color as Color, darkMode);
+          const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+          if (imageData) map.addImage(imageKey, imageData);
+        }
+        individualsFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
+          properties: { imageKey, device: item.device },
+        });
+      }
+
+      // Always draw accuracy circle for selected device regardless of cluster state
+      if (c.device === selectedDeviceId && c.accuracy > 0) {
+        const [cx, cy] = toWebMercator([c.lon, c.lat]);
+        const pts = 64;
+        const coords: Vec2[] = [];
+        for (let j = 0; j <= pts; j++) {
+          const angle = (j * 2 * Math.PI) / pts;
+          coords.push(fromWebMercator([cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle)]));
+        }
+        accuracyFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [coords] },
+          properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` }
+        });
+      }
+    } // end per-device for loop
+
+    // Debug frame circles (measurement + anchor at selected frame)
+    type FrameFeature = Feature<Polygon> | Feature<{ type: 'LineString'; coordinates: Vec2[] }>;
+    const debugFrameFeatures: FrameFeature[] = [];
+    if (debugFrame) {
+      const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
+        const pts = 64;
+        const coords: Vec2[] = [];
+        for (let j = 0; j <= pts; j++) {
+          const angle = (j * 2 * Math.PI) / pts;
+          coords.push(fromWebMercator([center[0] + radiusM * Math.cos(angle), center[1] + radiusM * Math.sin(angle)]));
+        }
+        return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } };
+      };
+      if (debugFrame.measurement.accuracy > 0)
+        debugFrameFeatures.push(makeCircle(debugFrame.measurement.mean, debugFrame.measurement.accuracy, 'measurement'));
+      if (debugFrame.anchor) {
+        debugFrameFeatures.push(makeCircle(debugFrame.anchor.mean, getRadiusFromVariance(debugFrame.anchor.variance), 'anchor'));
+        // Red line connecting measurement center to anchor center
+        debugFrameFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: [[debugFrame.measurement.lon, debugFrame.measurement.lat], fromWebMercator(debugFrame.anchor.mean)] },
+          properties: { kind: 'link' },
+        } as FrameFeature);
+      }
+    }
+
+    // Debug anchor circles
+    const ANCHOR_COLORS: Record<DebugAnchor['type'], string> = {
+      active: '#00bcd4',   // teal
+      closed: '#9e9e9e',   // gray
+      candidate: '#ff9800', // orange
+      frame: '#2196f3',    // blue
+    };
+    const anchorCircleFeatures: Feature<Polygon>[] = [];
+    for (let ai = 0; ai < debugAnchors.length; ai++) {
+      const a = debugAnchors[ai]!;
+      const radius = getRadiusFromVariance(a.variance);
+      const pts = 64;
+      const coords: Vec2[] = [];
+      for (let j = 0; j <= pts; j++) {
+        const angle = (j * 2 * Math.PI) / pts;
+        coords.push(fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]));
+      }
+      anchorCircleFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [coords] },
+        properties: {
+          color: ANCHOR_COLORS[a.type],
+          anchorIndex: ai,
+        },
+      });
+    }
+
+    // Process clusters (separate pass after all devices are evaluated)
+    for (const cl of clusters) {
+      if (cl.size <= 1) continue;
+
+      if (hiddenClusterDeviceIds) {
+        const thisClusterIds = new Set(cl.items.map(it => it.device));
+        if (thisClusterIds.size === hiddenClusterDeviceIds.size &&
+          [...thisClusterIds].every(id => hiddenClusterDeviceIds.has(id))) {
+          continue;
+        }
+      }
+
+      const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
+        cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
+      const repIdx = drawItems.findIndex(di => di.device === repItem.device);
+      const rep = drawItems[repIdx];
+      if (!rep) continue;
+
+      const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
+      const selComp = selItem ? components[selItem.idx] : null;
+      const markerLng = selComp ? selComp.lon : cl.items.reduce((sum, it) => sum + (components[it.idx]?.lon ?? 0), 0) / cl.size;
+      const markerLat = selComp ? selComp.lat : cl.items.reduce((sum, it) => sum + (components[it.idx]?.lat ?? 0), 0) / cl.size;
+
+      const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
+      if (!map.hasImage(clusterKey)) {
+        const pinCanvas = document.createElement("canvas");
+        pinCanvas.width = 48; pinCanvas.height = 48;
+        const pctx = pinCanvas.getContext("2d")!;
+        drawPin(pctx, 24, 36, PIN_R, rep.iconText, rep.color as Color, darkMode, false, String(cl.size));
+        const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+        if (imageData) map.addImage(clusterKey, imageData);
+      }
+
+      clustersFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [markerLng, markerLat] },
+        properties: {
+          clusterIconKey: clusterKey,
+          members: cl.items.map(it => it.device),
+        },
+      });
+    }
+
+    // Pulsing device points (drawn under pins)
+    const pulsingPointFeatures: Feature<Point>[] = [];
+    for (const comp of components) {
+      if (pulsingDeviceIds.includes(comp.device)) {
+        pulsingPointFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [comp.lon, comp.lat] },
+          properties: {},
+        });
+      }
+    }
+
     try {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      const mpp = 156543.03392804097 * Math.cos((center.lat * Math.PI) / 180) / Math.pow(2, zoom);
-      const ppm = 1 / mpp;
-      setPixelsPerMeter(ppm);
-      if (refLatRef.current != null && refLonRef.current != null) {
-        const [x, y] = coordinateSystemRef.current?.project(center.lat, center.lng) ?? [0, 0];
-        const cm = { x, y };
-        setCenterMeters(cm);
+      // Update sources & layers - initialize on first call, setData on subsequent
+      const dotsData = { type: 'FeatureCollection' as const, features: dotsFeatures };
+      if (!map.getSource('dots-source')) {
+        map.addSource('dots-source', { type: 'geojson', data: dotsData });
+        map.addLayer({
+          id: 'dots-layer',
+          type: 'circle',
+          source: 'dots-source',
+          paint: { 'circle-radius': 3, 'circle-color': ['get', 'color'], 'circle-opacity': 1 },
+        });
       } else {
-        setCenterMeters({ x: 0, y: 0 });
+        (map.getSource('dots-source') as GeoJSONSource).setData(dotsData);
       }
-      // Update refs with current values for animation loop comparison
-      lastCenterRef.current = center;
-      lastZoomRef.current = zoom;
-    } catch {
-      // ignore transform update errors
+
+      const pulsingData = { type: 'FeatureCollection' as const, features: pulsingPointFeatures };
+      if (!map.getSource('pulsing-source')) {
+        map.addSource('pulsing-source', { type: 'geojson', data: pulsingData });
+        map.addLayer({
+          id: 'pulsing-layer',
+          type: 'circle',
+          source: 'pulsing-source',
+          paint: {
+            'circle-radius': 8,
+            'circle-color': 'transparent',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#2196f3',
+            'circle-stroke-opacity': 0,
+            'circle-pitch-alignment': 'map',
+            'circle-radius-transition': { duration: 0, delay: 0 },
+            'circle-stroke-opacity-transition': { duration: 0, delay: 0 },
+          },
+        }, 'dots-layer');
+      } else {
+        (map.getSource('pulsing-source') as GeoJSONSource).setData(pulsingData);
+      }
+
+      const accData = { type: 'FeatureCollection' as const, features: accuracyFeatures };
+      if (!map.getSource('accuracy-source')) {
+        map.addSource('accuracy-source', { type: 'geojson', data: accData });
+        map.addLayer({
+          id: 'accuracy-fill-layer',
+          type: 'fill',
+          source: 'accuracy-source',
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.15 },
+        });
+        map.addLayer({
+          id: 'accuracy-stroke-layer',
+          type: 'line',
+          source: 'accuracy-source',
+          paint: { 'line-color': ['get', 'color'], 'line-width': 1, 'line-opacity': 0.6 },
+        });
+      } else {
+        (map.getSource('accuracy-source') as GeoJSONSource).setData(accData);
+      }
+
+      const anchorData = { type: 'FeatureCollection' as const, features: anchorCircleFeatures };
+      if (!map.getSource('debug-anchors-source')) {
+        map.addSource('debug-anchors-source', { type: 'geojson', data: anchorData });
+        // Invisible fill for interior hover hit-testing
+        map.addLayer({
+          id: 'debug-anchors-fill-layer',
+          type: 'fill',
+          source: 'debug-anchors-source',
+          paint: { 'fill-opacity': 0 },
+        });
+        // Solid outline — no dasharray so it stays visually consistent across zoom levels
+        map.addLayer({
+          id: 'debug-anchors-layer',
+          type: 'line',
+          source: 'debug-anchors-source',
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 1.5,
+            'line-opacity': 0.85,
+          },
+        });
+      } else {
+        (map.getSource('debug-anchors-source') as GeoJSONSource).setData(anchorData);
+      }
+
+      const frameData = { type: 'FeatureCollection' as const, features: debugFrameFeatures };
+      if (!map.getSource('debug-frame-source')) {
+        map.addSource('debug-frame-source', { type: 'geojson', data: frameData as never });
+        // Light red fill for measurement circle (no outline)
+        map.addLayer({
+          id: 'debug-frame-fill-layer',
+          type: 'fill',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'measurement'],
+          paint: { 'fill-color': '#f44336', 'fill-opacity': 0.25 },
+        });
+        // Blue outline for anchor-at-frame circle
+        map.addLayer({
+          id: 'debug-frame-anchor-layer',
+          type: 'line',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'anchor'],
+          paint: { 'line-color': '#2196f3', 'line-width': 1.5, 'line-opacity': 0.9 },
+        });
+        // Red line linking measurement center to anchor center
+        map.addLayer({
+          id: 'debug-frame-link-layer',
+          type: 'line',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'link'],
+          paint: { 'line-color': '#f44336', 'line-width': 1.5, 'line-opacity': 0.8 },
+        });
+      } else {
+        (map.getSource('debug-frame-source') as GeoJSONSource).setData(frameData as never);
+      }
+
+      const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
+      if (!map.getSource('individuals-source')) {
+        map.addSource('individuals-source', { type: 'geojson', data: indData });
+        map.addLayer({
+          id: 'individuals-layer',
+          type: 'symbol',
+          source: 'individuals-source',
+          layout: {
+            'icon-image': ['get', 'imageKey'],
+            'icon-size': 1,
+            'icon-anchor': 'bottom',
+            'icon-allow-overlap': true,
+          },
+        });
+      } else {
+        (map.getSource('individuals-source') as GeoJSONSource).setData(indData);
+      }
+
+      const clData = { type: 'FeatureCollection' as const, features: clustersFeatures };
+      if (!map.getSource('clusters-source')) {
+        map.addSource('clusters-source', { type: 'geojson', data: clData });
+        map.addLayer({
+          id: 'clusters-layer',
+          type: 'symbol',
+          source: 'clusters-source',
+          layout: {
+            'icon-image': ['get', 'clusterIconKey'],
+            'icon-size': 1,
+            'icon-anchor': 'bottom',
+            'icon-allow-overlap': true,
+          },
+        });
+      } else {
+        (map.getSource('clusters-source') as GeoJSONSource).setData(clData);
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes("Style is not done loading")) return;
+      throw e;
     }
-  };
+  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds]);
 
-  const startAnimationLoop = () => {
-    if (animationInProgressRef.current) return;
-    animationInProgressRef.current = true;
+  const listenersAttached = useRef(false);
 
-    const animate = () => {
-      const map = mapRef.current;
-      if (!map) {
-        animationInProgressRef.current = false;
-        return;
-      }
-
-      const currentCenter = map.getCenter();
-      const currentZoom = map.getZoom();
-
-      // Check if anything changed since last update
-      const centerChanged = !lastCenterRef.current ||
-        Math.abs(currentCenter.lat - lastCenterRef.current.lat) > 0.0000001 ||
-        Math.abs(currentCenter.lng - lastCenterRef.current.lng) > 0.0000001;
-      const zoomChanged = lastZoomRef.current === null || currentZoom !== lastZoomRef.current;
-
-      if (centerChanged || zoomChanged) {
-        updateTransform();
-      }
-
-      if (animationInProgressRef.current) {
-        animFrameRef.current = window.requestAnimationFrame(animate);
-      }
-    };
-
-    animFrameRef.current = window.requestAnimationFrame(animate);
-  };
-
-  const stopAnimationLoop = () => {
-    animationInProgressRef.current = false;
-    if (animFrameRef.current !== null) {
-      window.cancelAnimationFrame(animFrameRef.current);
-      animFrameRef.current = null;
-    }
-  };
-
+  // Map initialization
   useEffect(() => {
-    const mapContainer = mapDivRef.current;
-    if (!mapContainer) return;
+    const container = containerRef.current;
+    if (!container || !maptilerApiKey) return;
 
-    const map = L.map(mapContainer, { attributionControl: true, zoomControl: false, maxZoom: 22 });
+    config.apiKey = maptilerApiKey;
 
-    const initialLat = refLatRef.current;
-    const initialLon = refLonRef.current;
-    if (worldBounds && initialLat != null && initialLon != null) {
-      const sw = coordinateSystemRef.current?.unproject(worldBounds.minX, worldBounds.minY) ?? { lat: 0, lon: 0 };
-      const ne = coordinateSystemRef.current?.unproject(worldBounds.maxX, worldBounds.maxY) ?? { lat: 0, lon: 0 };
-      try {
-        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
-      } catch {
-        map.setView([initialLat, initialLon], 15);
-      }
-    } else if (initialLat != null && initialLon != null) {
-      map.setView([initialLat, initialLon], 15);
-    } else {
-      map.setView([0, 0], 2);
+    let initialCenter: Vec2 = [0, 0];
+    let initialZoom = 2;
+
+    const firstComp = componentsRef.current[0];
+    if (firstComp) {
+      initialCenter = [firstComp.lon, firstComp.lat];
+      initialZoom = 15;
     }
 
-    updateTransform();
-
-    map.on("move", updateTransform);
-    map.on("zoom", updateTransform);
-    map.on("movestart", startAnimationLoop);
-    map.on("zoomstart", startAnimationLoop);
-    map.on("moveend", stopAnimationLoop);
-    map.on("zoomend", stopAnimationLoop);
-
-    const onMapClick = (ev: L.LeafletMouseEvent) => {
-      const pt = map.latLngToContainerPoint(ev.latlng);
-      const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-      if (hit?.items?.length) {
-        if (hit.items.length === 1) {
-          const devKey = hit.items[0]!.device;
-          const devNum = Number(devKey);
-          if (Number.isFinite(devNum)) onSelectDeviceRef.current(devNum);
-          closeClusterPopupAnimated();
-        } else {
-          const clusterPoint = map.containerPointToLatLng(L.point(hit.x, hit.y));
-          try {
-            if (map.stop) map.stop();
-            const center = map.getCenter();
-            const dist = L.latLng(center.lat, center.lng).distanceTo(L.latLng(clusterPoint.lat, clusterPoint.lng));
-            if (dist >= 5) {
-              const dur = flyDurationForMeters(dist);
-              map.flyTo([clusterPoint.lat, clusterPoint.lng], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
-            }
-          } catch {
-            // ignore map animation errors
-          }
-          openClusterPopupAnimated({ lat: clusterPoint.lat, lng: clusterPoint.lng, items: hit.items });
-        }
-      } else {
-        const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
-        if (motionHit && onSelectMotionSegmentRef.current) {
-          onSelectMotionSegmentRef.current(motionHit.segment);
-        }
-        closeClusterPopupAnimated();
-      }
-    };
-
-    const onMapMove = (ev: L.LeafletMouseEvent) => {
-      const pt = map.latLngToContainerPoint(ev.latlng);
-      const hit = canvasApiRef.current?.hitTestPoint(pt.x, pt.y) ?? null;
-      const anchorHit = canvasApiRef.current?.hitTestAnchor(pt.x, pt.y) ?? null;
-      if (anchorHit) {
-        setAnchorHover({ x: anchorHit.x, y: anchorHit.y, anchor: anchorHit.anchor });
-      } else {
-        setAnchorHover(null);
-      }
-
-      const motionHit = canvasApiRef.current?.hitTestMotionSegment?.(pt.x, pt.y) ?? null;
-      if (motionHit) {
-        setMotionHover({ x: motionHit.x, y: motionHit.y, segment: motionHit.segment });
-      } else {
-        setMotionHover(null);
-      }
-
-      const container = map.getContainer();
-      if (hit?.items?.length) {
-        container.style.cursor = "pointer";
-        if (hit.items.length === 1) {
-          const first = hit.items[0];
-          if (first) container.title = deviceNamesRef.current[first.device] ?? String(first.device);
-          else container.title = "";
-        } else {
-          container.title = "";
-        }
-      } else {
-        container.style.cursor = "";
-        container.title = "";
-      }
-    };
-
-    const container = map.getContainer();
-    const onMouseLeave = () => {
-      container.style.cursor = "";
-      container.title = "";
-      setAnchorHover(null);
-      setMotionHover(null);
-    };
-
-    map.on("click", onMapClick);
-    map.on("mousemove", onMapMove);
-    container.addEventListener("mouseleave", onMouseLeave);
+    const map = new MaptilerMap({
+      container,
+      center: initialCenter,
+      zoom: initialZoom,
+      style: darkMode ? MapStyle.DATAVIZ.DARK : MapStyle.DATAVIZ,
+      navigationControl: false,
+      geolocateControl: false,
+      scaleControl: false,
+      fullscreenControl: false,
+    });
 
     mapRef.current = map;
+    listenersAttached.current = false;
 
     return () => {
-      map.off("move", updateTransform);
-      map.off("zoom", updateTransform);
-      map.off("movestart", startAnimationLoop);
-      map.off("zoomstart", startAnimationLoop);
-      map.off("moveend", stopAnimationLoop);
-      map.off("zoomend", stopAnimationLoop);
-      map.off("click", onMapClick);
-      map.off("mousemove", onMapMove);
-      container.removeEventListener("mouseleave", onMouseLeave);
-      // Stop any ongoing animations before removing the map to prevent errors
-      if (map.stop) map.stop();
-      stopAnimationLoop();
-
-      // Explicitly remove tile layer first to prevent "el is undefined" errors
-      if (tileLayerRef.current) {
-        try {
-          if (map.hasLayer(tileLayerRef.current)) {
-            map.removeLayer(tileLayerRef.current);
-          }
-        } catch {
-          // ignore removal errors
-        }
-        tileLayerRef.current = null;
-      }
-
       map.remove();
       mapRef.current = null;
     };
-  }, []);
+  }, [maptilerApiKey]);
 
-  // Update tile layer when maptilerApiKey changes
+  // Style update
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-
-    // Optimization: if only changing style (dark mode) and API key matches, try to use setStyle
-    // to avoid destroying/recreating the layer which causes animation errors.
-    if (tileLayerRef.current &&
-      prevMaptilerApiKeyRef.current === maptilerApiKey &&
-      maptilerApiKey) {
-      try {
-        const layer = tileLayerRef.current as InstanceType<typeof MaptilerLayer>;
-        layer.setStyle(darkMode ? "dataviz-dark" : "dataviz");
-      } catch (e) {
-        console.warn("Error updating layer style:", e);
-      }
-    }
-
-    prevMaptilerApiKeyRef.current = maptilerApiKey;
-
-    // Remove existing tile layer safely
-    if (tileLayerRef.current) {
-      try {
-        if (map.hasLayer(tileLayerRef.current)) {
-          map.removeLayer(tileLayerRef.current);
-        }
-      } catch (e) {
-        console.warn("Error removing tile layer:", e);
-      }
-      tileLayerRef.current = null;
-    }
-
-    // Add new tile layer based on API key
-    if (maptilerApiKey) {
-      try {
-        const ml = new MaptilerLayer({
-          apiKey: maptilerApiKey,
-          style: darkMode ? "dataviz-dark" : "dataviz",
-        });
-        ml.addTo(map);
-        tileLayerRef.current = ml;
-      } catch (e) {
-        console.error("Error adding tile layer:", e);
-      }
-    }
+    if (!map || !maptilerApiKey) return;
+    map.setStyle(darkMode ? MapStyle.DATAVIZ.DARK : MapStyle.DATAVIZ);
   }, [maptilerApiKey, darkMode]);
 
+  // Ref to hold updateLayers to avoid stale closure in event listeners
+  const updateLayersRef = useRef(updateLayers);
+  useEffect(() => { updateLayersRef.current = updateLayers; }, [updateLayers]);
+
+  // rAF animation loop: update pulsing-layer paint properties each frame
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || selectedDeviceId != null) return;
-    if (skipNextAutoFitRef.current) {
-      skipNextAutoFitRef.current = false;
+    if (pulsingDeviceIds.length === 0) {
+      // Clear the layer if no devices pulsing
+      const map = mapRef.current;
+      if (map?.getLayer('pulsing-layer')) {
+        map.setPaintProperty('pulsing-layer', 'circle-radius', 8);
+        map.setPaintProperty('pulsing-layer', 'circle-stroke-opacity', 0);
+      }
       return;
     }
-
-    if (worldBounds && refLat != null && refLon != null) {
-      const sw = coordinateSystemRef.current?.unproject(worldBounds.minX, worldBounds.minY) ?? { lat: 0, lon: 0 };
-      const ne = coordinateSystemRef.current?.unproject(worldBounds.maxX, worldBounds.maxY) ?? { lat: 0, lon: 0 };
-      try {
-        map.fitBounds(L.latLngBounds(L.latLng(sw.lat, sw.lon), L.latLng(ne.lat, ne.lon)), { padding: [40, 40], maxZoom: 18 });
-      } catch {
-        map.setView([refLat, refLon], 15);
+    const PERIOD = 1200; // ms per ping
+    const MAX_RADIUS = 60;
+    let running = true;
+    const tick = () => {
+      const map = mapRef.current;
+      if (map?.getLayer('pulsing-layer')) {
+        const t = (Date.now() % PERIOD) / PERIOD;
+        map.setPaintProperty('pulsing-layer', 'circle-radius', 8 + t * MAX_RADIUS);
+        map.setPaintProperty('pulsing-layer', 'circle-stroke-opacity', 1 - t);
       }
-    } else if (refLat != null && refLon != null) {
-      map.setView([refLat, refLon], 15);
-    } else {
-      map.setView([0, 0], 2);
-    }
+      if (running) window.requestAnimationFrame(tick);
+    };
+    window.requestAnimationFrame(tick);
+    return () => { running = false; };
+  }, [pulsingDeviceIds]);
 
-    updateTransform();
-  }, [refLat, refLon, worldBounds, selectedDeviceId]);
-
+  // Listeners setup
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    if (selectedDeviceId == null) return;
 
-    const sel = components.find((c) => Number(c.device) === Number(selectedDeviceId));
-    if (!sel?.mean || refLat == null || refLon == null)
-      return;
-
-    const deg = coordinateSystemRef.current?.unproject(sel.mean[0], sel.mean[1]) ?? { lat: 0, lon: 0 };
-
-    try {
-      const ZOOM_FOR_SELECTED = 18;
-      const PAN_DISTANCE_METERS = 20;
-
-      const center = map.getCenter();
-      const centerLatLng = L.latLng(center.lat, center.lng);
-      const targetLatLng = L.latLng(deg.lat, deg.lon);
-      const distMeters = centerLatLng.distanceTo(targetLatLng);
-
-      if (!selectedZoomedRef.current) {
-        if (map.stop) map.stop();
-        const targetZoom = Math.max(map.getZoom() || ZOOM_FOR_SELECTED, ZOOM_FOR_SELECTED);
-        if (distMeters < 5) {
-          map.setZoom(targetZoom, { animate: true });
-        } else {
-          const dur = flyDurationForMeters(distMeters);
-          map.flyTo([deg.lat, deg.lon], targetZoom, { animate: true, duration: dur, easeLinearity: 0.25 });
-        }
-        selectedZoomedRef.current = true;
-      } else {
-        if (distMeters > PAN_DISTANCE_METERS) {
-          if (map.stop) map.stop();
-          const dur = flyDurationForMeters(distMeters);
-          map.flyTo([deg.lat, deg.lon], map.getZoom(), { animate: true, duration: dur, easeLinearity: 0.25 });
-        }
+    let rafPending = false;
+    const onMove = () => {
+      if (!rafPending) {
+        rafPending = true;
+        window.requestAnimationFrame(() => {
+          updateLayersRef.current();
+          rafPending = false;
+        });
       }
-    } catch {
-      // ignore map animation errors
+    };
+
+    const onIndividualClick = (e: MapMouseEvent) => {
+      e.preventDefault();
+      const features = (e as unknown as { features: Feature<Point>[] }).features;
+      const props = features?.[0]?.properties;
+      const device: unknown = props ? props['device'] : undefined;
+      if (typeof device === 'number') {
+        onSelectDeviceRef.current(device);
+        flyToDevice(device);
+      }
+    };
+
+    const onClusterClick = (e: MapMouseEvent) => {
+      e.preventDefault();
+      const features = (e as unknown as { features: Feature<Point>[] }).features;
+      const props = features?.[0]?.properties;
+      const membersProp: unknown = props ? props['members'] : undefined;
+
+      let memberIds: number[] = [];
+      if (typeof membersProp === 'string') {
+        try {
+          const parsed: unknown = JSON.parse(membersProp) as unknown;
+          if (Array.isArray(parsed)) memberIds = parsed as number[];
+        } catch { /* ignore */ }
+      } else if (Array.isArray(membersProp)) {
+        memberIds = membersProp as number[];
+      }
+
+      const coords = features?.[0]?.geometry as Point;
+      if (memberIds && memberIds.length > 0 && coords) {
+        const screen = map.project(coords.coordinates as Vec2);
+        const items: DevicePoint[] = memberIds.map(deviceId => {
+          const comp = componentsRef.current.find(c => c.device === deviceId);
+          if (comp) return { ...comp };
+          return { device: deviceId, sourceDeviceId: undefined, mean: [0, 0] as Vec2, variance: 100, lat: 0, lon: 0, timestamp: 0, accuracy: 0, anchorAgeMs: 0, confidence: 0 };
+        });
+        setClusterPopup({ x: screen.x, y: screen.y, items });
+      }
+    };
+
+    const onMapClick = (e: MapMouseEvent) => {
+      if (e.defaultPrevented) return;
+      const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer', 'clusters-layer'] });
+      if (!features.length) {
+        setClusterPopup(null);
+      }
+    };
+
+    if (!listenersAttached.current) {
+      map.on('move', onMove);
+      map.on('moveend', onMove);
+      map.on('zoom', onMove);
+
+      map.on('click', 'individuals-layer', onIndividualClick);
+      map.on('click', 'clusters-layer', onClusterClick);
+      map.on('click', onMapClick);
+
+      map.on("mouseenter", "individuals-layer", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "individuals-layer", () => { map.getCanvas().style.cursor = ""; });
+      map.on("mouseenter", "clusters-layer", () => { map.getCanvas().style.cursor = "pointer"; });
+      map.on("mouseleave", "clusters-layer", () => { map.getCanvas().style.cursor = ""; });
+
+      // Debug anchor hover — listen on fill layer so tooltip fires anywhere inside the circle
+      map.on("mousemove", "debug-anchors-fill-layer", (e: MapMouseEvent) => {
+        const features = map.queryRenderedFeatures(e.point, { layers: ['debug-anchors-fill-layer'] });
+        let best: DebugAnchor | null = null;
+        for (const f of features) {
+          const idx: unknown = f.properties?.['anchorIndex'];
+          if (typeof idx !== 'number') continue;
+          const anchor = debugAnchorsRef.current[idx];
+          if (anchor && (best === null || anchor.variance < best.variance)) best = anchor;
+        }
+        if (best) {
+          setAnchorTooltip({ x: e.point.x, y: e.point.y, anchor: best });
+          map.getCanvas().style.cursor = 'crosshair';
+        }
+      });
+      map.on("mouseleave", "debug-anchors-fill-layer", () => {
+        setAnchorTooltip(null);
+        map.getCanvas().style.cursor = '';
+      });
+
+      listenersAttached.current = true;
     }
-  }, [selectedDeviceId, components, refLat, refLon]);
+  }, [maptilerApiKey]);
+
+  // Style data listener to restore layers after style change
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const onStyleData = () => {
+      updateLayersRef.current();
+    };
+
+    map.on('styledata', onStyleData);
+    return () => { map?.off('styledata', onStyleData); };
+  }, [maptilerApiKey]);
+
+  // Data update effect
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    updateLayers();
+  }, [components, deviceNames, deviceIcons, deviceColors, darkMode, selectedDeviceId, updateLayers]);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setSize({ width: el.clientWidth || 0, height: el.clientHeight || 0 });
-      if (mapRef.current) mapRef.current.invalidateSize();
-    });
-    ro.observe(el);
-    setSize({ width: el.clientWidth || 0, height: el.clientHeight || 0 });
-    return () => ro.disconnect();
+    const map = mapRef.current;
+    if (!map || hasFittedInitially.current) return;
+
+    const c = componentsRef.current;
+    if (c.length === 0) return;
+
+    let sw: { lat: number, lon: number }, ne: { lat: number, lon: number };
+
+    if (c.length > 0) {
+      let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
+      for (const comp of c) {
+        minLat = Math.min(minLat, comp.lat);
+        minLon = Math.min(minLon, comp.lon);
+        maxLat = Math.max(maxLat, comp.lat);
+        maxLon = Math.max(maxLon, comp.lon);
+      }
+      const padding = 0.005;
+      sw = { lat: minLat - padding, lon: minLon - padding };
+      ne = { lat: maxLat + padding, lon: maxLon + padding };
+    } else {
+      return;
+    }
+
+    map.fitBounds(
+      [sw.lon, sw.lat, ne.lon, ne.lat],
+      { padding: 40, maxZoom: 18, duration: 0 }
+    );
+
+    hasFittedInitially.current = true;
   }, []);
 
-  const clusterPoint = useMemo(() => {
-    if (!clusterPopup || !centerMeters || pixelsPerMeter === null) return null;
-    const width = size.width;
-    const height = size.height;
-    const { x: anchorX, y: anchorY } = centerMeters;
-    const localZoom = pixelsPerMeter;
-    if (refLat == null || refLon == null) return null;
-
-    const [meterX, meterY] = coordinateSystemRef.current?.project(clusterPopup.lat, clusterPopup.lng) ?? [0, 0];
-    const x = width / 2 + (meterX - anchorX) * localZoom;
-    const y = height / 2 - (meterY - anchorY) * localZoom;
-
-    return { x, y };
-  }, [clusterPopup, centerMeters, pixelsPerMeter, refLat, refLon, size]);
-
-  const anchorHoverLabel = useMemo(() => {
-    if (!anchorHover) return null;
-    const { anchor } = anchorHover;
-    const typeLabel = anchor.type === "active" ? "Active" : anchor.type === "candidate" ? "Candidate" : anchor.type === "frame" ? "Frame" : "Closed";
-    const started = new Date(anchor.startTimestamp).toLocaleString();
-    const ended = anchor.endTimestamp ? new Date(anchor.endTimestamp).toLocaleString() : null;
-    const updated = new Date(anchor.lastUpdateTimestamp).toLocaleString();
-    return { typeLabel, started, ended, updated, confidence: anchor.confidence };
-  }, [anchorHover]);
-
-  const motionHoverLabel = useMemo(() => {
-    if (!motionHover) return null;
-    const { segment } = motionHover;
-    const started = new Date(segment.startTime).toLocaleString();
-    const ended = segment.endTime ? new Date(segment.endTime).toLocaleString() : "-";
-
-    // Calculate total distance and duration
-    let distance = 0;
-    let durationMs = 0;
-
-    if (segment.endTime) {
-      durationMs = segment.endTime - segment.startTime;
-    } else if (segment.path.length > 0) {
-      // For in-progress, we don't have an easy "current time" reference here without passing it down, 
-      // but we can approximate or just show "In progress"
-      durationMs = Date.now() - segment.startTime;
-    }
-
-    // Calculate distance along path
-    for (let i = 0; i < segment.path.length - 1; i++) {
-      const p1 = segment.path[i]!;
-      const p2 = segment.path[i + 1]!;
-      // Approximate distance in meters (since we have meters in Vec2)
-      const dx = p1[0] - p2[0];
-      const dy = p1[1] - p2[1];
-      distance += Math.sqrt(dx * dx + dy * dy);
-    }
-
-    // Speed (m/s) -> km/h
-    const speedMps = durationMs > 0 ? (distance / (durationMs / 1000)) : 0;
-    const speedKmph = speedMps * 3.6;
-
-    // Format duration
-    const minutes = Math.floor(durationMs / 60000);
-    const seconds = Math.floor((durationMs % 60000) / 1000);
-    const durationStr = `${minutes}m ${seconds}s`;
-
-    return { started, ended, distance: Math.round(distance), duration: durationStr, speed: speedKmph.toFixed(1) };
-  }, [motionHover, timeTick]);
-
-  const pulsingMarkerPositions = useMemo(() => {
-    if (!pulsingDeviceIds || pulsingDeviceIds.length === 0 || !centerMeters || pixelsPerMeter === null) return [];
-    const width = size.width;
-    const height = size.height;
-    const { x: anchorX, y: anchorY } = centerMeters;
-    const localZoom = pixelsPerMeter;
-
-    const positions: { id: number; x: number; y: number }[] = [];
-
-    for (const id of pulsingDeviceIds) {
-      const comp = components.find(c => Number(c.device) === id);
-      if (!comp?.mean) continue;
-
-      const [devX, devY] = comp.mean;
-      const x = width / 2 + (devX - anchorX) * localZoom;
-      const y = height / 2 - (devY - anchorY) * localZoom;
-
-      positions.push({ id, x, y });
-    }
-
-    return positions;
-  }, [pulsingDeviceIds, components, centerMeters, pixelsPerMeter, size]);
-
   return (
-    <div ref={containerRef} className="relative w-full" style={{ height: typeof height === "number" ? `${height}px` : height }}>
-      <style>{`
-        .leaflet-control-attribution {
-          display: none !important;
-        }
-        .leaflet-container {
-          background-color: ${darkMode ? 'rgb(40, 40, 40)' : '#ddd'} !important;
-        }
-      `}</style>
-      <div ref={mapDivRef} className="absolute inset-0 z-0" />
-      <div className="absolute inset-0 pointer-events-none z-[1000]">
-        <CanvasView
-          ref={canvasApiRef}
-          components={components}
-          deviceIcons={deviceIcons}
-          deviceColors={deviceColors}
-          width={size.width}
-          height={size.height}
-          zoom={pixelsPerMeter}
-          refMeters={centerMeters}
-          fitToBounds={false}
-          worldBounds={null}
-          selectedDeviceId={selectedDeviceId}
-          openClusterPoint={clusterPoint}
-          debugFrame={debugFrame ?? null}
-          debugAnchors={debugAnchors ?? []}
-          motionSegments={effectiveMotionSegments}
-          selectedMotionSegment={selectedMotionSegment ?? null}
-          darkMode={darkMode}
-          memberDeviceIds={memberDeviceIds}
-        />
-      </div>
-      {anchorHover && anchorHoverLabel ? (
-        <div
-          className="absolute z-[1003] pointer-events-none"
-          style={{ left: anchorHover.x + 12, top: anchorHover.y + 12 }}
-        >
-          <div className="text-xs bg-background/90 border shadow rounded px-2 py-1 text-foreground backdrop-blur-sm border-border">
-            <div className="font-medium">{anchorHoverLabel.typeLabel} anchor</div>
-            <div>Confidence: {anchorHoverLabel.confidence.toFixed(2)}</div>
-            <div>Started: {anchorHoverLabel.started}</div>
-            {anchorHoverLabel.ended ? <div>Ended: {anchorHoverLabel.ended}</div> : null}
-            <div>Updated: {anchorHoverLabel.updated}</div>
-          </div>
+    <div style={{ height: "100vh", position: "relative", width: "100%" }}>
+      <style>{`.maplibregl-ctrl-attrib{display:none} .maplibregl-ctrl-bottom-left{display:none}`}</style>
+      <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
+      <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>
+      {clusterPopup && (
+        <div style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20 }}>
+          <ClusterPopup
+            x={clusterPopup.x}
+            y={clusterPopup.y}
+            items={clusterPopup.items}
+            animationState="visible"
+            onClose={() => setClusterPopup(null)}
+            onSelectDevice={(id) => {
+              onSelectDevice(id);
+              setClusterPopup(null);
+            }}
+            darkMode={darkMode}
+            deviceColors={deviceColors}
+            deviceIcons={deviceIcons}
+            deviceNames={deviceNames}
+          />
         </div>
-      ) : null}
-
-      {motionHover && motionHoverLabel ? (
-        <div
-          className="absolute z-[1003] pointer-events-none"
-          style={{ left: motionHover.x + 12, top: motionHover.y + 12 }}
-        >
-          <div className="text-xs bg-background/90 border shadow rounded px-2 py-1 text-foreground backdrop-blur-sm border-border">
-            <div className="font-medium text-emerald-500">Motion Segment</div>
-            <div>Duration: {motionHoverLabel.duration}</div>
-            <div>Distance: {motionHoverLabel.distance}m</div>
-            <div>Avg Speed: {motionHoverLabel.speed} km/h</div>
-            <div>Started: {motionHoverLabel.started}</div>
-            <div>End: {motionHoverLabel.ended}</div>
-          </div>
-        </div>
-      ) : null}
-      {pulsingMarkerPositions.map(pos => (
-        <PulsingMarker key={`pulse-${pos.id}`} x={pos.x} y={pos.y} />
-      ))}
-      {clusterPopup && clusterPoint && (
-        <ClusterPopup
-          x={clusterPoint.x}
-          y={clusterPoint.y}
-          items={clusterPopup.items}
-          animationState={clusterAnimation}
-          onClose={() => closeClusterPopupAnimated()}
-          onSelectDevice={onSelectDevice}
-          darkMode={darkMode}
-          deviceColors={deviceColors}
-          deviceIcons={deviceIcons}
-          deviceNames={deviceNames}
-        />
       )}
-      <div className="absolute z-[1001] left-4 right-4 bottom-4 sm:right-4 sm:left-auto sm:top-4 sm:bottom-auto pointer-events-auto">
-        <div className="w-full sm:w-80 bg-background backdrop-blur-sm rounded p-3 shadow-md max-h-[60vh] overflow-auto">
-          {overlay}
-        </div>
-      </div>
+      {anchorTooltip && (() => {
+        const a = anchorTooltip.anchor;
+        const fmt = (ts: Timestamp) => { const d = new Date(ts); const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate() ? d.toLocaleTimeString() : d.toLocaleString(); };
+        const radius = Math.round(getRadiusFromVariance(a.variance));
+        return (
+          <div style={{
+            position: 'absolute',
+            left: anchorTooltip.x + 12,
+            top: anchorTooltip.y + 12,
+            zIndex: 30,
+            pointerEvents: 'none',
+            background: 'rgba(0,0,0,0.75)',
+            color: '#fff',
+            borderRadius: 6,
+            padding: '6px 10px',
+            fontSize: 12,
+            lineHeight: 1.6,
+            whiteSpace: 'nowrap',
+            borderLeft: `3px solid ${a.type === 'active' ? '#00bcd4' : '#9e9e9e'}`,
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: 2 }}>{a.type === 'active' ? '● Active anchor' : '○ Closed anchor'}</div>
+            <div>Radius: {radius} m</div>
+            <div>Confidence: {(a.confidence * 100).toFixed(0)}%</div>
+            <div>Started: {fmt(a.startTimestamp)}</div>
+            {a.endTimestamp && <div>Ended: {fmt(a.endTimestamp)}</div>}
+          </div>
+        );
+      })()}
     </div>
   );
 });

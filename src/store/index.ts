@@ -1,17 +1,14 @@
 import { create } from 'zustand';
 import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
-import { ProjectedCoordinateSystem } from '@/util/ProjectedCoordinateSystem';
-import { rgbToHex } from '@/ui/color';
-import type { Anchor } from '@/engine/anchor';
-import type { GroupDevice, MotionProfileName, DevicePoint, WorldBounds, NormalizedPosition } from '@/types';
+import { rgbToHex } from '@/util/color';
+import type { GroupDevice, MotionProfileName, NormalizedPosition } from '@/types';
 import type { Store, StoreState } from './types';
 import type { TraccarDevice } from '@/api/devices';
 
 const initialState: StoreState = {
   devices: {},
   groups: [],
-  motionProfiles: {},
   settings: {
     baseUrl: '',
     secure: false,
@@ -24,19 +21,11 @@ const initialState: StoreState = {
     darkMode: 'system',
     inputDarkMode: 'system',
   },
-  positions: {
-    allPositions: [],
-    snapshots: {},
-    firstPosition: null,
-  },
   ui: {
     selectedDeviceId: null,
     isSidePanelOpen: true,
     debugMode: false,
     debugFrameIndex: 0,
-    refLat: null,
-    refLon: null,
-    worldBounds: null,
     editingTarget: null,
   },
   refs: {
@@ -45,11 +34,9 @@ const initialState: StoreState = {
     engines: new Map(),
     processedKeys: new Set(),
     positionsAll: [],
-    firstPosition: null,
     engineCheckpoints: new Map(),
   },
   engineSnapshotsByDevice: {},
-  dominantAnchors: new Map() as Map<number, Anchor | null>,
   motionSegments: {},
   retrospective: {
     byDevice: new Map(),
@@ -65,7 +52,7 @@ export const useStore = create<Store>()(
 
       // Device/Group Management
       setDevicesFromApi: async (devices: TraccarDevice[]) => {
-        const { colorForDevice } = await import("@/ui/color");
+        const { colorForDevice } = await import("@/util/color");
 
         const {
           nameMap,
@@ -97,7 +84,6 @@ export const useStore = create<Store>()(
             })
           ),
           groups,
-          motionProfiles: motionProfileMap,
           refs: {
             ...state.refs,
             deviceToGroupsMap,
@@ -109,7 +95,7 @@ export const useStore = create<Store>()(
       createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
         const state = get();
         const { createGroupDevice } = await import("@/api/devices");
-        const { colorForDevice } = await import("@/ui/color");
+        const { colorForDevice } = await import("@/util/color");
 
         // Optimistic update
         const tempId = Date.now(); // Temporary ID until API response
@@ -152,6 +138,14 @@ export const useStore = create<Store>()(
               newDevices[created.id] = { ...newDevices[tempId], color: newColor };
               delete newDevices[tempId];
             }
+            const newDeviceToGroupsMap = new Map(state.refs.deviceToGroupsMap);
+            for (const memberId of memberDeviceIds) {
+              const groups = newDeviceToGroupsMap.get(memberId) ?? [];
+              if (!groups.includes(created.id)) {
+                newDeviceToGroupsMap.set(memberId, [...groups, created.id]);
+              }
+            }
+
             return {
               ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: created.id } : state.ui,
               groups: state.groups.map(g => g.id === tempId ? { ...g, id: created.id, color: newColor } : g),
@@ -159,6 +153,7 @@ export const useStore = create<Store>()(
               refs: {
                 ...state.refs,
                 groupIds: new Set([...Array.from(state.refs.groupIds).filter(id => id !== tempId), created.id]),
+                deviceToGroupsMap: newDeviceToGroupsMap,
               }
             };
           });
@@ -191,6 +186,16 @@ export const useStore = create<Store>()(
           const newDevices = { ...state.devices };
           delete newDevices[groupId];
 
+          const newDeviceToGroupsMap = new Map(state.refs.deviceToGroupsMap);
+          if (groupToDelete) {
+            for (const memberId of groupToDelete.memberDeviceIds) {
+              const groups = newDeviceToGroupsMap.get(memberId);
+              if (groups) {
+                newDeviceToGroupsMap.set(memberId, groups.filter(id => id !== groupId));
+              }
+            }
+          }
+
           return {
             ui: state.ui.selectedDeviceId === groupId ? { ...state.ui, selectedDeviceId: null } : state.ui,
             groups: state.groups.filter(g => g.id !== groupId),
@@ -198,6 +203,7 @@ export const useStore = create<Store>()(
             refs: {
               ...state.refs,
               groupIds: new Set([...state.refs.groupIds].filter(id => id !== groupId)),
+              deviceToGroupsMap: newDeviceToGroupsMap,
             }
           };
         });
@@ -243,9 +249,20 @@ export const useStore = create<Store>()(
         // Optimistic update
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = [...originalMembers, deviceId];
-        set(state => ({
-          groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
-        }));
+        set(state => {
+          const newMap = new Map(state.refs.deviceToGroupsMap);
+          const deviceGroups = newMap.get(deviceId) ?? [];
+          if (!deviceGroups.includes(groupId)) {
+            newMap.set(deviceId, [...deviceGroups, groupId]);
+          }
+          return {
+            groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
+            refs: {
+              ...state.refs,
+              deviceToGroupsMap: newMap,
+            }
+          };
+        });
 
         try {
           await updateGroupDevice({
@@ -271,9 +288,20 @@ export const useStore = create<Store>()(
         // Optimistic update
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = originalMembers.filter(id => id !== deviceId);
-        set(state => ({
-          groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
-        }));
+        set(state => {
+          const newMap = new Map(state.refs.deviceToGroupsMap);
+          const deviceGroups = newMap.get(deviceId);
+          if (deviceGroups) {
+            newMap.set(deviceId, deviceGroups.filter(id => id !== groupId));
+          }
+          return {
+            groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
+            refs: {
+              ...state.refs,
+              deviceToGroupsMap: newMap,
+            }
+          };
+        });
 
         try {
           await updateGroupDevice({
@@ -295,7 +323,7 @@ export const useStore = create<Store>()(
 
         let defaultColor: string | null = null;
         if (updates.color === null) {
-          const { colorForDevice } = await import("@/ui/color");
+          const { colorForDevice } = await import("@/util/color");
           defaultColor = rgbToHex(...colorForDevice(groupId));
         }
 
@@ -364,10 +392,6 @@ export const useStore = create<Store>()(
               motionProfile: newProfileAttribute,
               color: updates.color !== undefined ? updates.color : existing.color,
             }
-          },
-          motionProfiles: {
-            ...state.motionProfiles,
-            [deviceId]: newEffectiveProfile
           }
         }));
 
@@ -381,7 +405,6 @@ export const useStore = create<Store>()(
           // Rollback
           set(state => ({
             devices: { ...state.devices, [deviceId]: original },
-            motionProfiles: { ...state.motionProfiles, [deviceId]: original.effectiveMotionProfile }
           }));
           throw error;
         }
@@ -394,36 +417,25 @@ export const useStore = create<Store>()(
 
       addPositions: (positions: NormalizedPosition[]) => {
         set(state => ({
-          positions: {
-            ...state.positions,
-            allPositions: [...state.positions.allPositions, ...positions],
+          refs: {
+            ...state.refs,
+            positionsAll: [...state.refs.positionsAll, ...positions],
           }
         }));
+
+        const { processPositions, runRetrospectiveAnalysis } = get();
+        processPositions();
+        runRetrospectiveAnalysis();
       },
 
       processPositions: () => {
         const state = get();
         const { refs } = state;
-        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, firstPosition, engineCheckpoints } = refs;
-        const { refLat, refLon } = state.ui;
+        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, engineCheckpoints } = refs;
 
-        // Determine effective reference point
-        let effectiveRefLat = refLat;
-        let effectiveRefLon = refLon;
-        if (effectiveRefLat == null || effectiveRefLon == null) {
-          if (firstPosition) {
-            effectiveRefLat = firstPosition.lat;
-            effectiveRefLon = firstPosition.lon;
-          } else if (positionsAll.length > 0) {
-            effectiveRefLat = positionsAll[0]?.lat ?? 0;
-            effectiveRefLon = positionsAll[0]?.lon ?? 0;
-          } else {
-            effectiveRefLat = 0;
-            effectiveRefLon = 0;
-          }
-        }
-
-        const coordinateSystem = new ProjectedCoordinateSystem(effectiveRefLat, effectiveRefLon);
+        const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
+          Object.entries(state.devices).map(([id, d]) => [id, d.effectiveMotionProfile])
+        );
 
         const result = computeProcessedPositions(
           positionsAll,
@@ -433,53 +445,19 @@ export const useStore = create<Store>()(
           engines,
           engineCheckpoints,
           groupIds,
-          state.motionProfiles,
-          coordinateSystem,
-          firstPosition
+          motionProfiles
         );
 
         if (!result) return null;
 
-        const { engineSnapshotsByDevice, dominantAnchors, motionSegments, firstPos } = result;
+        const { engineSnapshotsByDevice, motionSegments } = result;
 
-        set(state => ({
+        set(() => ({
           engineSnapshotsByDevice,
-          dominantAnchors,
           motionSegments,
-          refs: {
-            ...state.refs,
-            firstPosition: firstPos ?? state.refs.firstPosition,
-          }
         }));
 
-        return firstPos;
-      },
-
-      setSnapshots: (snapshots: Record<number, DevicePoint[]>) => {
-        set(state => ({
-          positions: {
-            ...state.positions,
-            snapshots,
-          }
-        }));
-      },
-
-      setFirstPosition: (pos) => {
-        set(state => ({
-          refs: {
-            ...state.refs,
-            firstPosition: pos,
-          }
-        }));
-      },
-
-      setPositionsAll: (updater) => {
-        set(state => ({
-          refs: {
-            ...state.refs,
-            positionsAll: updater(state.refs.positionsAll),
-          }
-        }));
+        return null;
       },
 
       applySettings: () => {
@@ -491,24 +469,6 @@ export const useStore = create<Store>()(
             token: state.settings.inputToken,
             maptilerApiKey: state.settings.inputMaptilerApiKey,
             darkMode: state.settings.inputDarkMode,
-          }
-        }));
-      },
-
-      clearSettings: () => {
-        set(state => ({
-          settings: {
-            ...state.settings,
-            baseUrl: '',
-            secure: false,
-            token: '',
-            inputBaseUrl: '',
-            inputSecure: false,
-            inputToken: '',
-            maptilerApiKey: '',
-            inputMaptilerApiKey: '',
-            darkMode: 'system',
-            inputDarkMode: 'system',
           }
         }));
       },
@@ -567,15 +527,6 @@ export const useStore = create<Store>()(
         }));
       },
 
-      toggleSidePanel: () => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            isSidePanelOpen: !state.ui.isSidePanelOpen,
-          }
-        }));
-      },
-
       setIsSidePanelOpen: (open: boolean) => {
         set(state => ({
           ui: {
@@ -603,57 +554,12 @@ export const useStore = create<Store>()(
         }));
       },
 
-      setRefLat: (lat: number | null) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            refLat: lat,
-          }
-        }));
-      },
-
-      setRefLon: (lon: number | null) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            refLon: lon,
-          }
-        }));
-      },
-
-      setWorldBounds: (bounds: WorldBounds | null) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            worldBounds: bounds,
-          }
-        }));
-      },
-
-      setEngineSnapshotsByDevice: (snapshots) => {
-        set(() => ({
-          engineSnapshotsByDevice: snapshots,
-        }));
-      },
-
-      setDominantAnchors: (anchors) => {
-        set(() => ({
-          dominantAnchors: anchors,
-        }));
-      },
-
       setEditingTarget: (target) => {
         set(state => ({
           ui: {
             ...state.ui,
             editingTarget: target,
           }
-        }));
-      },
-
-      setMotionSegments: (segments) => {
-        set(() => ({
-          motionSegments: segments,
         }));
       },
 
@@ -671,10 +577,6 @@ export const useStore = create<Store>()(
         const deviceIds = Object.keys(state.devices).map(id => Number(id));
         if (deviceIds.length === 0) return;
 
-        const refLat = state.ui.refLat ?? state.refs.firstPosition?.lat ?? null;
-        const refLon = state.ui.refLon ?? state.refs.firstPosition?.lon ?? null;
-        if (refLat === null || refLon === null) return;
-
         set(prevState => ({
           retrospective: {
             ...prevState.retrospective,
@@ -689,12 +591,13 @@ export const useStore = create<Store>()(
             await new Promise(resolve => setTimeout(resolve, 50));
 
             const { analyzeAllDevices } = await import('@/engine/retrospective');
+            const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
+              Object.entries(state.devices).map(([id, d]) => [id, d.effectiveMotionProfile])
+            );
             const results = analyzeAllDevices(
               state.refs.positionsAll,
               deviceIds,
-              refLat,
-              refLon,
-              state.motionProfiles
+              motionProfiles
             );
 
             set(() => ({
@@ -713,27 +616,6 @@ export const useStore = create<Store>()(
             }));
           }
         })();
-      },
-
-      setRetrospectiveResults: (results) => {
-        set(prevState => ({
-          retrospective: {
-            ...prevState.retrospective,
-            byDevice: results,
-            lastUpdate: Date.now(),
-            isAnalyzing: false,
-          }
-        }));
-      },
-
-      clearRetrospectiveResults: () => {
-        set(prevState => ({
-          retrospective: {
-            byDevice: new Map(),
-            lastUpdate: 0,
-            isAnalyzing: prevState.retrospective.isAnalyzing,
-          }
-        }));
       },
     }),
     {

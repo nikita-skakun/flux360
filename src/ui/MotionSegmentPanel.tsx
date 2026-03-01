@@ -1,15 +1,13 @@
 import { Button } from "@/components/ui/button";
-import { ProjectedCoordinateSystem } from "@/util/ProjectedCoordinateSystem";
+import { fromWebMercator } from "@/util/webMercator";
 import { X } from "lucide-react";
 import React from "react";
 import type { DebugFrame } from "@/engine/engine";
-import type { MotionSegment, RetrospectiveMotionSegment, Vec2 } from "@/types";
+import type { MotionSegment, RetrospectiveMotionSegment, Timestamp, Vec2 } from "@/types";
 
 type Props = {
   segment: MotionSegment | RetrospectiveMotionSegment;
   debugFrames: DebugFrame[];
-  refLat: number | null;
-  refLon: number | null;
   onClose: () => void;
 };
 
@@ -24,7 +22,7 @@ function formatDuration(ms: number): string {
   return `${h}h ${min}m`;
 }
 
-function formatTimestamp(ts: number): string {
+function formatTimestamp(ts: Timestamp): string {
   return new Date(ts).toLocaleString();
 }
 
@@ -42,7 +40,7 @@ function isRetrospectiveSegment(seg: MotionSegment | RetrospectiveMotionSegment)
   return 'confidence' in seg;
 }
 
-function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: Props) {
+function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
   const startTime = segment.startTime;
   const endTime = segment.endTime ?? Date.now();
   const duration = endTime - startTime;
@@ -58,7 +56,7 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
   });
 
   return (
-    <div className="p-2 rounded-lg bg-muted/30 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0 min-h-0">
+    <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0 min-h-0">
       <div className="flex items-start justify-between mb-2">
         <div className="text-sm font-medium">
           {isRetro ? 'Retrospective Segment' : 'Motion Segment'}
@@ -85,21 +83,16 @@ function MotionSegmentPanel({ segment, debugFrames, refLat, refLon, onClose }: P
         <div><strong>Path points:</strong> {segment.path.length}</div>
       </div>
 
-      {refLat != null && refLon != null && (
-        <div className="text-xs space-y-1 mb-3 shrink-0">
-          <div><strong>Start:</strong> {(() => {
-            const cs = new ProjectedCoordinateSystem(refLat, refLon);
-            const { lat, lon } = cs.unproject(segment.path[0]![0], segment.path[0]![1]);
-            return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-          })()}</div>
-          <div><strong>End:</strong> {(() => {
-            const last = segment.path[segment.path.length - 1]!;
-            const cs = new ProjectedCoordinateSystem(refLat, refLon);
-            const { lat, lon } = cs.unproject(last[0], last[1]);
-            return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-          })()}</div>
-        </div>
-      )}
+      <div className="text-xs space-y-1 mb-3 shrink-0">
+        <div><strong>Start:</strong> {(() => {
+          const [lon, lat] = fromWebMercator(segment.path[0]!);
+          return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+        })()}</div>
+        <div><strong>End:</strong> {(() => {
+          const [lon, lat] = fromWebMercator(segment.path[segment.path.length - 1]!);
+          return `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+        })()}</div>
+      </div>
 
       <div className="text-xs font-medium mb-1 shrink-0">
         Debug frames ({relevantFrames.length}):

@@ -1,8 +1,8 @@
 import { Engine, type EngineState } from '@/engine/engine';
 import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
-import { ProjectedCoordinateSystem } from '@/util/ProjectedCoordinateSystem';
-import { rgbToHex } from '@/ui/color';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName } from '@/types';
+import { toWebMercator } from '@/util/webMercator';
+import { rgbToHex } from '@/util/color';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 type ColorFunction = (id: number) => [number, number, number];
@@ -13,7 +13,7 @@ export function parseDevices(
 ) {
     const nameMap: Record<number, string> = {};
     const iconMap: Record<number, string> = {};
-    const lastSeenMap: Record<number, number | null> = {};
+    const lastSeenMap: Record<number, Timestamp | null> = {};
     const motionProfileMap: Record<number, MotionProfileName> = {};
     const motionProfileAttributeMap: Record<number, MotionProfileName | null> = {};
     const colorAttributeMap: Record<number, string | null> = {};
@@ -32,15 +32,14 @@ export function parseDevices(
         motionProfileMap[device.id] = profile;
         motionProfileAttributeMap[device.id] = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
 
-        const colorAttr = typeof device.attributes["color"] === "string" ? device.attributes["color"] : null;
-        colorAttributeMap[device.id] = colorAttr;
+        colorAttributeMap[device.id] = typeof device.attributes["color"] === "string" && device.attributes["color"] || rgbToHex(...colorForDevice(device.id));
 
         // Check if it's a group device
         const memberDeviceIdsAttr = device.attributes["memberDeviceIds"];
         if (typeof memberDeviceIdsAttr === "string") {
             try {
                 const memberDeviceIds = JSON.parse(memberDeviceIdsAttr) as unknown;
-                if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((id): id is number => typeof id === "number")) {
+                if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((id: unknown): id is number => typeof id === "number")) {
                     let color = rgbToHex(...colorForDevice(device.id));
                     const colorAttr = device.attributes["color"];
                     if (typeof colorAttr === "string") {
@@ -99,11 +98,9 @@ export function computeProcessedPositions(
     deviceToGroupsMap: Map<number, number[]>,
     groupDevices: GroupDevice[],
     engines: Map<number, Engine>,
-    engineCheckpoints: Map<number, { timestamp: number; snapshot: EngineState }[]>,
+    engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>,
     groupIds: Set<number>,
-    motionProfiles: Record<number, MotionProfileName>,
-    coordinateSystem: ProjectedCoordinateSystem,
-    firstPosition: { lat: number; lon: number } | null
+    motionProfiles: Record<number, MotionProfileName>
 ) {
     if (!positionsAll || positionsAll.length === 0) return null;
 
@@ -190,7 +187,7 @@ export function computeProcessedPositions(
                 }
             }
 
-            let replayFrom = 0;
+            let replayFrom: Timestamp = 0;
             if (cp) {
                 engine.restoreSnapshot(cp.snapshot);
                 replayFrom = cp.timestamp;
@@ -225,11 +222,9 @@ export function computeProcessedPositions(
     const rawByDevice: Record<number, DevicePoint[]> = {};
     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
         const deviceId = Number(deviceKey);
-        const isGroup = groupIds.has(deviceId);
         const rawArr: DevicePoint[] = arr.map((p) => {
-            const [x, y] = coordinateSystem.project(p.lat, p.lon);
             const comp: DevicePoint = {
-                mean: [x, y],
+                mean: toWebMercator([p.lon, p.lat]),
                 variance: measurementVarianceFromAccuracy(p.accuracy),
                 accuracy: p.accuracy,
                 lat: p.lat,
@@ -238,18 +233,14 @@ export function computeProcessedPositions(
                 timestamp: p.timestamp,
                 anchorAgeMs: 0,
                 confidence: 0,
-                ...(isGroup ? { sourceDeviceId: p.device } : {}),
+                sourceDeviceId: groupIds.has(deviceId) ? p.device : undefined,
             };
             return comp;
         });
         rawByDevice[deviceId] = rawArr;
     }
 
-    let firstPos: { lat: number; lon: number } | null = null;
-    if (!firstPosition && newPositions.length > 0) {
-        const first = newPositions[0]!;
-        firstPos = { lat: first.lat, lon: first.lon };
-    }
+    // No need to track firstPosition anymore
 
     const groupMotionProfiles = new Map<number, MotionProfileName>();
     for (const group of groupDevices) {
@@ -267,12 +258,12 @@ export function computeProcessedPositions(
         groupMotionProfiles.set(group.id, profile);
     }
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, coordinateSystem, positionsAll);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, positionsAll);
 
     // Prune old motion segments from engines based on the current data window
     if (positionsAll.length > 0) {
         // Find the oldest timestamp in the current dataset
-        let minTimestamp = Infinity;
+        let minTimestamp: Timestamp = Infinity;
         for (const p of positionsAll) {
             if (p.timestamp < minTimestamp) minTimestamp = p.timestamp;
         }
@@ -306,8 +297,6 @@ export function computeProcessedPositions(
 
     return {
         engineSnapshotsByDevice: result.positionsByDevice,
-        dominantAnchors: result.dominantAnchors,
         motionSegments: result.motionSegments,
-        firstPos
     };
 }
