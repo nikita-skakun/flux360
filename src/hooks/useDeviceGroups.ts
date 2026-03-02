@@ -14,14 +14,8 @@ export function useDeviceGroups(deviceMotionProfiles: Record<number, MotionProfi
   const groupMotionProfiles = useMemo(() => {
     const profiles = new Map<number, MotionProfileName>();
     for (const group of groupDevices) {
-      let profile: MotionProfileName = "person";
-      for (const memberId of group.memberDeviceIds) {
-        if ((deviceMotionProfiles[memberId] ?? "person") === "car") {
-          profile = "car";
-          break;
-        }
-      }
-      profiles.set(group.id, profile);
+      const hasCar = group.memberDeviceIds.some(memberId => (deviceMotionProfiles[memberId] ?? "person") === "car");
+      profiles.set(group.id, hasCar ? "car" : "person");
     }
     return profiles;
   }, [groupDevices, deviceMotionProfiles]);
@@ -80,25 +74,28 @@ export function useDeviceGroups(deviceMotionProfiles: Record<number, MotionProfi
 
   const handleAddDeviceToGroup = useCallback(async (groupId: number, deviceId: number) => {
     try {
-      const devices = await import("@/api/devices");
-      const { updateGroupDevice } = devices;
-      let originalMemberIds: number[] = [];
+      const { updateGroupDevice } = await import("@/api/devices");
+
+      let newMemberIds: number[] | null = null;
+      let originalMemberIds: number[] | null = null;
 
       setGroupDevices(prevGroups => {
         const group = prevGroups.find((g) => g.id === groupId);
         if (!group || group.memberDeviceIds.includes(deviceId)) return prevGroups;
 
         originalMemberIds = group.memberDeviceIds;
-        const newMemberIds = [...group.memberDeviceIds, deviceId];
+        newMemberIds = [...group.memberDeviceIds, deviceId];
+        return prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: newMemberIds! } : g);
+      });
 
-        // Fire API update in background
+      if (newMemberIds) {
         updateGroupDevice(buildApiOpts(), groupId, { memberDeviceIds: newMemberIds }).catch(error => {
           console.error("Failed to add device to group:", error);
-          setGroupDevices(prevGroups => prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: originalMemberIds } : g));
+          if (originalMemberIds) {
+            setGroupDevices(prevGroups => prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: originalMemberIds! } : g));
+          }
         });
-
-        return prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: newMemberIds } : g);
-      });
+      }
     } catch (error) {
       console.error("Failed to add device to group:", error);
       throw error;
@@ -107,25 +104,28 @@ export function useDeviceGroups(deviceMotionProfiles: Record<number, MotionProfi
 
   const handleRemoveDeviceFromGroup = useCallback(async (groupId: number, deviceId: number) => {
     try {
-      const devices = await import("@/api/devices");
-      const { updateGroupDevice } = devices;
-      let originalMemberIds: number[] = [];
+      const { updateGroupDevice } = await import("@/api/devices");
+
+      let newMemberIds: number[] | null = null;
+      let originalMemberIds: number[] | null = null;
 
       setGroupDevices(prevGroups => {
         const group = prevGroups.find((g) => g.id === groupId);
         if (!group) return prevGroups;
 
         originalMemberIds = group.memberDeviceIds;
-        const newMemberIds = group.memberDeviceIds.filter((id) => id !== deviceId);
+        newMemberIds = group.memberDeviceIds.filter((id) => id !== deviceId);
+        return prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: newMemberIds! } : g);
+      });
 
-        // Fire API update in background
+      if (newMemberIds) {
         updateGroupDevice(buildApiOpts(), groupId, { memberDeviceIds: newMemberIds }).catch(error => {
           console.error("Failed to remove device from group:", error);
-          setGroupDevices(prevGroups => prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: originalMemberIds } : g));
+          if (originalMemberIds) {
+            setGroupDevices(prevGroups => prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: originalMemberIds! } : g));
+          }
         });
-
-        return prevGroups.map((g) => g.id === groupId ? { ...g, memberDeviceIds: newMemberIds } : g);
-      });
+      }
     } catch (error) {
       console.error("Failed to remove device from group:", error);
       throw error;

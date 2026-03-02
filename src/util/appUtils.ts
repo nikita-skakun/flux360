@@ -29,7 +29,7 @@ export function buildEngineSnapshotsFromByDevice(
   groupIdsRef: Set<number>,
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
-  positionsAll: NormalizedPosition[]
+  allPosByDevice: Map<number, NormalizedPosition[]>
 ): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; motionSegments: Record<number, MotionSegment[]> } {
   try {
     const measurementsByDevice: Record<number, DevicePoint[]> = {};
@@ -69,7 +69,7 @@ export function buildEngineSnapshotsFromByDevice(
           const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
 
           if (engine.motionActive) {
-            const latestRaw = positionsAll.filter(p => p.device === dId).pop();
+            const latestRaw = allPosByDevice.get(dId)?.at(-1);
             if (latestRaw) {
               const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1, sourceDeviceId: undefined };
               currentSnapshots[dId] = [point];

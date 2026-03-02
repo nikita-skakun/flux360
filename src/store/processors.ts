@@ -104,6 +104,17 @@ export function computeProcessedPositions(
 ) {
     if (!positionsAll || positionsAll.length === 0) return null;
 
+    // Pre-index all positions by deviceId once to avoid O(N*E) filters
+    const allPosByDevice = new Map<number, NormalizedPosition[]>();
+    for (const p of positionsAll) {
+        let list = allPosByDevice.get(p.device);
+        if (!list) {
+            list = [];
+            allPosByDevice.set(p.device, list);
+        }
+        list.push(p);
+    }
+
     const newPositions = positionsAll.filter((p: NormalizedPosition) => {
         const key = dedupeKey(p);
         if (processedKeys.has(key)) return false;
@@ -140,8 +151,11 @@ export function computeProcessedPositions(
     // Bootstrap missing group engines (including new groups)
     for (const group of groupDevices) {
         if (!engines.has(group.id)) {
-            const memberIds = new Set(group.memberDeviceIds);
-            const historical = positionsAll.filter(p => memberIds.has(p.device));
+            const historical: NormalizedPosition[] = [];
+            for (const memberId of group.memberDeviceIds) {
+                const memberPos = allPosByDevice.get(memberId);
+                if (memberPos) historical.push(...memberPos);
+            }
             if (historical.length > 0) {
                 historical.sort((a, b) => a.timestamp - b.timestamp);
                 posByDevice[group.id] = historical;
@@ -211,7 +225,15 @@ export function computeProcessedPositions(
                 relevantDeviceIds.add(deviceId);
             }
 
-            const historical = positionsAll.filter(p => relevantDeviceIds.has(p.device) && p.timestamp > replayFrom);
+            const historical: NormalizedPosition[] = [];
+            for (const dId of relevantDeviceIds) {
+                const devicePos = allPosByDevice.get(dId);
+                if (devicePos) {
+                    for (const p of devicePos) {
+                        if (p.timestamp > replayFrom) historical.push(p);
+                    }
+                }
+            }
             historical.sort((a, b) => a.timestamp - b.timestamp);
             posByDevice[deviceId] = historical;
         }
@@ -258,7 +280,7 @@ export function computeProcessedPositions(
         groupMotionProfiles.set(group.id, profile);
     }
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, positionsAll);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, allPosByDevice);
 
     // Prune old motion segments from engines based on the current data window
     if (positionsAll.length > 0) {

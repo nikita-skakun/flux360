@@ -16,7 +16,6 @@ export function App() {
   const addPositions = useStore(state => state.addPositions);
   const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
   const groupDevices = useStore(state => state.groups);
-  const deviceToGroupsMap = useStore(state => state.refs.deviceToGroupsMap);
 
   const enginesRef = useStore(state => state.refs.engines);
   const devices = useStore(state => state.devices);
@@ -142,20 +141,26 @@ export function App() {
   };
 
   const visibleComponents = useMemo(() => {
-    const engineComps = Object.values(engineSnapshotsByDevice).flat();
-    const allComps = engineComps;
+    const allComps = Object.values(engineSnapshotsByDevice).flat();
 
-    // Filter devices not seen in the last 24 hours using deviceLastSeen
+    // Filter devices not seen in the last cutoff using deviceLastSeen
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-    const activeDevices = new Set<number>();
-    for (const [device, lastSeen] of Object.entries(deviceLastSeen)) {
-      if (lastSeen == null || lastSeen > cutoff) {
-        activeDevices.add(Number(device));
+
+    // Create a set of group member IDs to hide them if they should be shown via group
+    const groupMemberIds = new Set<number>();
+    for (const group of groupDevices) {
+      for (const id of group.memberDeviceIds) {
+        groupMemberIds.add(id);
       }
     }
 
-    return allComps.filter((comp) => activeDevices.has(comp.device) && !deviceToGroupsMap.has(comp.device));
-  }, [engineSnapshotsByDevice, deviceLastSeen, deviceToGroupsMap]);
+    return allComps.filter((comp) => {
+      const lastSeen = deviceLastSeen[comp.device];
+      const isRecent = lastSeen != null && lastSeen > cutoff;
+      const isIndividual = !groupMemberIds.has(comp.device);
+      return isRecent && isIndividual;
+    });
+  }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
 
   const frame = { components: visibleComponents };
 
@@ -264,6 +269,16 @@ export function App() {
     return result;
   }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice, deviceColors]);
 
+  const allDevicesForSelection = useMemo(() => {
+    return Object.entries(deviceNames)
+      .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
+      .map(([id, name]) => ({
+        id: Number(id),
+        name,
+        emoji: deviceIcons[Number(id)] ?? name?.charAt(0).toUpperCase() ?? "?"
+      }));
+  }, [deviceNames, groupDevices, deviceIcons]);
+
   return (
     <div className="h-screen w-screen">
       <DeviceListSidePanel
@@ -283,9 +298,7 @@ export function App() {
         onAddDeviceToGroup={addDeviceToGroup}
         onEditGroup={(groupId) => setEditingTarget({ type: 'group', id: groupId })}
         onCreateGroupSelectionChange={setPulsingDeviceIds}
-        allDevices={Object.entries(deviceNames)
-          .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
-          .map(([id, name]) => ({ id: Number(id), name, emoji: deviceIcons[Number(id)] ?? name?.charAt(0).toUpperCase() ?? "?" }))}
+        allDevices={allDevicesForSelection}
       />
       <MapView
         ref={mapViewRef}

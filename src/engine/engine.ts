@@ -82,8 +82,15 @@ export class Engine {
   }
 
   private insertOutlier(sample: OutlierSample) {
-    this.outliers.push(sample);
-    this.outliers.sort((a, b) => a.point.timestamp - b.point.timestamp);
+    // Binary search for sorted insertion by timestamp
+    let low = 0;
+    let high = this.outliers.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (this.outliers[mid]!.point.timestamp < sample.point.timestamp) low = mid + 1;
+      else high = mid;
+    }
+    this.outliers.splice(low, 0, sample);
   }
 
   private computeAverageVariance(points: DevicePoint[]): number {
@@ -115,47 +122,43 @@ export class Engine {
   }
 
   private arePointsConsistent(points: DevicePoint[], threshold: number): boolean {
-    for (let i = 0; i < points.length; i++) {
-      for (let j = i + 1; j < points.length; j++) {
-        const p1 = points[i];
-        const p2 = points[j];
-        if (!p1 || !p2) return false;
-        const dx = p1.mean[0] - p2.mean[0];
-        const dy = p1.mean[1] - p2.mean[1];
-        const mahal = (dx * dx + dy * dy) / (p1.variance + p2.variance);
-        if (mahal >= threshold) return false;
-      }
+    if (points.length < 2) return true;
+    // Check all points against the centroid to reduce to O(N)
+    const centroid = computeCentroid(points.map(p => p.mean));
+    for (const p of points) {
+      const dx = p.mean[0] - centroid[0];
+      const dy = p.mean[1] - centroid[1];
+      // Variance of centroid is approximately average variance / N
+      // But for consistency check, comparing to centroid with single point variance is a good proxy
+      const mahal = (dx * dx + dy * dy) / p.variance;
+      if (mahal >= threshold) return false;
     }
     return true;
   }
 
   private areDirectionsRandom(points: DevicePoint[], threshold: number): boolean {
-    // Evaluates if directions between consecutive points are random (low correlation via dot product).
-    // Random directions suggest stationary/noisy movement rather than coherent travel, qualifying for settling.
-    // Threshold ensures pairs aren't too aligned (e.g., dot < threshold means uncorrelated).
-    if (points.length < 2) return false;
+    if (points.length < 3) return true;
     const directions: Vec2[] = [];
     for (let i = 0; i < points.length - 1; i++) {
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      if (!p1 || !p2) return false;
+      const p1 = points[i]!;
+      const p2 = points[i + 1]!;
       const dx = p2.mean[0] - p1.mean[0];
       const dy = p2.mean[1] - p1.mean[1];
       const mag = Math.hypot(dx, dy);
-      if (mag === 0) continue;
-      directions.push([dx / mag, dy / mag]);
-    }
-    if (directions.length < 1) return true; // no movement, consider random (stationary)
-    for (let i = 0; i < directions.length; i++) {
-      for (let j = i + 1; j < directions.length; j++) {
-        const d1 = directions[i];
-        const d2 = directions[j];
-        if (!d1 || !d2) return false;
-        const dot = d1[0] * d2[0] + d1[1] * d2[1];
-        if (dot >= threshold) return false; // aligned, not random
+      if (mag > 1e-6) {
+        directions.push([dx / mag, dy / mag]);
       }
     }
-    return true; // all pairs have low dot, directions are random
+    if (directions.length < 2) return true;
+
+    // Check consecutive directions for correlation O(N)
+    for (let i = 0; i < directions.length - 1; i++) {
+      const d1 = directions[i]!;
+      const d2 = directions[i + 1]!;
+      const dot = d1[0] * d2[0] + d1[1] * d2[1];
+      if (dot >= threshold) return false;
+    }
+    return true;
   }
 
   private isCentroidCentered(points: DevicePoint[], maxRadius: number): boolean {

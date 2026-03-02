@@ -43,17 +43,19 @@ function isRetrospectiveSegment(seg: MotionSegment | RetrospectiveMotionSegment)
 function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
   const startTime = segment.startTime;
   const endTime = segment.endTime ?? Date.now();
-  const duration = endTime - startTime;
-  const distance = pathDistance(segment.path);
-  const avgSpeedKmh = duration > 0 ? (distance / 1000) / (duration / 3600000) : 0;
+  const duration = React.useMemo(() => endTime - startTime, [startTime, endTime]);
+  const distance = React.useMemo(() => pathDistance(segment.path), [segment.path]);
+  const avgSpeedKmh = React.useMemo(() => duration > 0 ? (distance / 1000) / (duration / 3600000) : 0, [distance, duration]);
 
   const isRetro = isRetrospectiveSegment(segment);
 
-  const relevantFrames = debugFrames.filter(f => {
-    if (f.timestamp < startTime) return false;
-    if (endTime && f.timestamp > endTime) return false;
-    return true;
-  });
+  const relevantFrames = React.useMemo(() => {
+    return debugFrames.filter(f => {
+      if (f.timestamp < startTime) return false;
+      if (endTime && f.timestamp > endTime) return false;
+      return true;
+    });
+  }, [debugFrames, startTime, endTime]);
 
   return (
     <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0 min-h-0">
