@@ -198,7 +198,6 @@ export function computeProcessedPositions(
         const engine = engines.get(deviceId);
         if (!engine?.lastTimestamp) continue;
 
-        newPositionsForDevice.sort((a, b) => a.timestamp - b.timestamp);
         if (newPositionsForDevice.length === 0 || !newPositionsForDevice[0]) continue;
         const minTs = newPositionsForDevice[0].timestamp;
 

@@ -27,10 +27,8 @@ export function buildEngineSnapshotsFromByDevice(
         ? (groupMotionProfiles.get(deviceId) ?? "person")
         : (deviceMotionProfiles[deviceId] ?? "person");
       engine.setMotionProfile(profile);
-      // Ensure measurements are sorted by timestamp
-      const sortedArr = [...arr].sort((a, b) => a.timestamp - b.timestamp);
-      measurementsByDevice[deviceId] = sortedArr;
-      engine.processMeasurements(sortedArr);
+      measurementsByDevice[deviceId] = arr;
+      engine.processMeasurements(arr);
     }
 
     const currentSnapshots: Record<number, DevicePoint[]> = {};

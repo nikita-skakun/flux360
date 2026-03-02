@@ -59,7 +59,8 @@ export class Anchor {
 
     const residualX = mean[0] - this.mean[0];
     const residualY = mean[1] - this.mean[1];
-    this.mean = [this.mean[0] + kalmanGain * residualX, this.mean[1] + kalmanGain * residualY];
+    this.mean[0] += kalmanGain * residualX;
+    this.mean[1] += kalmanGain * residualY;
 
     const processNoise = 0.1; // small constant for model uncertainty
     this.variance = (1 - kalmanGain) * this.variance + processNoise;

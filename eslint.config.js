@@ -24,8 +24,7 @@ export default [
         clearInterval: 'readonly',
         console: 'readonly',
         process: 'readonly',
-        React: 'readonly',
-        structuredClone: 'readonly'
+        React: 'readonly'
       }
     },
     plugins: {
