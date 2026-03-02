@@ -26,10 +26,6 @@ function formatTimestamp(ts: Timestamp): string {
   return new Date(ts).toLocaleString();
 }
 
-function isRetrospectiveSegment(seg: MotionSegment | RetrospectiveMotionSegment): seg is RetrospectiveMotionSegment {
-  return 'confidence' in seg;
-}
-
 function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
   const startTime = segment.startTime;
   const endTime = segment.endTime ?? Date.now();
@@ -37,7 +33,7 @@ function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
   const distance = segment.distance;
   const avgSpeedKmh = duration > 0 ? (distance / 1000) / (duration / 3600000) : 0;
 
-  const isRetro = isRetrospectiveSegment(segment);
+  const isRetro = 'confidence' in segment;
 
   const relevantFrames = React.useMemo(() => {
     return debugFrames.filter(f => {
