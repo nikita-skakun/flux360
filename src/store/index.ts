@@ -12,10 +12,12 @@ const initialState: StoreState = {
   settings: {
     baseUrl: '',
     secure: false,
-    token: '',
+    email: '',
+    password: '',
     inputBaseUrl: '',
     inputSecure: false,
-    inputToken: '',
+    inputEmail: '',
+    inputPassword: '',
     maptilerApiKey: '',
     inputMaptilerApiKey: '',
     darkMode: 'system',
@@ -93,7 +95,6 @@ export const useStore = create<Store>()(
       },
 
       createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
-        const state = get();
         const { createGroupDevice } = await import("@/api/devices");
         const { colorForDevice } = await import("@/util/color");
 
@@ -124,10 +125,9 @@ export const useStore = create<Store>()(
         }));
 
         try {
+          const { baseUrl, secure, email, password } = get().settings;
           const created = await createGroupDevice({
-            baseUrl: state.settings.baseUrl,
-            secure: state.settings.secure,
-            auth: { type: "token" as const, token: state.settings.token },
+            baseUrl, secure, auth: { type: "basic", username: email, password }
           }, name, emoji, memberDeviceIds);
 
           // Replace temp with real
@@ -209,10 +209,9 @@ export const useStore = create<Store>()(
         });
 
         try {
+          const { baseUrl, secure, email, password } = get().settings;
           await deleteGroupDevice({
-            baseUrl: state.settings.baseUrl,
-            secure: state.settings.secure,
-            auth: { type: "token" as const, token: state.settings.token },
+            baseUrl, secure, auth: { type: "basic", username: email, password }
           }, groupId);
         } catch (error) {
           // Rollback
@@ -242,8 +241,7 @@ export const useStore = create<Store>()(
 
       addDeviceToGroup: async (groupId: number, deviceId: number) => {
         const { updateGroupDevice } = await import("@/api/devices");
-        const state = get();
-        const group = state.groups.find(g => g.id === groupId);
+        const group = get().groups.find(g => g.id === groupId);
         if (!group || group.memberDeviceIds.includes(deviceId)) return;
 
         // Optimistic update
@@ -265,10 +263,9 @@ export const useStore = create<Store>()(
         });
 
         try {
+          const { baseUrl, secure, email, password } = get().settings;
           await updateGroupDevice({
-            baseUrl: state.settings.baseUrl,
-            secure: state.settings.secure,
-            auth: { type: "token" as const, token: state.settings.token },
+            baseUrl, secure, auth: { type: "basic", username: email, password }
           }, groupId, { memberDeviceIds: newMembers });
         } catch (error) {
           // Rollback
@@ -281,8 +278,7 @@ export const useStore = create<Store>()(
 
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
         const { updateGroupDevice } = await import("@/api/devices");
-        const state = get();
-        const group = state.groups.find(g => g.id === groupId);
+        const group = get().groups.find(g => g.id === groupId);
         if (!group?.memberDeviceIds.includes(deviceId)) return;
 
         // Optimistic update
@@ -304,10 +300,9 @@ export const useStore = create<Store>()(
         });
 
         try {
+          const { baseUrl, secure, email, password } = get().settings;
           await updateGroupDevice({
-            baseUrl: state.settings.baseUrl,
-            secure: state.settings.secure,
-            auth: { type: "token" as const, token: state.settings.token },
+            baseUrl, secure, auth: { type: "basic", username: email, password }
           }, groupId, { memberDeviceIds: newMembers });
         } catch (error) {
           // Rollback
@@ -356,10 +351,9 @@ export const useStore = create<Store>()(
         }));
 
         try {
+          const { baseUrl, secure, email, password } = get().settings;
           await updateGroupDevice({
-            baseUrl: state.settings.baseUrl,
-            secure: state.settings.secure,
-            auth: { type: "token" as const, token: state.settings.token },
+            baseUrl, secure, auth: { type: "basic", username: email, password }
           }, groupId, updates);
         } catch (error) {
           // Rollback
@@ -372,8 +366,7 @@ export const useStore = create<Store>()(
 
       updateDevice: async (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
         const { updateDevice } = await import("@/api/devices");
-        const state = get();
-        const existing = state.devices[deviceId];
+        const existing = get().devices[deviceId];
         if (!existing) return;
 
         // Optimistic update
@@ -396,10 +389,9 @@ export const useStore = create<Store>()(
         }));
 
         try {
+          const { baseUrl, secure, email, password } = get().settings;
           await updateDevice({
-            baseUrl: state.settings.baseUrl,
-            secure: state.settings.secure,
-            auth: { type: "token" as const, token: state.settings.token },
+            baseUrl, secure, auth: { type: "basic", username: email, password }
           }, deviceId, updates);
         } catch (error) {
           // Rollback
@@ -472,7 +464,8 @@ export const useStore = create<Store>()(
             ...state.settings,
             baseUrl: state.settings.inputBaseUrl,
             secure: state.settings.inputSecure,
-            token: state.settings.inputToken,
+            email: state.settings.inputEmail,
+            password: state.settings.inputPassword,
             maptilerApiKey: state.settings.inputMaptilerApiKey,
             darkMode: state.settings.inputDarkMode,
           }
@@ -497,11 +490,19 @@ export const useStore = create<Store>()(
         }));
       },
 
-      setInputToken: (value: string) => {
+      setInputEmail: (value: string) => {
         set(state => ({
           settings: {
             ...state.settings,
-            inputToken: value,
+            inputEmail: value,
+          }
+        }));
+      },
+      setInputPassword: (value: string) => {
+        set(state => ({
+          settings: {
+            ...state.settings,
+            inputPassword: value,
           }
         }));
       },

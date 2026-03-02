@@ -1,4 +1,4 @@
-import { performGet, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
+import { performRequest, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
 import type { NormalizedPosition } from "@/types";
 
 export function normalizePosition(raw: unknown): NormalizedPosition | null {
@@ -50,14 +50,14 @@ export async function fetchPositions(
   const authHeader = buildAuthHeader(opts.auth);
   if (authHeader) headers["Authorization"] = authHeader;
 
-  const json: unknown = await performGet(fetcher, url, headers);
-  if (Array.isArray(json)) {
-    return json.map((p) => normalizePosition(p)).filter(Boolean) as NormalizedPosition[];
+  const data = await performRequest<unknown>(fetcher, url, "GET", headers);
+  if (Array.isArray(data)) {
+    return data.map((p) => normalizePosition(p)).filter((p): p is NormalizedPosition => p !== null);
   }
-  if (json && typeof json === "object") {
-    const obj = json as Record<string, unknown>;
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
     if (Array.isArray(obj["data"])) {
-      return obj["data"].map((p) => normalizePosition(p)).filter(Boolean) as NormalizedPosition[];
+      return (obj["data"] as unknown[]).map((p) => normalizePosition(p)).filter((p): p is NormalizedPosition => p !== null);
     }
   }
   throw new Error("Unexpected Traccar response format: expected JSON array");

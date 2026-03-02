@@ -52,15 +52,18 @@ export function App() {
   const baseUrlInput = useStore(state => state.settings.inputBaseUrl);
   const setBaseUrlInput = useStore(state => state.setInputBaseUrl);
   const setSecureInput = useStore(state => state.setInputSecure);
-  const setTokenInput = useStore(state => state.setInputToken);
+  const setEmailInput = useStore(state => state.setInputEmail);
+  const setPasswordInput = useStore(state => state.setInputPassword);
   const setMaptilerApiKeyInput = useStore(state => state.setInputMaptilerApiKey);
   const setDarkModeInput = useStore(state => state.setInputDarkMode);
   const inputSecure = useStore(state => state.settings.inputSecure);
-  const inputToken = useStore(state => state.settings.inputToken);
+  const inputEmail = useStore(state => state.settings.inputEmail);
+  const inputPassword = useStore(state => state.settings.inputPassword);
   const inputMaptilerApiKey = useStore(state => state.settings.inputMaptilerApiKey);
   const inputDarkMode = useStore(state => state.settings.inputDarkMode);
   const traccarSecure = useStore(state => state.settings.secure);
-  const traccarToken = useStore(state => state.settings.token);
+  const traccarEmail = useStore(state => state.settings.email);
+  const traccarPassword = useStore(state => state.settings.password);
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const darkMode = useStore(state => state.settings.darkMode);
@@ -114,7 +117,8 @@ export function App() {
   const { wsStatus, wsError, reconnect } = useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
-    token: traccarToken,
+    email: traccarEmail,
+    password: traccarPassword,
     onDevices: setDevicesFromApi,
     onPositions: addPositions,
   });
@@ -324,8 +328,10 @@ export function App() {
               setBaseUrlInput={setBaseUrlInput}
               secureInput={inputSecure}
               setSecureInput={setSecureInput}
-              tokenInput={inputToken}
-              setTokenInput={setTokenInput}
+              emailInput={inputEmail}
+              setEmailInput={setEmailInput}
+              passwordInput={inputPassword}
+              setPasswordInput={setPasswordInput}
               maptilerApiKeyInput={inputMaptilerApiKey}
               setMaptilerApiKeyInput={setMaptilerApiKeyInput}
               darkModeInput={inputDarkMode}

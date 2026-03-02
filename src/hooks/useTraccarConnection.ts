@@ -1,18 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import type { NormalizedPosition, Timestamp, Vec2 } from "@/types";
-
+import type { TraccarAuth, TraccarClientOptions } from "@/api/httpUtils";
 import type { TraccarDevice } from "@/api/devices";
 
 type TraccarConnectionOptions = {
   baseUrl: string | null;
   secure: boolean;
-  token: string | null;
+  email: string | null;
+  password: string | null;
   onDevices?: (devices: TraccarDevice[]) => Promise<void>;
   onPositions?: (positions: NormalizedPosition[]) => void;
 };
 
 export function useTraccarConnection(options: TraccarConnectionOptions) {
-  const { baseUrl, secure, token, onDevices, onPositions } = options;
+  const { baseUrl, secure, email, password, onDevices, onPositions } = options;
 
   const [wsStatus, setWsStatus] = useState<"Unknown" | "Connecting" | "Connected" | "Disconnected" | "Error">("Unknown");
   const [wsError, setWsError] = useState<string | null>(null);
@@ -43,14 +44,32 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
       try {
         const { connectRealtime } = await import("@/api/realtime");
         const { fetchPositions } = await import("@/api/positions");
-        const { fetchDevices } = await import("@/api/devices");
+        const { fetchDevices, fetchSession } = await import("@/api/devices");
+
+        let sessionToken: string | undefined;
+        let sessionAuth: TraccarAuth = (email && password) ? { type: "basic", username: email, password } : { type: "none" };
+
+        if (baseUrl && email && password) {
+          try {
+            setWsStatus("Connecting");
+            const user = await fetchSession({ baseUrl, secure, auth: sessionAuth });
+            sessionToken = user?.token;
+            // Once session is established, we can rely on cookies for HTTP requests
+            sessionAuth = { type: "none" };
+            // Small delay for cookie processing
+            await new Promise(r => setTimeout(r, 500));
+          } catch (e) {
+            setWsError(`Login failed: ${e instanceof Error ? e.message : String(e)}`);
+            setWsStatus("Error");
+            return;
+          }
+        }
+
         const client = connectRealtime({
           baseUrl: baseUrl ?? undefined,
           secure,
-          auth: token ? { type: "token", token } : { type: "none" },
-          autoReconnect: true,
-          reconnectInitialMs: 1000,
-          reconnectMaxMs: 30000,
+          auth: sessionAuth,
+          token: sessionToken,
           onPosition: (p) => {
             const key = dedupeKey(p);
             if (seenRef.current.has(key)) return;
@@ -58,72 +77,35 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
             knownDevices.current.add(p.device);
             if (onPositions) onPositions([p]);
           },
-          onOpen: async (): Promise<void> => {
+          onOpen: async () => {
             setWsStatus("Connected");
             setWsError(null);
-            const derivedBase = baseUrl ? { baseUrl, secure } : null;
+            const opts: TraccarClientOptions = { baseUrl, secure, auth: sessionAuth };
 
-            if (derivedBase) {
-              const devices = await fetchDevices({ ...derivedBase, auth: token ? { type: "token", token } : { type: "none" } });
-              if (onDevices) void onDevices(devices);
-              for (const d of devices) {
-                if (d?.id != null) {
-                  knownDevices.current.add(d.id);
-                }
-              }
-            }
+            const devices = await fetchDevices(opts);
+            if (onDevices) void onDevices(devices);
+            devices.forEach(d => d.id != null && knownDevices.current.add(d.id));
 
-            if (derivedBase) {
-              const from = new Date(Math.max(0, Date.now() - 96 * 60 * 60 * 1000)); // 96 hours
-              const to = new Date();
-              const fetches = Array.from(knownDevices.current).map((deviceId) => {
-                if (deviceId == null || Number.isNaN(deviceId)) return Promise.resolve([] as NormalizedPosition[]);
-                return fetchPositions(
-                  { ...derivedBase, auth: token ? { type: "token", token } : { type: "none" } },
-                  deviceId,
-                  from,
-                  to,
-                  {}
-                );
-              });
+            const from = new Date(Date.now() - 96 * 3600000); // 96h
+            const res = await Promise.allSettled(Array.from(knownDevices.current).map(id => fetchPositions(opts, id, from, new Date(), {})));
 
-              const results = await Promise.allSettled(fetches);
-              const newPositions: NormalizedPosition[] = [];
-              for (const res of results) {
-                if (res.status !== "fulfilled") continue;
-                for (const p of res.value) {
-                  const key = dedupeKey(p);
-                  if (seenRef.current.has(key)) continue;
-                  seenRef.current.add(key);
-                  newPositions.push(p);
-                }
-              }
-              if (onPositions && newPositions.length > 0) {
-                onPositions(newPositions);
-              }
-            }
+            const pos = res.flatMap(r => r.status === "fulfilled" ? r.value : [])
+              .filter(p => !seenRef.current.has(dedupeKey(p)));
+            pos.forEach(p => seenRef.current.add(dedupeKey(p)));
+            if (onPositions && pos.length > 0) onPositions(pos);
           },
           onClose: (ev) => {
-            const code = ev?.code;
-            const reason = ev?.reason;
-            const detail = code != null ? (reason ? `code=${code} reason=${reason}` : `code=${code}`) : "closed";
-            setWsStatus((prev) => (prev === "Error" ? "Error" : "Disconnected"));
-            setWsError((prev) => prev ?? `WebSocket closed: ${detail}`);
-            console.warn("Traccar WS closed:", ev);
+            setWsStatus(prev => prev === "Error" ? "Error" : "Disconnected");
+            setWsError(prev => prev ?? `WebSocket closed (code ${ev?.code ?? "unknown"})`);
           },
-          onError: (err) => {
-            const message = err instanceof Event ? "WebSocket connection error (check URL/token and server)" : (err instanceof Error ? err.message : String(err));
+          onError: () => {
             setWsStatus("Error");
-            setWsError(message);
-            console.warn("Traccar WS error:", err);
+            setWsError("WebSocket connection error");
           },
         });
 
-        clientCloseRef.current = () => {
-          client.close();
-        };
+        clientCloseRef.current = () => client.close();
       } catch (e) {
-        console.warn("Could not initialize realtime traccar client:", e);
         setWsStatus("Error");
         setWsError(String(e));
       }
@@ -132,12 +114,15 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
     return () => {
       clientCloseRef.current?.();
     };
-  }, [baseUrl, secure, token, wsApplyCounter]);
+  }, [baseUrl, secure, email, password, wsApplyCounter]);
 
   const reconnect = () => {
     if (!baseUrl) {
       setWsStatus("Disconnected");
       setWsError("No Base URL configured");
+    } else if (!email || !password) {
+      setWsStatus("Disconnected");
+      setWsError("No account credentials configured");
     } else {
       setWsStatus("Connecting");
       setWsError(null);

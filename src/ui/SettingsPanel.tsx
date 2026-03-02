@@ -10,8 +10,10 @@ type Props = {
   setBaseUrlInput: (value: string) => void;
   secureInput: boolean;
   setSecureInput: (value: boolean) => void;
-  tokenInput: string;
-  setTokenInput: (value: string) => void;
+  emailInput: string;
+  setEmailInput: (value: string) => void;
+  passwordInput: string;
+  setPasswordInput: (value: string) => void;
   maptilerApiKeyInput: string;
   setMaptilerApiKeyInput: (value: string) => void;
   darkModeInput: 'light' | 'dark' | 'system';
@@ -30,8 +32,10 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   setBaseUrlInput,
   secureInput,
   setSecureInput,
-  tokenInput,
-  setTokenInput,
+  emailInput,
+  setEmailInput,
+  passwordInput,
+  setPasswordInput,
   maptilerApiKeyInput,
   setMaptilerApiKeyInput,
   darkModeInput,
@@ -99,7 +103,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             <span>
               <strong className="text-foreground">{wsStatus}</strong>
             </span>
-            {wsError ? <span className="text-destructive font-semibold">Error: {wsError}</span> : null}
+            {wsError ? <span className="text-destructive font-semibold ml-2 overflow-hidden text-ellipsis whitespace-nowrap max-w-[120px]" title={wsError}>Error: {wsError}</span> : null}
 
             <div className="flex items-center gap-1">
               <Switch
@@ -146,10 +150,17 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             </div>
 
             <Input
+              type="email"
+              placeholder="Email / Username"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+            />
+
+            <Input
               type="password"
-              placeholder="API Token"
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
+              placeholder="Password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
             />
 
             <Input

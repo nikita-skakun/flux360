@@ -11,15 +11,12 @@ export type RealtimeConnectOptions = {
   onOpen?: () => Promise<void>;
   onClose?: (ev?: CloseEvent) => void;
   onError?: (err: unknown) => void;
-  autoReconnect: boolean;
-  reconnectInitialMs: number;
-  reconnectMaxMs: number;
+  token?: string | undefined;
 };
 
 export function connectRealtime(opts: RealtimeConnectOptions): { close: () => void; requestPositions: (params: { deviceId: number; from?: Date; to?: Date; timeoutMs?: number; message?: object; }) => Promise<NormalizedPosition[]> } {
   let ws: WebSocket | null = null;
   let destroyed = false;
-  let reconnectDelay = opts.reconnectInitialMs ?? 1000;
 
   type PendingRequest = { resolve: (ps: NormalizedPosition[]) => void; reject: (err: unknown) => void; timeoutId: ReturnType<typeof setTimeout>; matcher: (ps: NormalizedPosition[]) => boolean };
   const pendingRequests: PendingRequest[] = [];
@@ -41,21 +38,19 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     }
 
     let wsUrl = base;
-    if (opts.auth?.type === "token") {
+    if (opts.token) {
       const sep = wsUrl.includes("?") ? "&" : "?";
-      wsUrl = `${wsUrl}${sep}token=${encodeURIComponent(opts.auth.token)}`;
+      wsUrl = `${wsUrl}${sep}token=${encodeURIComponent(opts.token)}`;
     }
 
     try {
       ws = new WebSocket(wsUrl);
     } catch (e) {
       opts.onError?.(e);
-      scheduleReconnect();
       return;
     }
 
     ws.onopen = () => {
-      reconnectDelay = opts.reconnectInitialMs ?? 1000;
       opts.onOpen?.().catch(() => { });
     };
 
@@ -84,21 +79,11 @@ export function connectRealtime(opts: RealtimeConnectOptions): { close: () => vo
     ws.onclose = (ev) => {
       ws = null;
       opts.onClose?.(ev);
-      if (opts.autoReconnect !== false) scheduleReconnect();
     };
 
     ws.onerror = (ev) => {
       opts.onError?.(ev);
     };
-  }
-
-  function scheduleReconnect() {
-    if (destroyed) return;
-    setTimeout(() => {
-      if (destroyed) return;
-      attachSocket();
-      reconnectDelay = Math.min((opts.reconnectMaxMs ?? 30_000), reconnectDelay * 2);
-    }, reconnectDelay);
   }
 
   function requestPositions(params: { deviceId: number; from?: Date; to?: Date; timeoutMs?: number; message?: object }): Promise<NormalizedPosition[]> {

@@ -3,7 +3,7 @@
 ## 1. Environment & Tools
 - **Runtime**: Use `bun` for all operations.
   - Install: `bun add <package>`
-  - Scripts: `bun run <script>`
+  - Lint: `bun run lint`
   - Typecheck: `bun run tsc --noEmit`
 - **Restrictions**:
   - **NEVER** run `bun run dev` (locks terminal). Suggest the user run it.

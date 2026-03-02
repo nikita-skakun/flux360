@@ -1,6 +1,5 @@
 export type TraccarAuth =
   | { type: "basic"; username: string; password: string }
-  | { type: "token"; token: string }
   | { type: "none" };
 
 export type TraccarClientOptions = {
@@ -16,43 +15,38 @@ export function buildAuthHeader(auth?: TraccarAuth) {
     const b = btoa(`${auth.username}:${auth.password}`);
     return `Basic ${b}`;
   }
-  if (auth.type === "token") {
-    return `Bearer ${auth.token}`;
-  }
   return undefined;
 }
 
-export async function performGet(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<unknown> {
-  const res = await fetcher(url, { method: "GET", headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar fetch failed: ${res.status} ${res.statusText} - ${body}`);
-  }
-  return await res.json().catch(() => null);
+export function normalizeTraccarUrl(baseUrl: string): string {
+  let url = baseUrl.trim();
+  // Remove trailing slashes and normalize /api suffix
+  url = url.replace(/\/+$/, "");
+  return url;
 }
 
-export async function performPost(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
-  const res = await fetcher(url, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!res.ok) {
-    const resBody = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar POST failed: ${res.status} ${res.statusText} - ${resBody}`);
+export async function performRequest<T = unknown>(
+  fetcher: typeof fetch,
+  url: string,
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  headers: Record<string, string>,
+  body?: unknown
+): Promise<T> {
+  const options: RequestInit = {
+    method,
+    headers,
+    credentials: "include",
+  };
+  if (body !== undefined) {
+    options.body = typeof body === "string" ? body : JSON.stringify(body);
   }
-  return await res.json().catch(() => null);
-}
 
-export async function performPut(fetcher: typeof fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
-  const res = await fetcher(url, { method: "PUT", headers, body: JSON.stringify(body) });
+  const res = await fetcher(url, options);
   if (!res.ok) {
-    const resBody = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar PUT failed: ${res.status} ${res.statusText} - ${resBody}`);
+    const errorBody = await res.text().catch(() => "<no body>");
+    throw new Error(`Traccar ${method} failed: ${res.status} ${res.statusText} - ${errorBody}`);
   }
-  return await res.json().catch(() => null);
-}
 
-export async function performDelete(fetcher: typeof fetch, url: string, headers: Record<string, string>): Promise<void> {
-  const res = await fetcher(url, { method: "DELETE", headers });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar DELETE failed: ${res.status} ${res.statusText} - ${body}`);
-  }
+  if (method === "DELETE") return undefined as T;
+  return (await res.json().catch(() => null)) as T;
 }

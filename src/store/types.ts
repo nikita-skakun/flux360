@@ -29,10 +29,12 @@ export type StoreState = {
   settings: {
     baseUrl: string;
     secure: boolean;
-    token: string;
+    email: string;
+    password: string;
     inputBaseUrl: string;
     inputSecure: boolean;
-    inputToken: string;
+    inputEmail: string;
+    inputPassword: string;
     maptilerApiKey: string;
     inputMaptilerApiKey: string;
     darkMode: 'light' | 'dark' | 'system';
@@ -86,7 +88,8 @@ export type StoreActions = {
   applySettings: () => void;
   setInputBaseUrl: (value: string) => void;
   setInputSecure: (value: boolean) => void;
-  setInputToken: (value: string) => void;
+  setInputEmail: (value: string) => void;
+  setInputPassword: (value: string) => void;
   setInputMaptilerApiKey: (value: string) => void;
   setInputDarkMode: (value: 'light' | 'dark' | 'system') => void;
 

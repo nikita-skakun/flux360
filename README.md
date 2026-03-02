@@ -17,19 +17,11 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 
 - **Motion History and Playback**: Persist and visualize historical motion segments with scrub-through controls.
 - **Route Inference**: Integrate with routing data (e.g., OSM) to infer likely paths and constrain predictions based on road networks.
-- **Enhanced Visualization**: Expand map options for better performance with large datasets, such as vector tiles.
+- **Enhanced Visualization**: Expand map options for better performance with large datasets.
 - **Advanced Analytics**: Add route optimization, geofencing, and alert systems for fleet management.
 
 ## Usage
 
-Configure the connection in the in-app **Settings** panel: enter the Traccar WebSocket URL and optional token. These settings are saved locally and used automatically.
+Configure the connection in the in-app **Settings** panel: enter your Traccar server Base URL, email, and password. These settings are saved locally and used automatically.
 
 The app displays live device positions on an interactive map, with smooth anchoring to reduce GPS noise during stationary periods. Use debug mode to analyze processing details.
-
-## Development
-
-See [AGENTS.md](AGENTS.md) for development guidelines and coding conventions.
-
----
-
-Built with Bun, React, TypeScript, Tailwind CSS, and MapTiler SDK.
