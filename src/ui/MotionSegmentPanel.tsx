@@ -3,7 +3,7 @@ import { fromWebMercator } from "@/util/webMercator";
 import { X } from "lucide-react";
 import React from "react";
 import type { DebugFrame } from "@/engine/engine";
-import type { MotionSegment, RetrospectiveMotionSegment, Timestamp, Vec2 } from "@/types";
+import type { MotionSegment, RetrospectiveMotionSegment, Timestamp } from "@/types";
 
 type Props = {
   segment: MotionSegment | RetrospectiveMotionSegment;
@@ -26,16 +26,6 @@ function formatTimestamp(ts: Timestamp): string {
   return new Date(ts).toLocaleString();
 }
 
-function pathDistance(path: Vec2[]): number {
-  let dist = 0;
-  for (let i = 1; i < path.length; i++) {
-    const dx = path[i]![0] - path[i - 1]![0];
-    const dy = path[i]![1] - path[i - 1]![1];
-    dist += Math.sqrt(dx * dx + dy * dy);
-  }
-  return dist;
-}
-
 function isRetrospectiveSegment(seg: MotionSegment | RetrospectiveMotionSegment): seg is RetrospectiveMotionSegment {
   return 'confidence' in seg;
 }
@@ -43,9 +33,9 @@ function isRetrospectiveSegment(seg: MotionSegment | RetrospectiveMotionSegment)
 function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
   const startTime = segment.startTime;
   const endTime = segment.endTime ?? Date.now();
-  const duration = React.useMemo(() => endTime - startTime, [startTime, endTime]);
-  const distance = React.useMemo(() => pathDistance(segment.path), [segment.path]);
-  const avgSpeedKmh = React.useMemo(() => duration > 0 ? (distance / 1000) / (duration / 3600000) : 0, [distance, duration]);
+  const duration = segment.duration;
+  const distance = segment.distance;
+  const avgSpeedKmh = duration > 0 ? (distance / 1000) / (duration / 3600000) : 0;
 
   const isRetro = isRetrospectiveSegment(segment);
 

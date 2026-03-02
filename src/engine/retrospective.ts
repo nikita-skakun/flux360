@@ -1,20 +1,7 @@
 import { distanceSquared } from "@/util/geo";
 import { MOTION_PROFILES } from "./motionDetector";
 import { toWebMercator } from "@/util/webMercator";
-import type { NormalizedPosition, Vec2, MotionProfileName, Timestamp } from "@/types";
-
-export type RetrospectiveMotionSegment = {
-  startTime: Timestamp;
-  endTime: Timestamp;
-  startPosition: Vec2;
-  endPosition: Vec2;
-  path: Vec2[];
-  confidence: number;
-};
-
-export type RetrospectiveResult = {
-  motionSegments: RetrospectiveMotionSegment[];
-};
+import type { NormalizedPosition, Vec2, MotionProfileName, Timestamp, RetrospectiveMotionSegment, RetrospectiveResult } from "@/types";
 
 function computePathExtent(points: Vec2[]): number {
   if (points.length < 2) return 0;
@@ -209,7 +196,9 @@ export function analyzeMotion(
       startPosition: from.center,
       endPosition: to.center,
       path: [from.center, ...pathPoints, to.center],
-      confidence: 1.0
+      confidence: 1.0,
+      distance: extent,
+      duration: to.startTime - from.endTime
     });
   }
 
@@ -235,7 +224,9 @@ export function analyzeMotion(
           startPosition: lastInterval.center,
           endPosition: meterPoints[len - 1]!.mean,
           path: [lastInterval.center, ...pathPoints],
-          confidence: 0.8
+          confidence: 0.8,
+          distance: extent,
+          duration: meterPoints[len - 1]!.timestamp - lastInterval.endTime
         });
       }
     }
@@ -255,7 +246,9 @@ export function analyzeMotion(
         startPosition: meterPoints[0]!.mean,
         endPosition: meterPoints[len - 1]!.mean,
         path: pathPoints,
-        confidence: 0.5
+        confidence: 0.5,
+        distance: extent,
+        duration: meterPoints[len - 1]!.timestamp - meterPoints[0]!.timestamp
       });
     }
   }
@@ -264,19 +257,11 @@ export function analyzeMotion(
 }
 
 export function analyzeAllDevices(
-  positions: NormalizedPosition[],
+  positionsByDevice: Map<number, NormalizedPosition[]>,
   deviceIds: number[],
   motionProfiles: Record<number, MotionProfileName>
 ): Map<number, RetrospectiveResult> {
   const results = new Map<number, RetrospectiveResult>();
-  const positionsByDevice = new Map<number, NormalizedPosition[]>();
-
-  for (const p of positions) {
-    if (!positionsByDevice.has(p.device)) {
-      positionsByDevice.set(p.device, []);
-    }
-    positionsByDevice.get(p.device)!.push(p);
-  }
 
   for (const deviceId of deviceIds) {
     const profile = motionProfiles[deviceId] ?? "person";

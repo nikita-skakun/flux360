@@ -416,12 +416,18 @@ export const useStore = create<Store>()(
       },
 
       addPositions: (positions: NormalizedPosition[]) => {
-        set(state => ({
-          refs: {
-            ...state.refs,
-            positionsAll: [...state.refs.positionsAll, ...positions],
-          }
-        }));
+        set(state => {
+          const newPositions = [...state.refs.positionsAll, ...positions];
+          // Sort once here so engine and retrospective don't have to
+          newPositions.sort((a, b) => a.timestamp - b.timestamp);
+
+          return {
+            refs: {
+              ...state.refs,
+              positionsAll: newPositions,
+            }
+          };
+        });
 
         const { processPositions, runRetrospectiveAnalysis } = get();
         processPositions();
@@ -594,8 +600,17 @@ export const useStore = create<Store>()(
             const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
               Object.entries(state.devices).map(([id, d]) => [id, d.effectiveMotionProfile])
             );
+
+            // Group positions by device for efficient retrospective analysis
+            const positionsByDevice = new Map<number, NormalizedPosition[]>();
+            for (const p of state.refs.positionsAll) {
+              const list = positionsByDevice.get(p.device) ?? [];
+              if (list.length === 0) positionsByDevice.set(p.device, list);
+              list.push(p);
+            }
+
             const results = analyzeAllDevices(
-              state.refs.positionsAll,
+              positionsByDevice,
               deviceIds,
               motionProfiles
             );

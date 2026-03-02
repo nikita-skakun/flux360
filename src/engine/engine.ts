@@ -286,7 +286,9 @@ export class Engine {
                   endAnchor: null,
                   path: [this.activeAnchor.mean],
                   startTime: this.motionStartTimestamp ?? m.timestamp,
-                  endTime: null
+                  endTime: null,
+                  distance: 0,
+                  duration: 0,
                 };
               }
             }
@@ -305,9 +307,15 @@ export class Engine {
               this.currentMotionSegment.endAnchor = this.activeAnchor.clone();
               this.currentMotionSegment.path.push(this.activeAnchor.mean);
               this.currentMotionSegment.endTime = m.timestamp;
-              // Only keep segments with meaningful path length (> 1 meter)
-              const pathLength = this.computePathLength(this.currentMotionSegment.path);
-              if (pathLength > 1.0) {
+              this.currentMotionSegment.duration = this.currentMotionSegment.endTime - this.currentMotionSegment.startTime;
+              this.currentMotionSegment.distance = this.computePathLength(this.currentMotionSegment.path);
+
+              // Use distanceSquared for fast 1m pruning (1m^2 = 1)
+              const start = this.currentMotionSegment.path[0];
+              const end = this.activeAnchor.mean;
+              const directDistSq = start && end ? distanceSquared(start, end) : 0;
+
+              if (this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0) {
                 this.motionSegments.push(this.currentMotionSegment);
               }
               this.currentMotionSegment = null;
@@ -338,9 +346,14 @@ export class Engine {
                 this.currentMotionSegment.endAnchor = newAnchor;
                 this.currentMotionSegment.path.push(newAnchor.mean);
                 this.currentMotionSegment.endTime = m.timestamp;
-                // Only keep segments with meaningful path length (> 1 meter)
-                const pathLength = this.computePathLength(this.currentMotionSegment.path);
-                if (pathLength > 1.0) {
+                this.currentMotionSegment.duration = this.currentMotionSegment.endTime - this.currentMotionSegment.startTime;
+                this.currentMotionSegment.distance = this.computePathLength(this.currentMotionSegment.path);
+
+                const start = this.currentMotionSegment.path[0];
+                const end = newAnchor.mean;
+                const directDistSq = start && end ? distanceSquared(start, end) : 0;
+
+                if (this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0) {
                   this.motionSegments.push(this.currentMotionSegment);
                 }
                 this.currentMotionSegment = null;
@@ -425,6 +438,8 @@ export class Engine {
         path: structuredClone(s.path),
         startTime: s.startTime,
         endTime: s.endTime,
+        distance: s.distance,
+        duration: s.duration,
       })),
       currentMotionSegment: this.currentMotionSegment ? {
         startAnchor: this.currentMotionSegment.startAnchor.clone(),
@@ -432,6 +447,8 @@ export class Engine {
         path: structuredClone(this.currentMotionSegment.path),
         startTime: this.currentMotionSegment.startTime,
         endTime: this.currentMotionSegment.endTime,
+        distance: this.currentMotionSegment.distance,
+        duration: this.currentMotionSegment.duration,
       } : null,
     };
   }
@@ -464,6 +481,8 @@ export class Engine {
       path: structuredClone(s.path),
       startTime: s.startTime,
       endTime: s.endTime,
+      distance: s.distance,
+      duration: s.duration,
     }));
     this.currentMotionSegment = state.currentMotionSegment ? {
       startAnchor: state.currentMotionSegment.startAnchor.clone(),
@@ -471,6 +490,8 @@ export class Engine {
       path: structuredClone(state.currentMotionSegment.path),
       startTime: state.currentMotionSegment.startTime,
       endTime: state.currentMotionSegment.endTime,
+      distance: state.currentMotionSegment.distance,
+      duration: state.currentMotionSegment.duration,
     } : null;
   }
 }
