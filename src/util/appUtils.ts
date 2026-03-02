@@ -1,6 +1,6 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
 import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2, Timestamp } from "@/types";
-import { fromWebMercator } from "@/util/webMercator";
+import { fromWebMercator, toWebMercator } from "@/util/webMercator";
 
 export function dedupeKey(p: { device: number; timestamp: Timestamp; lat: number; lon: number }) {
   return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
@@ -68,10 +68,21 @@ export function buildEngineSnapshotsFromByDevice(
           const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
           const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
 
-          if (engine.motionActive) {
+          if (engine.currentMotionSegment) {
             const latestRaw = allPosByDevice.get(dId)?.at(-1);
             if (latestRaw) {
-              const point: DevicePoint = { mean: [0, 0], variance: 0, timestamp: latestRaw.timestamp, device: dId, lat: latestRaw.lat, lon: latestRaw.lon, accuracy: latestRaw.accuracy, anchorAgeMs: 0, confidence: 1, sourceDeviceId: undefined };
+              const point: DevicePoint = {
+                mean: toWebMercator([latestRaw.lon, latestRaw.lat]),
+                variance: measurementVarianceFromAccuracy(latestRaw.accuracy),
+                timestamp: latestRaw.timestamp,
+                device: dId,
+                lat: latestRaw.lat,
+                lon: latestRaw.lon,
+                accuracy: latestRaw.accuracy,
+                anchorAgeMs: 0,
+                confidence: 1,
+                sourceDeviceId: groupIdsRef.has(dId) ? latestRaw.device : undefined
+              };
               currentSnapshots[dId] = [point];
               continue;
             }

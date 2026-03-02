@@ -107,12 +107,26 @@ export function computeProcessedPositions(
     // Pre-index all positions by deviceId once to avoid O(N*E) filters
     const allPosByDevice = new Map<number, NormalizedPosition[]>();
     for (const p of positionsAll) {
+        // Add to individual device list
         let list = allPosByDevice.get(p.device);
         if (!list) {
             list = [];
             allPosByDevice.set(p.device, list);
         }
         list.push(p);
+
+        // Also add to any group this device belongs to
+        const groups = deviceToGroupsMap.get(p.device);
+        if (groups) {
+            for (const groupId of groups) {
+                let groupList = allPosByDevice.get(groupId);
+                if (!groupList) {
+                    groupList = [];
+                    allPosByDevice.set(groupId, groupList);
+                }
+                groupList.push(p);
+            }
+        }
     }
 
     const newPositions = positionsAll.filter((p: NormalizedPosition) => {

@@ -13,8 +13,6 @@ export type EngineState = {
   closedAnchors: Anchor[];
   lastTimestamp: Timestamp | null;
   motionProfile: MotionProfileName;
-  motionActive: boolean;
-  motionStartTimestamp: Timestamp | null;
   outliers: OutlierSample[];
   recentMotionPoints: DevicePoint[];
   debugFrames: DebugFrame[];
@@ -30,7 +28,6 @@ export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'none' | 'n
 export type DebugFrame = {
   timestamp: Timestamp;
   sourceDeviceId: number | undefined;
-  motionActive: boolean;
   motionStartTimestamp: Timestamp | null;
   outlierCount: number;
   motionScore: number | null;
@@ -52,15 +49,13 @@ export class Engine {
   closedAnchors: Anchor[] = [];
   lastTimestamp: Timestamp | null = null;
   motionProfile: MotionProfileName = "person";
-  motionActive: boolean = false;
-  motionStartTimestamp: Timestamp | null = null;
   private outliers: OutlierSample[] = [];
   private recentMotionPoints: DevicePoint[] = [];
   // debug buffer (per-engine)
   private debugFrames: DebugFrame[] = [];
   private seenDebugKeys = new Set<string>();
   motionSegments: MotionSegment[] = [];
-  private currentMotionSegment: MotionSegment | null = null;
+  currentMotionSegment: MotionSegment | null = null;
 
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
 
@@ -206,8 +201,6 @@ export class Engine {
         // Initialize with the first measurement
         this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp, m.timestamp);
 
-        this.motionActive = false;
-        this.motionStartTimestamp = null;
         this.outliers = [];
         this.recentMotionPoints = [];
         decision = 'initialized';
@@ -215,7 +208,7 @@ export class Engine {
         const dist2Active = this.activeAnchor.mahalanobis2(m);
         mahalanobis2 = dist2Active;
 
-        if (!this.motionActive) {
+        if (!this.currentMotionSegment) {
           if (dist2Active < profile.stationaryMahalanobisThreshold) {
             // Detect stationary drift: when reports consistently fall outside the anchor's accuracy circle,
             // we inflate the anchor's variance to allow it to move toward the new position.
@@ -274,8 +267,7 @@ export class Engine {
               const bufferTriggers = adjustedScore >= profile.motionScoreThreshold && (this.outliers.length >= 2 || motionSinglePointOverride);
 
               if (singlePointTriggers || bufferTriggers) {
-                this.motionActive = true;
-                this.motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
+                const motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
                 this.recentMotionPoints = [];
                 this.recentMotionPoints.push(m);
                 this.outliers = [];
@@ -285,7 +277,7 @@ export class Engine {
                   startAnchor: this.activeAnchor.clone(),
                   endAnchor: null,
                   path: [this.activeAnchor.mean],
-                  startTime: this.motionStartTimestamp ?? m.timestamp,
+                  startTime: motionStartTimestamp,
                   endTime: null,
                   distance: 0,
                   duration: 0,
@@ -295,8 +287,6 @@ export class Engine {
           }
         } else {
           if (dist2Active < profile.stationaryMahalanobisThreshold) {
-            this.motionActive = false;
-            this.motionStartTimestamp = null;
             this.outliers = [];
             this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
 
@@ -335,8 +325,6 @@ export class Engine {
               this.closedAnchors.push(this.activeAnchor);
               const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
               this.activeAnchor = newAnchor;
-              this.motionActive = false;
-              this.motionStartTimestamp = null;
               this.outliers = [];
               this.recentMotionPoints = [];
               decision = 'motion-end';
@@ -370,8 +358,7 @@ export class Engine {
       this.pushDebugFrame({
         timestamp: m.timestamp,
         sourceDeviceId: m.sourceDeviceId,
-        motionActive: this.motionActive,
-        motionStartTimestamp: this.motionStartTimestamp,
+        motionStartTimestamp: this.currentMotionSegment?.startTime ?? null,
         outlierCount: this.outliers.length,
         motionScore,
         motionScoreSum,
@@ -426,8 +413,6 @@ export class Engine {
       closedAnchors: this.closedAnchors.map(a => a.clone()),
       lastTimestamp: this.lastTimestamp,
       motionProfile: this.motionProfile,
-      motionActive: this.motionActive,
-      motionStartTimestamp: this.motionStartTimestamp,
       outliers: structuredClone(this.outliers), // Use structuredClone for deep copy
       recentMotionPoints: structuredClone(this.recentMotionPoints),
       debugFrames: [...this.debugFrames],
@@ -469,8 +454,6 @@ export class Engine {
     this.closedAnchors = state.closedAnchors.map(a => a.clone());
     this.lastTimestamp = state.lastTimestamp;
     this.motionProfile = state.motionProfile;
-    this.motionActive = state.motionActive;
-    this.motionStartTimestamp = state.motionStartTimestamp;
     this.outliers = structuredClone(state.outliers);
     this.recentMotionPoints = structuredClone(state.recentMotionPoints);
     this.debugFrames = [...state.debugFrames];

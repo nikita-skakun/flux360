@@ -150,7 +150,7 @@ function DeviceOverlayComponent({
               <div>Accuracy: {Math.round(chosenFrame.measurement.accuracy)} m</div>
               <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
               {chosenFrame.trendSeparation != null ? <div>Trend separation: {chosenFrame.trendSeparation.toFixed(1)} m</div> : null}
-              <div>Motion active: {chosenFrame.motionActive ? 'yes' : 'no'}</div>
+              <div>Motion active: {chosenFrame.motionStartTimestamp != null ? 'yes' : 'no'}</div>
               {chosenFrame.motionStartTimestamp != null ? <div>Motion start: {new Date(chosenFrame.motionStartTimestamp).toLocaleString()}</div> : null}
               {chosenFrame.motionDistance != null ? <div>Motion distance: {Math.round(chosenFrame.motionDistance)} m</div> : null}
               {chosenFrame.motionScore != null || chosenFrame.motionScoreSum != null ? <div>Motion score: {chosenFrame.motionScoreSum?.toFixed(2)} (+{chosenFrame.motionScore?.toFixed(2)})</div> : null}

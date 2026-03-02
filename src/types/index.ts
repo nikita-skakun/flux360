@@ -33,6 +33,7 @@ export type DebugFrameView = {
     lastUpdateTimestamp: Timestamp;
   } | null;
   timestamp: Timestamp;
+  motionStartTimestamp: Timestamp | null;
 };
 
 export type DevicePoint = {

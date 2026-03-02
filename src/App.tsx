@@ -205,6 +205,7 @@ export function App() {
       measurement: { ...f.measurement },
       anchor: f.anchor ? { ...f.anchor } : null,
       timestamp: f.timestamp,
+      motionStartTimestamp: f.motionStartTimestamp,
     };
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
