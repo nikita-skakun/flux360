@@ -18,8 +18,7 @@ export type DebugAnchor = {
 export type DebugFrameView = {
   /** GPS measurement: geographic position + accuracy radius in meters. */
   measurement: {
-    lat: number;
-    lon: number;
+    geo: Vec2;
     accuracy: number;
     mean: Vec2;
     variance: number;
@@ -39,21 +38,18 @@ export type DebugFrameView = {
 export type DevicePoint = {
   device: number;
   sourceDeviceId: number | undefined;
-  lat: number;
-  lon: number;
+  geo: Vec2;
   mean: Vec2;
-  variance: number;
   timestamp: Timestamp;
   accuracy: number;
-  anchorAgeMs: number;
+  anchorStartTimestamp: Timestamp;
   confidence: number;
 };
 
 export type NormalizedPosition = {
   device: number;
   timestamp: Timestamp;
-  lat: number;
-  lon: number;
+  geo: Vec2;
   accuracy: number; // meters
 };
 

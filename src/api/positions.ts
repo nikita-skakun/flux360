@@ -17,8 +17,7 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
   return {
     device: deviceId,
     timestamp: ts,
-    lat,
-    lon,
+    geo: [lon, lat],
     accuracy: typeof obj["accuracy"] === "number" ? obj["accuracy"] : 100,
   };
 }

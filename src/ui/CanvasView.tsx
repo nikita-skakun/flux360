@@ -89,12 +89,19 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       if (!best) return null;
       // Use processedComponentsRef which already has member devices filtered out
       const items = best.cluster.items
-        .map((it) => processedComponentsRef.current[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint));
+        .map((it) => processedComponentsRef.current[it.idx])
+        .filter((c): c is DevicePoint => !!c);
       if (items.length === 0) return null;
       return { items, x: best.cluster.x, y: best.cluster.y };
     },
     getClusters: () => {
-      return clustersRef.current.map((cl) => ({ items: cl.items.map((it) => processedComponentsRef.current[it.idx] ?? ({ device: it.device, mean: [0, 0], variance: 100, lat: 0, lon: 0, timestamp: it.timestamp, accuracy: 0, anchorAgeMs: 0, confidence: 0 } as DevicePoint)), x: cl.x, y: cl.y }));
+      return clustersRef.current.map((cl) => ({
+        items: cl.items
+          .map((it) => processedComponentsRef.current[it.idx])
+          .filter((c): c is DevicePoint => !!c),
+        x: cl.x,
+        y: cl.y
+      }));
     },
     hitTestAnchor: (px: number, py: number) => {
       if (!debugAnchorsRef.current.length) return null;
@@ -189,8 +196,8 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
       .filter(c => !memberDeviceIds?.has(c.device)) // Hide member devices of groups on the map
       .map(c => {
         const mean: Vec2 = Array.isArray(c.mean) && c.mean.length === 2 ? c.mean : [0, 0];
-        const variance = typeof c.variance === 'number' ? c.variance : 100;
-        return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, variance, radiusMeters: getRadiusFromVariance(variance), color: getColorForDevice(c.device, deviceColors[c.device]) };
+        const accuracy = typeof c.accuracy === 'number' ? c.accuracy : 10;
+        return { device: c.device, iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(), timestamp: c.timestamp, mean, accuracy, radiusMeters: accuracy, color: getColorForDevice(c.device, deviceColors[c.device]) };
       });
 
     // Store processed components for hit testing (indices in drawItems refer to this array)

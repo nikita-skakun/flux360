@@ -27,7 +27,7 @@ function computePathExtent(points: Vec2[]): number {
 function toMeterPoint(
   p: NormalizedPosition
 ): { mean: Vec2; timestamp: Timestamp; accuracy: number } {
-  return { mean: toWebMercator([p.lon, p.lat]), timestamp: p.timestamp, accuracy: p.accuracy };
+  return { mean: toWebMercator(p.geo), timestamp: p.timestamp, accuracy: p.accuracy };
 }
 
 function getDynamicRadius(accuracy: number, maxStationaryRadius: number): number {

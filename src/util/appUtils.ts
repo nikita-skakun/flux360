@@ -2,25 +2,8 @@ import { Engine, type EngineSnapshot } from "@/engine/engine";
 import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2, Timestamp } from "@/types";
 import { fromWebMercator, toWebMercator } from "@/util/webMercator";
 
-export function dedupeKey(p: { device: number; timestamp: Timestamp; lat: number; lon: number }) {
-  return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
-}
-
-export function measurementVarianceFromAccuracy(accuracyMeters: number) {
-  return accuracyMeters * accuracyMeters;
-}
-
-export function createDevicePoint(
-  mean: Vec2,
-  variance: number,
-  timestamp: Timestamp,
-  deviceId: number,
-  geo: Vec2,
-  anchorAgeMs: number,
-  confidence: number
-): DevicePoint {
-  const accuracyVal = Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, variance))));
-  return { mean, variance, timestamp, device: deviceId, lat: geo[1], lon: geo[0], accuracy: accuracyVal, anchorAgeMs, confidence, sourceDeviceId: undefined };
+export function dedupeKey(p: { device: number; timestamp: Timestamp; geo: Vec2 }) {
+  return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -58,28 +41,24 @@ export function buildEngineSnapshotsFromByDevice(
         const engine = enginesRef.get(deviceId);
         if (!engine) continue;
         const snapshot = engine.getCurrentSnapshot();
-        snapshotsByDevice.set(Number(deviceId), [snapshot]);
-        motionSegments[deviceId] = engine.motionSegments;
-        if (snapshot.activeAnchor) {
-          // Use the latest timestamp from the measurements we just processed, not engine.lastTimestamp
+        if (snapshot) {
+          snapshotsByDevice.set(Number(deviceId), [snapshot]);
+          motionSegments[deviceId] = engine.motionSegments;
+
           const dId = Number(deviceId);
           const measurements: DevicePoint[] = measurementsByDevice[dId] ?? [];
-          const timestamp = measurements.at(-1)?.timestamp ?? engine.lastTimestamp ?? Date.now();
-          const anchorStartTs = (typeof snapshot.activeAnchor.startTimestamp === 'number' && Number.isFinite(snapshot.activeAnchor.startTimestamp)) ? snapshot.activeAnchor.startTimestamp : timestamp;
-          const anchorAgeMs = Math.max(0, Date.now() - anchorStartTs);
+          const timestamp = measurements.at(-1)?.timestamp ?? engine.lastTimestamp ?? Date.now() as Timestamp;
 
           if (engine.currentMotionSegment) {
             const latestRaw = allPosByDevice.get(dId)?.at(-1);
             if (latestRaw) {
               const point: DevicePoint = {
-                mean: toWebMercator([latestRaw.lon, latestRaw.lat]),
-                variance: measurementVarianceFromAccuracy(latestRaw.accuracy),
+                mean: toWebMercator(latestRaw.geo),
                 timestamp: latestRaw.timestamp,
                 device: dId,
-                lat: latestRaw.lat,
-                lon: latestRaw.lon,
+                geo: latestRaw.geo,
                 accuracy: latestRaw.accuracy,
-                anchorAgeMs: 0,
+                anchorStartTimestamp: snapshot.activeAnchor.startTimestamp,
                 confidence: 1,
                 sourceDeviceId: groupIdsRef.has(dId) ? latestRaw.device : undefined
               };
@@ -88,8 +67,16 @@ export function buildEngineSnapshotsFromByDevice(
             }
           }
 
-          // Convert anchor mean to lat/lon from Web Mercator
-          const point = createDevicePoint(snapshot.activeAnchor.mean, snapshot.activeAnchor.variance, timestamp, dId, fromWebMercator(snapshot.activeAnchor.mean), anchorAgeMs, snapshot.activeConfidence);
+          const point: DevicePoint = {
+            mean: snapshot.activeAnchor.mean,
+            timestamp,
+            device: dId,
+            geo: fromWebMercator(snapshot.activeAnchor.mean),
+            accuracy: Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, snapshot.activeAnchor.variance)))),
+            anchorStartTimestamp: snapshot.activeAnchor.startTimestamp,
+            confidence: snapshot.activeConfidence,
+            sourceDeviceId: undefined
+          };
           currentSnapshots[dId] = [point];
         } else {
           currentSnapshots[Number(deviceId)] = [];

@@ -94,7 +94,7 @@ function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
             <div key={idx} className="border-b border-border/50 pb-1 last:border-0">
               <div className="font-medium">{new Date(frame.timestamp).toLocaleTimeString()}</div>
               <div>Accuracy: {Math.round(frame.measurement.accuracy)}m</div>
-              <div>Location: {frame.measurement.lat.toFixed(5)}, {frame.measurement.lon.toFixed(5)}</div>
+              <div>Location: {frame.measurement.geo[1].toFixed(5)}, {frame.measurement.geo[0].toFixed(5)}</div>
               <div>Mahal²: {frame.mahalanobis2?.toFixed(2) ?? '—'}</div>
             </div>
           ))

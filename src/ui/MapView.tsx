@@ -75,12 +75,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const device = componentsRef.current.find(c => c.device === id);
     if (!device) return;
 
-    const target = [device.lon, device.lat] as Vec2;
-
     const center = map.getCenter();
     let duration = 800;
     if (center) {
-      const distanceDeg = distance([target[0], target[1]], [center.lng, center.lat]);
+      const distanceDeg = distance(device.geo, [center.lng, center.lat]);
 
       const minDuration = 300;
       const maxDuration = 2500;
@@ -89,7 +87,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       duration = Math.round(minDuration + t * (maxDuration - minDuration));
     }
 
-    map.flyTo({ center: target, zoom: 18, duration });
+    map.flyTo({ center: device.geo, zoom: 18, duration });
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -107,7 +105,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     // Project components to screen coords
     const drawItems: (DrawItem & { colorHex: string })[] = components.map((c, idx) => {
-      const pt = map.project([c.lon, c.lat]);
+      const pt = map.project(c.geo);
       const colorHex = deviceColors[c.device] ?? '#3b82f6';
       const colorRgb = getColorForDevice(c.device, colorHex);
       return {
@@ -155,7 +153,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (isClustered) {
         dotsFeatures.push({
           type: 'Feature',
-          geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
+          geometry: { type: 'Point', coordinates: c.geo },
           properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` },
         });
       } else {
@@ -170,14 +168,14 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         }
         individualsFeatures.push({
           type: 'Feature',
-          geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
+          geometry: { type: 'Point', coordinates: c.geo },
           properties: { imageKey, device: item.device },
         });
       }
 
       // Always draw accuracy circle for selected device regardless of cluster state
       if (c.device === selectedDeviceId && c.accuracy > 0) {
-        const [cx, cy] = toWebMercator([c.lon, c.lat]);
+        const [cx, cy] = toWebMercator(c.geo);
         const pts = 64;
         const coords: Vec2[] = [];
         for (let j = 0; j <= pts; j++) {
@@ -212,7 +210,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         // Red line connecting measurement center to anchor center
         debugFrameFeatures.push({
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: [[debugFrame.measurement.lon, debugFrame.measurement.lat], fromWebMercator(debugFrame.anchor.mean)] },
+          geometry: { type: 'LineString', coordinates: [debugFrame.measurement.geo, fromWebMercator(debugFrame.anchor.mean)] },
           properties: { kind: 'link' },
         } as FrameFeature);
       }
@@ -265,8 +263,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
       const selComp = selItem ? components[selItem.idx] : null;
-      const markerLng = selComp ? selComp.lon : cl.items.reduce((sum, it) => sum + (components[it.idx]?.lon ?? 0), 0) / cl.size;
-      const markerLat = selComp ? selComp.lat : cl.items.reduce((sum, it) => sum + (components[it.idx]?.lat ?? 0), 0) / cl.size;
+      const markerLng = selComp ? selComp.geo[0] : cl.items.reduce((sum, it) => sum + (components[it.idx]?.geo[0] ?? 0), 0) / cl.size;
+      const markerLat = selComp ? selComp.geo[1] : cl.items.reduce((sum, it) => sum + (components[it.idx]?.geo[1] ?? 0), 0) / cl.size;
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
@@ -294,7 +292,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (pulsingDeviceIds.includes(comp.device)) {
         pulsingPointFeatures.push({
           type: 'Feature',
-          geometry: { type: 'Point', coordinates: [comp.lon, comp.lat] },
+          geometry: { type: 'Point', coordinates: comp.geo },
           properties: {},
         });
       }
@@ -467,7 +465,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     const firstComp = componentsRef.current[0];
     if (firstComp) {
-      initialCenter = [firstComp.lon, firstComp.lat];
+      initialCenter = firstComp.geo;
       initialZoom = 15;
     }
 
@@ -575,11 +573,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       const coords = features?.[0]?.geometry as Point;
       if (memberIds && memberIds.length > 0 && coords) {
         const screen = map.project(coords.coordinates as Vec2);
-        const items: DevicePoint[] = memberIds.map(deviceId => {
-          const comp = componentsRef.current.find(c => c.device === deviceId);
-          if (comp) return { ...comp };
-          return { device: deviceId, sourceDeviceId: undefined, mean: [0, 0] as Vec2, variance: 100, lat: 0, lon: 0, timestamp: 0, accuracy: 0, anchorAgeMs: 0, confidence: 0 };
-        });
+        const items: DevicePoint[] = memberIds
+          .map(deviceId => componentsRef.current.find(c => c.device === deviceId))
+          .filter((c): c is DevicePoint => !!c);
         setClusterPopup({ x: screen.x, y: screen.y, items });
       }
     };
@@ -657,25 +653,25 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const c = componentsRef.current;
     if (c.length === 0) return;
 
-    let sw: { lat: number, lon: number }, ne: { lat: number, lon: number };
+    let sw: Vec2, ne: Vec2;
 
     if (c.length > 0) {
       let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
       for (const comp of c) {
-        minLat = Math.min(minLat, comp.lat);
-        minLon = Math.min(minLon, comp.lon);
-        maxLat = Math.max(maxLat, comp.lat);
-        maxLon = Math.max(maxLon, comp.lon);
+        minLat = Math.min(minLat, comp.geo[1]);
+        minLon = Math.min(minLon, comp.geo[0]);
+        maxLat = Math.max(maxLat, comp.geo[1]);
+        maxLon = Math.max(maxLon, comp.geo[0]);
       }
       const padding = 0.005;
-      sw = { lat: minLat - padding, lon: minLon - padding };
-      ne = { lat: maxLat + padding, lon: maxLon + padding };
+      sw = [minLon - padding, minLat - padding];
+      ne = [maxLon + padding, maxLat + padding];
     } else {
       return;
     }
 
     map.fitBounds(
-      [sw.lon, sw.lat, ne.lon, ne.lat],
+      [sw[0], sw[1], ne[0], ne[1]],
       { padding: 40, maxZoom: 18, duration: 0 }
     );
 

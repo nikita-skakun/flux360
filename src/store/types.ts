@@ -80,7 +80,7 @@ export type StoreActions = {
 
   // Positions
   addPositions: (positions: NormalizedPosition[]) => void;
-  processPositions: () => { lat: number; lon: number } | null;
+  processPositions: () => null;
 
   // Settings
   applySettings: () => void;

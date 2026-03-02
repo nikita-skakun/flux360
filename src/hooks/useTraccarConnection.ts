@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import type { NormalizedPosition, Timestamp } from "@/types";
+import type { NormalizedPosition, Timestamp, Vec2 } from "@/types";
 
 import type { TraccarDevice } from "@/api/devices";
 
@@ -22,8 +22,8 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
   const seenRef = useRef<Set<string>>(new Set());
   const knownDevices = useRef<Set<number>>(new Set());
 
-  function dedupeKey(p: { device: number; timestamp: Timestamp; lat: number; lon: number }) {
-    return `${p.device}:${p.timestamp}:${p.lat}:${p.lon}`;
+  function dedupeKey(p: { device: number; timestamp: Timestamp; geo: Vec2 }) {
+    return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
   }
 
   useEffect(() => {

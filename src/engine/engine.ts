@@ -5,14 +5,12 @@ import { fromWebMercator, WORLD_R } from "@/util/webMercator";
 import type { DevicePoint, MotionProfileName, MotionSegment, Timestamp, Vec2 } from "@/types";
 
 // Snapshot for UI/Historical view
-export type EngineSnapshot = { activeAnchor: Anchor | null; closedAnchors: Anchor[]; timestamp: Timestamp | null; activeConfidence: number };
+export type EngineSnapshot = { activeAnchor: Anchor; closedAnchors: Anchor[]; timestamp: Timestamp | null; activeConfidence: number };
 
 // Full engine state for checkpointing
 export type EngineState = {
   activeAnchor: Anchor | null;
   closedAnchors: Anchor[];
-  lastTimestamp: Timestamp | null;
-  motionProfile: MotionProfileName;
   outliers: OutlierSample[];
   recentMotionPoints: DevicePoint[];
   debugFrames: DebugFrame[];
@@ -37,7 +35,7 @@ export type DebugFrame = {
   motionTimeFactor: number | null;
   motionSinglePointOverride: boolean | null;
   anchorVarianceScale: number | null;
-  measurement: { lat: number; lon: number; accuracy: number; mean: Vec2; variance: number; };
+  measurement: { geo: Vec2; accuracy: number; mean: Vec2; variance: number; };
   anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: Timestamp; lastUpdateTimestamp: Timestamp } | null;
   mahalanobis2: number | null;
   decision: DebugDecision;
@@ -90,7 +88,7 @@ export class Engine {
 
   private computeAverageVariance(points: DevicePoint[]): number {
     let sum = 0;
-    for (const p of points) sum += p.variance;
+    for (const p of points) sum += p.accuracy * p.accuracy;
     return sum / points.length;
   }
 
@@ -125,7 +123,7 @@ export class Engine {
       const dy = p.mean[1] - centroid[1];
       // Variance of centroid is approximately average variance / N
       // But for consistency check, comparing to centroid with single point variance is a good proxy
-      const mahal = (dx * dx + dy * dy) / p.variance;
+      const mahal = (dx * dx + dy * dy) / (p.accuracy * p.accuracy);
       if (mahal >= threshold) return false;
     }
     return true;
@@ -175,7 +173,7 @@ export class Engine {
   }
 
   private pushDebugFrame(frame: DebugFrame) {
-    const key = `${frame.timestamp}:${frame.measurement.lat}:${frame.measurement.lon}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''}`;
+    const key = `${frame.timestamp}:${frame.measurement.geo[0]}:${frame.measurement.geo[1]}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''} `;
     if (this.seenDebugKeys.has(key)) return;
     this.seenDebugKeys.add(key);
     this.debugFrames.push(frame);
@@ -199,13 +197,15 @@ export class Engine {
 
       if (this.activeAnchor === null) {
         // Initialize with the first measurement
-        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], m.variance, m.timestamp, m.timestamp);
+        const initialVariance = m.accuracy * m.accuracy;
+        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], initialVariance, m.timestamp, m.timestamp);
 
         this.outliers = [];
         this.recentMotionPoints = [];
         decision = 'initialized';
       } else {
-        const dist2Active = this.activeAnchor.mahalanobis2(m);
+        const mVariance = m.accuracy * m.accuracy;
+        const dist2Active = this.activeAnchor.mahalanobis2(m.mean, mVariance);
         mahalanobis2 = dist2Active;
 
         if (!this.currentMotionSegment) {
@@ -221,12 +221,12 @@ export class Engine {
             if (separation > 0) {
               // Accuracy circles don't overlap: inflate variance proportionally to separation.
               // Division by variance (accuracy²) ensures inaccurate reports have minimal impact.
-              const inflation = 1 + (separation / m.variance) * profile.trendVarianceInflation;
+              const inflation = 1 + (separation / (m.accuracy * m.accuracy)) * profile.trendVarianceInflation;
               this.activeAnchor.variance *= inflation;
               this.activeAnchor.confidence /= inflation;
             }
 
-            this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
+            this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, m.accuracy * m.accuracy, m.timestamp, GAIN_RATE);
             decision = 'updated';
 
             this.outliers = [];
@@ -237,10 +237,9 @@ export class Engine {
             const distToMean = distance(this.activeAnchor.mean, m.mean);
             if (distToMean < m.accuracy * profile.minDistanceAccuracyRatio || distToMean <= Math.sqrt(this.activeAnchor.variance) + m.accuracy) {
               // Center is within the noise-gate radius, OR the GPS circles still overlap —
-              // both cases are geometrically consistent with being stationary.
-              const weakVariance = m.variance * profile.weakVarianceInflation;
-              const weakPoint: DevicePoint = { ...m, variance: weakVariance };
-              this.activeAnchor.kalmanUpdate(weakPoint, GAIN_RATE);
+              // Both cases are geometrically consistent with being stationary.
+              const weakVariance = m.accuracy * m.accuracy * profile.weakVarianceInflation;
+              this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, weakVariance, m.timestamp, GAIN_RATE);
               this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
               anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
               decision = 'noise-weak-update';
@@ -286,9 +285,10 @@ export class Engine {
             }
           }
         } else {
+          const dist2Active = this.activeAnchor.mahalanobis2(m.mean, m.accuracy * m.accuracy);
           if (dist2Active < profile.stationaryMahalanobisThreshold) {
             this.outliers = [];
-            this.activeAnchor.kalmanUpdate(m, GAIN_RATE);
+            this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, m.accuracy * m.accuracy, m.timestamp, GAIN_RATE);
 
             decision = 'motion-end';
             // Finalize motion segment
@@ -300,7 +300,6 @@ export class Engine {
               this.currentMotionSegment.duration = this.currentMotionSegment.endTime - this.currentMotionSegment.startTime;
               this.currentMotionSegment.distance = this.computePathLength(this.currentMotionSegment.path);
 
-              // Use distanceSquared for fast 1m pruning (1m^2 = 1)
               const start = this.currentMotionSegment.path[0];
               const end = this.activeAnchor.mean;
               const directDistSq = start && end ? distanceSquared(start, end) : 0;
@@ -367,7 +366,7 @@ export class Engine {
         motionTimeFactor,
         motionSinglePointOverride,
         anchorVarianceScale,
-        measurement: { lat: m.lat, lon: m.lon, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], variance: m.variance },
+        measurement: { geo: m.geo, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], variance: m.accuracy * m.accuracy },
         anchor: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], variance: afterAnchor.variance, confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
         mahalanobis2,
         decision,
@@ -375,13 +374,26 @@ export class Engine {
       });
 
       this.lastTimestamp = m.timestamp;
-      snapshots.push({ activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp, DECAY_RATE_ACTIVE) : 0 });
+      if (this.activeAnchor) {
+        snapshots.push({
+          activeAnchor: this.activeAnchor.clone(),
+          closedAnchors: this.closedAnchors.map(a => a.clone()),
+          timestamp: m.timestamp,
+          activeConfidence: this.activeAnchor.getConfidence(m.timestamp, DECAY_RATE_ACTIVE)
+        });
+      }
     }
     return snapshots;
   }
 
-  getCurrentSnapshot(): EngineSnapshot {
-    return { activeAnchor: this.activeAnchor, closedAnchors: [...this.closedAnchors], timestamp: this.lastTimestamp, activeConfidence: this.activeAnchor ? this.activeAnchor.getConfidence(this.lastTimestamp as Timestamp, DECAY_RATE_ACTIVE) : 0 };
+  getCurrentSnapshot(): EngineSnapshot | null {
+    if (!this.activeAnchor) return null;
+    return {
+      activeAnchor: this.activeAnchor.clone(),
+      closedAnchors: this.closedAnchors.map(a => a.clone()),
+      timestamp: this.lastTimestamp,
+      activeConfidence: this.activeAnchor.getConfidence(this.lastTimestamp ?? Date.now() as Timestamp, DECAY_RATE_ACTIVE)
+    };
   }
 
   getDominantAnchorAt(timestamp: Timestamp): Anchor | null {
@@ -411,10 +423,8 @@ export class Engine {
     return {
       activeAnchor: this.activeAnchor ? this.activeAnchor.clone() : null,
       closedAnchors: this.closedAnchors.map(a => a.clone()),
-      lastTimestamp: this.lastTimestamp,
-      motionProfile: this.motionProfile,
-      outliers: structuredClone(this.outliers), // Use structuredClone for deep copy
-      recentMotionPoints: structuredClone(this.recentMotionPoints),
+      outliers: [...this.outliers],
+      recentMotionPoints: [...this.recentMotionPoints],
       debugFrames: [...this.debugFrames],
       seenDebugKeys: new Set(this.seenDebugKeys),
       motionSegments: this.motionSegments.map(s => ({
@@ -452,10 +462,8 @@ export class Engine {
   restoreSnapshot(state: EngineState): void {
     this.activeAnchor = state.activeAnchor ? state.activeAnchor.clone() : null;
     this.closedAnchors = state.closedAnchors.map(a => a.clone());
-    this.lastTimestamp = state.lastTimestamp;
-    this.motionProfile = state.motionProfile;
-    this.outliers = structuredClone(state.outliers);
-    this.recentMotionPoints = structuredClone(state.recentMotionPoints);
+    this.outliers = [...state.outliers];
+    this.recentMotionPoints = [...state.recentMotionPoints];
     this.debugFrames = [...state.debugFrames];
     this.seenDebugKeys = new Set(state.seenDebugKeys);
     this.motionSegments = state.motionSegments.map(s => ({

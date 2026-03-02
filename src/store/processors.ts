@@ -1,5 +1,5 @@
 import { Engine, type EngineState } from '@/engine/engine';
-import { measurementVarianceFromAccuracy, dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
+import { dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
 import { toWebMercator } from '@/util/webMercator';
 import { rgbToHex } from '@/util/color';
 import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, Timestamp } from '@/types';
@@ -260,14 +260,12 @@ export function computeProcessedPositions(
         const deviceId = Number(deviceKey);
         const rawArr: DevicePoint[] = arr.map((p) => {
             const comp: DevicePoint = {
-                mean: toWebMercator([p.lon, p.lat]),
-                variance: measurementVarianceFromAccuracy(p.accuracy),
+                mean: toWebMercator(p.geo),
                 accuracy: p.accuracy,
-                lat: p.lat,
-                lon: p.lon,
+                geo: p.geo,
                 device: deviceId,
                 timestamp: p.timestamp,
-                anchorAgeMs: 0,
+                anchorStartTimestamp: p.timestamp,
                 confidence: 0,
                 sourceDeviceId: groupIds.has(deviceId) ? p.device : undefined,
             };

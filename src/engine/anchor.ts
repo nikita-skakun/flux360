@@ -1,4 +1,4 @@
-import type { DevicePoint, Timestamp, Vec2 } from "@/types";
+import type { Timestamp, Vec2 } from "@/types";
 
 export const CONFIDENCE_HIGH_THRESHOLD = 0.8;
 export const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
@@ -36,34 +36,33 @@ export class Anchor {
     return "low";
   }
 
-  mahalanobis2(m: DevicePoint): number {
-    const dx = m.mean[0] - this.mean[0];
-    const dy = m.mean[1] - this.mean[1];
+  mahalanobis2(mean: Vec2, variance: number): number {
+    const dx = mean[0] - this.mean[0];
+    const dy = mean[1] - this.mean[1];
     const distanceSq = dx * dx + dy * dy;
-    const totalVariance = Math.max(this.variance + m.variance, 1e-6); // prevent division by zero
+    const totalVariance = Math.max(this.variance + variance, 1e-6); // prevent division by zero
     return distanceSq / totalVariance;
   }
 
-  kalmanUpdate(m: DevicePoint, gainRate: number): void {
+  kalmanUpdate(mean: Vec2, accuracy: number, variance: number, timestamp: Timestamp, gainRate: number): void {
     // Compute gain based on accuracy
-    const accuracy = 1 / (1 + m.accuracy);
-    const gain = gainRate * accuracy;
+    const accuracyFactor = 1 / (1 + accuracy);
+    const gain = gainRate * accuracyFactor;
 
     // Update confidence asymptotically
     this.confidence = 1 - (1 - this.confidence) * Math.exp(-gain);
     this.confidence = Math.max(0, Math.min(1, this.confidence));
 
     // Scalar Kalman filter update
-    const measurementVariance = m.variance;
-    const totalVariance = this.variance + measurementVariance;
+    const totalVariance = this.variance + variance;
     const kalmanGain = this.variance / totalVariance;
 
-    const residualX = m.mean[0] - this.mean[0];
-    const residualY = m.mean[1] - this.mean[1];
+    const residualX = mean[0] - this.mean[0];
+    const residualY = mean[1] - this.mean[1];
     this.mean = [this.mean[0] + kalmanGain * residualX, this.mean[1] + kalmanGain * residualY];
 
     const processNoise = 0.1; // small constant for model uncertainty
     this.variance = (1 - kalmanGain) * this.variance + processNoise;
-    this.lastUpdateTimestamp = m.timestamp;
+    this.lastUpdateTimestamp = timestamp;
   }
 }

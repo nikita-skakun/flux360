@@ -29,7 +29,7 @@ export type MotionProfileConfig = {
   maxCentroidRadiusMeters: number; // Max radius for centroid centering in settling
   trendVarianceInflation: number; // Scale factor for variance inflation when reports fall outside anchor circle
   stationaryMahalanobisThreshold: number; // Mahalanobis² threshold: below = stationary update, above = resisted/motion
-  
+
   // Retrospective Analysis Tuning
   retrospectiveMinStationaryDuration: number; // Duration in ms to consider a stop "stable"
   retrospectiveMaxStationaryRadius: number; // Radius in meters to cluster stable points
