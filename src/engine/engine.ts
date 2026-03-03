@@ -285,6 +285,11 @@ export class Engine {
                   duration: 0,
                 };
                 this.outliers = [];
+
+                // Close the previous stationary period by pushing a snapshot to closedAnchors
+                const preMotion = this.activeAnchor.clone();
+                preMotion.endTimestamp = motionStartTimestamp;
+                this.closedAnchors.push(preMotion);
               }
             }
           }
@@ -297,6 +302,8 @@ export class Engine {
             decision = 'motion-end';
             // Finalize motion segment
             if (this.currentMotionSegment) {
+              // Reset start time for the new stationary period
+              this.activeAnchor.startTimestamp = m.timestamp;
               // Clone the anchor to preserve its state at motion end
               this.currentMotionSegment.endAnchor = this.activeAnchor.clone();
               this.currentMotionSegment.path.push(this.activeAnchor.mean);
@@ -322,12 +329,10 @@ export class Engine {
             if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
             if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
               const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
-              const newMean = computeCentroid(points.map(p => p.mean));
-              const newVariance = this.computeAverageVariance(points);
-              this.activeAnchor.endTimestamp = m.timestamp;
-              this.closedAnchors.push(this.activeAnchor);
-              const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
-              this.activeAnchor = newAnchor;
+               const newMean = computeCentroid(points.map(p => p.mean));
+               const newVariance = this.computeAverageVariance(points);
+               const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
+               this.activeAnchor = newAnchor;
               this.outliers = [];
               this.recentMotionPoints = [];
               decision = 'motion-end';

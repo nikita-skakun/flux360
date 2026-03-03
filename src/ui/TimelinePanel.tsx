@@ -95,7 +95,7 @@ export const TimelinePanel: React.FC<Props> = ({
         for (const a of anchors) {
             if ((a.endTimestamp ?? now) < cutoff) continue;
             items.push({
-                id: `anchor-${a.startTimestamp}`,
+                id: `anchor-closed-${a.startTimestamp}`,
                 item: a,
             });
         }
@@ -104,7 +104,7 @@ export const TimelinePanel: React.FC<Props> = ({
         const a = engine?.activeAnchor;
         if (a && (a.endTimestamp ?? now) >= cutoff) {
             items.push({
-                id: `anchor-${a.startTimestamp}`,
+                id: `anchor-active-${a.startTimestamp}`,
                 item: a,
             });
         }
