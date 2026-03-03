@@ -552,11 +552,11 @@ export class Engine {
       const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
       const mergeRadiusSquared = mergeRadius * mergeRadius;
 
-      const { effectiveDistance, midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
+      const { midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
 
       const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
       const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
-      const isInsignificantSegment = effectiveDistance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
+      const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
 
       if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
         // Merge `next` into `current`
@@ -603,13 +603,16 @@ export class Engine {
         const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
         const mergeRadiusSquared = mergeRadius * mergeRadius;
 
-        const { effectiveDistance, midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
+        const { midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
 
         const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
         const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
-        const isInsignificantSegment = effectiveDistance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
+        const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
 
-        if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
+        // Only merge with activeAnchor if motion was insignificant - preserve significant trips
+        const significantMotion = segment.distance > profileConfig.retrospectiveMaxStationaryRadius * 2;
+        if (!significantMotion && (isShortAnchor || isSpatiallyClose || isInsignificantSegment)) {
+          // Only merge if motion was truly insignificant (short segment that barely departed from anchors)
           const weightCurrent = currentDuration || 1;
           const weightNext = (next.lastUpdateTimestamp - next.startTimestamp) || 1;
 
@@ -619,7 +622,7 @@ export class Engine {
           ];
 
           next.mean = newMean;
-          next.startTimestamp = current.startTimestamp; // Inherit older start time
+          // Only merge variance, preserve activeAnchor timestamps to avoid timeline issues
           next.variance = (current.variance * weightCurrent + next.variance * weightNext) / (weightCurrent + weightNext);
 
           this.closedAnchors.pop(); // Remove `current`
