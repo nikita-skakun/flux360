@@ -151,9 +151,9 @@ export class Engine {
   }
 
   private isCentroidCentered(points: DevicePoint[], centroid: Vec2, maxRadius: number): boolean {
-    const radiusSquared = maxRadius * maxRadius;
     for (const p of points) {
-      if (distanceSquared(centroid, p.mean) > radiusSquared) return false;
+      const allowedRadius = Math.max(maxRadius, p.accuracy * 1.5);
+      if (distanceSquared(centroid, p.mean) > allowedRadius * allowedRadius) return false;
     }
     return true;
   }
@@ -236,8 +236,10 @@ export class Engine {
             const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
             const distSq = distanceSquared(this.activeAnchor.mean, m.mean);
             const anchorVariance = this.activeAnchor.variance;
-            if (distSq < m.accuracy * m.accuracy * profile.minDistanceAccuracyRatio * profile.minDistanceAccuracyRatio || distSq <= (Math.sqrt(anchorVariance) + m.accuracy) ** 2) {
-              // Center is within the noise-gate radius, OR the GPS circles still overlap —
+            const overlapSigma = 1.5; // Expand noise acceptance to 1.5x accuracy standard deviation
+            const overlapGateSq = (Math.sqrt(anchorVariance) + m.accuracy * overlapSigma) ** 2;
+            if (distSq < m.accuracy * m.accuracy * profile.minDistanceAccuracyRatio * profile.minDistanceAccuracyRatio || distSq <= overlapGateSq) {
+              // Center is within the noise-gate radius, OR the GPS circles still overlap (1.5 sigma) —
               // Both cases are geometrically consistent with being stationary.
               const weakVariance = m.accuracy * m.accuracy * profile.weakVarianceInflation;
               this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, weakVariance, m.timestamp, GAIN_RATE);
@@ -271,18 +273,18 @@ export class Engine {
                 const motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
                 this.recentMotionPoints = [];
                 this.recentMotionPoints.push(m);
-                this.outliers = [];
                 decision = 'motion-start';
                 // Start a new motion segment - clone the anchor to preserve its state
                 this.currentMotionSegment = {
                   startAnchor: this.activeAnchor.clone(),
                   endAnchor: null,
-                  path: [this.activeAnchor.mean],
+                  path: [this.activeAnchor.mean, ...this.outliers.map(o => o.point.mean)],
                   startTime: motionStartTimestamp,
                   endTime: null,
                   distance: 0,
                   duration: 0,
                 };
+                this.outliers = [];
               }
             }
           }
@@ -331,6 +333,10 @@ export class Engine {
               decision = 'motion-end';
               // Finalize motion segment
               if (this.currentMotionSegment) {
+                // Remove the settling points from the path before adding the settled anchor
+                for (let i = 0; i < points.length; i++) {
+                  this.currentMotionSegment.path.pop();
+                }
                 // newAnchor is freshly created, no need to clone
                 this.currentMotionSegment.endAnchor = newAnchor;
                 this.currentMotionSegment.path.push(newAnchor.mean);
@@ -461,47 +467,66 @@ export class Engine {
     });
   }
 
+  private getEffectiveMotionStats(segment: MotionSegment, startAnchor: Anchor, endAnchor: Anchor): { effectiveDistance: number; midExtentSq: number } {
+    if (segment.path.length <= 2) {
+      return { effectiveDistance: segment.distance, midExtentSq: 0 };
+    }
+    const startRadiusSq = startAnchor.variance;
+    const endRadiusSq = endAnchor.variance;
+    let startIndex = 0;
+    while (startIndex < segment.path.length - 1) {
+      if (distanceSquared(startAnchor.mean, segment.path[startIndex]!) <= startRadiusSq * 1.5) {
+        startIndex++;
+      } else {
+        break;
+      }
+    }
+    let endIndex = segment.path.length - 1;
+    while (endIndex > startIndex) {
+      if (distanceSquared(endAnchor.mean, segment.path[endIndex]!) <= endRadiusSq * 1.5) {
+        endIndex--;
+      } else {
+        break;
+      }
+    }
+    const effectivePath = startIndex > 0 || endIndex < segment.path.length - 1
+      ? segment.path.slice(startIndex, endIndex + 1)
+      : segment.path;
+
+    const effectiveDistance = this.computePathLength(effectivePath);
+
+    let maxDistSqFromCenter = 0;
+    const center: Vec2 = [(startAnchor.mean[0] + endAnchor.mean[0]) / 2, (startAnchor.mean[1] + endAnchor.mean[1]) / 2];
+    for (const p of effectivePath) {
+      const dSq = distanceSquared(center, p);
+      if (dSq > maxDistSqFromCenter) maxDistSqFromCenter = dSq;
+    }
+
+    return { effectiveDistance, midExtentSq: maxDistSqFromCenter * 4 };
+  }
+
   refineHistory(profileConfig: MotionProfileConfig) {
     if (this.closedAnchors.length < 2) return;
 
-    // 1. Trim start and end points of motion segments
-    for (const segment of this.motionSegments) {
-      if (!segment.endAnchor) continue; // Skip active segment
+    // 1. Prune insignificant excursion loops (paths that start and end on the SAME anchor)
+    this.motionSegments = this.motionSegments.filter(segment => {
+      if (!segment.endAnchor) return true;
+      if (segment.startAnchor.startTimestamp !== segment.endAnchor.startTimestamp) return true;
 
-      const originalLength = segment.path.length;
-      if (originalLength <= 2) continue;
-
-      // Trim from start (points belonging to startAnchor)
-      const startRadiusSq = segment.startAnchor.variance; // Approx radius² from variance
-      let startIndex = 0;
-      while (startIndex < segment.path.length - 1) {
-        if (distanceSquared(segment.startAnchor.mean, segment.path[startIndex]!) <= startRadiusSq * 1.5) { // Lenient boundary
-          startIndex++;
-        } else {
-          break;
-        }
+      let maxDistSq = 0;
+      for (const p of segment.path) {
+        const dSq = distanceSquared(segment.startAnchor.mean, p);
+        if (dSq > maxDistSq) maxDistSq = dSq;
       }
 
-      // Trim from end (points belonging to endAnchor)
-      const endRadiusSq = segment.endAnchor.variance;
-      let endIndex = segment.path.length - 1;
-      while (endIndex > startIndex) {
-        if (distanceSquared(segment.endAnchor.mean, segment.path[endIndex]!) <= endRadiusSq * 1.5) {
-          endIndex--;
-        } else {
-          break;
-        }
+      // If the maximum departure from the anchor didn't even exceed the normal stationary cluster size
+      if (maxDistSq < profileConfig.retrospectiveMaxStationaryRadius * profileConfig.retrospectiveMaxStationaryRadius) {
+        return false; // Prune insignificant loop
       }
+      return true;
+    });
 
-      if (startIndex > 0 || endIndex < segment.path.length - 1) {
-        segment.path = segment.path.slice(startIndex, endIndex + 1);
-
-        // Recalculate distance
-        segment.distance = this.computePathLength(segment.path);
-      }
-    }
-
-    // 2. Merge adjacent anchors & drop transient ones
+    // Merge adjacent anchors & drop transient ones
     let i = 0;
     while (i < this.closedAnchors.length - 1) {
       const current = this.closedAnchors[i]!;
@@ -523,18 +548,11 @@ export class Engine {
       const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
       const mergeRadiusSquared = mergeRadius * mergeRadius;
 
-      // Calculate path extent to ensure it didn't wander far
-      let maxDistSqFromCenter = 0;
-      const center: Vec2 = [(current.mean[0] + next.mean[0]) / 2, (current.mean[1] + next.mean[1]) / 2];
-      for (const p of segment.path) {
-        const dSq = distanceSquared(center, p);
-        if (dSq > maxDistSqFromCenter) maxDistSqFromCenter = dSq;
-      }
-      const midExtentSq = maxDistSqFromCenter * 4; // Approx diameter²
+      const { effectiveDistance, midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
 
       const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
       const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
-      const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
+      const isInsignificantSegment = effectiveDistance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
 
       if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
         // Merge `next` into `current`
@@ -581,17 +599,11 @@ export class Engine {
         const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
         const mergeRadiusSquared = mergeRadius * mergeRadius;
 
-        let maxDistSqFromCenter = 0;
-        const center: Vec2 = [(current.mean[0] + next.mean[0]) / 2, (current.mean[1] + next.mean[1]) / 2];
-        for (const p of segment.path) {
-          const dSq = distanceSquared(center, p);
-          if (dSq > maxDistSqFromCenter) maxDistSqFromCenter = dSq;
-        }
-        const midExtentSq = maxDistSqFromCenter * 4;
+        const { effectiveDistance, midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
 
         const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
         const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
-        const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
+        const isInsignificantSegment = effectiveDistance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
 
         if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
           const weightCurrent = currentDuration || 1;
