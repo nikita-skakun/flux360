@@ -31,14 +31,15 @@ export type StoreState = {
     secure: boolean;
     email: string;
     password: string;
-    inputBaseUrl: string;
-    inputSecure: boolean;
-    inputEmail: string;
-    inputPassword: string;
     maptilerApiKey: string;
-    inputMaptilerApiKey: string;
-    darkMode: 'light' | 'dark' | 'system';
-    inputDarkMode: 'light' | 'dark' | 'system';
+    theme: 'light' | 'dark' | 'system';
+  };
+
+  // Auth State
+  auth: {
+    isAuthenticated: boolean;
+    isLoggingIn: boolean;
+    loginError: string | null;
   };
 
   // UI State slice
@@ -84,14 +85,10 @@ export type StoreActions = {
   addPositions: (positions: NormalizedPosition[]) => void;
   processPositions: () => null;
 
-  // Settings
-  applySettings: () => void;
-  setInputBaseUrl: (value: string) => void;
-  setInputSecure: (value: boolean) => void;
-  setInputEmail: (value: string) => void;
-  setInputPassword: (value: string) => void;
-  setInputMaptilerApiKey: (value: string) => void;
-  setInputDarkMode: (value: 'light' | 'dark' | 'system') => void;
+  // Settings & Auth
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+  setTheme: (theme: 'light' | 'dark' | 'system') => void;
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;
@@ -102,6 +99,10 @@ export type StoreActions = {
 
   // Retrospective analysis actions
   runRetrospectiveAnalysis: () => void;
+
+  // External Config
+  fetchConfig: () => Promise<void>;
+  fetchMaptilerKey: () => Promise<void>;
 };
 
 export type Store = StoreState & StoreActions;

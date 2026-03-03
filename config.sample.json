@@ -1,0 +1,5 @@
+{
+    "maptilerApiKey": "YOUR_MAPTILER_API_KEY",
+    "traccarBaseUrl": "demo.traccar.org",
+    "traccarSecure": true
+}

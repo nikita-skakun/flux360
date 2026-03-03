@@ -1,3 +1,4 @@
+import { LoginPage } from "./ui/LoginPage";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useStore } from "./store";
@@ -49,32 +50,21 @@ export function App() {
 
   const RECENT_DEVICE_CUTOFF_MS = 96 * 60 * 60 * 1000; // 96 hours
 
-  const baseUrlInput = useStore(state => state.settings.inputBaseUrl);
-  const setBaseUrlInput = useStore(state => state.setInputBaseUrl);
-  const setSecureInput = useStore(state => state.setInputSecure);
-  const setEmailInput = useStore(state => state.setInputEmail);
-  const setPasswordInput = useStore(state => state.setInputPassword);
-  const setMaptilerApiKeyInput = useStore(state => state.setInputMaptilerApiKey);
-  const setDarkModeInput = useStore(state => state.setInputDarkMode);
-  const inputSecure = useStore(state => state.settings.inputSecure);
-  const inputEmail = useStore(state => state.settings.inputEmail);
-  const inputPassword = useStore(state => state.settings.inputPassword);
-  const inputMaptilerApiKey = useStore(state => state.settings.inputMaptilerApiKey);
-  const inputDarkMode = useStore(state => state.settings.inputDarkMode);
   const traccarSecure = useStore(state => state.settings.secure);
   const traccarEmail = useStore(state => state.settings.email);
   const traccarPassword = useStore(state => state.settings.password);
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
-  const darkMode = useStore(state => state.settings.darkMode);
+  const theme = useStore(state => state.settings.theme);
+  const setTheme = useStore(state => state.setTheme);
 
   // Handle theme switching with support for 'system', 'light', and 'dark'
   const isDark = useMemo(() => {
-    if (darkMode === 'dark') return true;
-    if (darkMode === 'light') return false;
+    if (theme === 'dark') return true;
+    if (theme === 'light') return false;
     // System mode - check media query
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
-  }, [darkMode]);
+  }, [theme]);
 
   useEffect(() => {
     if (isDark) {
@@ -86,7 +76,7 @@ export function App() {
 
   // Listen for system theme changes when in system mode
   useEffect(() => {
-    if (darkMode !== 'system') return;
+    if (theme !== 'system') return;
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
@@ -99,7 +89,18 @@ export function App() {
 
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
-  }, [darkMode]);
+  }, [theme]);
+
+  const fetchConfig = useStore((state) => state.fetchConfig);
+  const fetchMaptilerKey = useStore((state) => state.fetchMaptilerKey);
+  const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
+
+  useEffect(() => {
+    fetchConfig();
+    if (isAuthenticated) {
+      fetchMaptilerKey();
+    }
+  }, [fetchConfig, fetchMaptilerKey, isAuthenticated]);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
@@ -112,9 +113,11 @@ export function App() {
   const editingTarget = useStore(state => state.ui.editingTarget);
   const setEditingTarget = useStore(state => state.setEditingTarget);
 
+  const logout = useStore((state) => state.logout);
+
   const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | RetrospectiveMotionSegment | null>(null);
 
-  const { wsStatus, wsError, reconnect } = useTraccarConnection({
+  useTraccarConnection({
     baseUrl: traccarBaseUrl,
     secure: traccarSecure,
     email: traccarEmail,
@@ -128,20 +131,9 @@ export function App() {
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
 
-  const applySettings = () => {
-    useStore.getState().applySettings();
-    reconnect();
-  };
-
-  // Apply theme immediately without affecting other settings
-  const applyTheme = (theme: 'light' | 'dark' | 'system') => {
-    useStore.setState(state => ({
-      settings: {
-        ...state.settings,
-        darkMode: theme,
-        inputDarkMode: theme,
-      }
-    }));
+  // Apply theme immediately
+  const applyTheme = (nextTheme: 'light' | 'dark' | 'system') => {
+    setTheme(nextTheme);
   };
 
   const visibleComponents = useMemo(() => {
@@ -284,6 +276,10 @@ export function App() {
       }));
   }, [deviceNames, groupDevices, deviceIcons]);
 
+  if (!isAuthenticated) {
+    return <LoginPage />;
+  }
+
   return (
     <div className="h-screen w-screen">
       <DeviceListSidePanel
@@ -324,25 +320,11 @@ export function App() {
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
-              baseUrlInput={baseUrlInput}
-              setBaseUrlInput={setBaseUrlInput}
-              secureInput={inputSecure}
-              setSecureInput={setSecureInput}
-              emailInput={inputEmail}
-              setEmailInput={setEmailInput}
-              passwordInput={inputPassword}
-              setPasswordInput={setPasswordInput}
-              maptilerApiKeyInput={inputMaptilerApiKey}
-              setMaptilerApiKeyInput={setMaptilerApiKeyInput}
-              darkModeInput={inputDarkMode}
-              setDarkModeInput={setDarkModeInput}
-              wsStatus={wsStatus}
-              wsError={wsError}
-              onApplySettings={applySettings}
+              theme={theme}
               onApplyTheme={applyTheme}
-              onReconnect={reconnect}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
+              onLogout={logout}
             />
 
             <DeviceOverlay

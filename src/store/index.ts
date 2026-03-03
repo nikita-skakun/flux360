@@ -14,14 +14,13 @@ const initialState: StoreState = {
     secure: false,
     email: '',
     password: '',
-    inputBaseUrl: '',
-    inputSecure: false,
-    inputEmail: '',
-    inputPassword: '',
     maptilerApiKey: '',
-    inputMaptilerApiKey: '',
-    darkMode: 'system',
-    inputDarkMode: 'system',
+    theme: 'system',
+  },
+  auth: {
+    isAuthenticated: false,
+    isLoggingIn: false,
+    loginError: null,
   },
   ui: {
     selectedDeviceId: null,
@@ -458,69 +457,73 @@ export const useStore = create<Store>()(
         return null;
       },
 
-      applySettings: () => {
+      setTheme: (theme: 'light' | 'dark' | 'system') => {
         set(state => ({
           settings: {
             ...state.settings,
-            baseUrl: state.settings.inputBaseUrl,
-            secure: state.settings.inputSecure,
-            email: state.settings.inputEmail,
-            password: state.settings.inputPassword,
-            maptilerApiKey: state.settings.inputMaptilerApiKey,
-            darkMode: state.settings.inputDarkMode,
+            theme,
           }
         }));
       },
 
-      setInputBaseUrl: (value: string) => {
+      login: async (email, password) => {
+        const { fetchSession } = await import("@/api/devices");
+        const { settings } = get();
+
         set(state => ({
-          settings: {
-            ...state.settings,
-            inputBaseUrl: value,
-          }
+          auth: { ...state.auth, isLoggingIn: true, loginError: null }
         }));
+
+        try {
+          const baseUrl = settings.baseUrl;
+          const secure = settings.secure;
+
+          if (!baseUrl) throw new Error("Base URL is missing in server config");
+
+          await fetchSession({
+            baseUrl,
+            secure,
+            auth: { type: "basic", username: email, password }
+          });
+
+          // If fetchSession succeeds, we're authenticated
+          set(state => ({
+            settings: {
+              ...state.settings,
+              email,
+              password,
+            },
+            auth: {
+              isAuthenticated: true,
+              isLoggingIn: false,
+              loginError: null,
+            }
+          }));
+
+          // Fetch protected configuration after login
+          await get().fetchMaptilerKey();
+        } catch (error) {
+          set(state => ({
+            auth: {
+              ...state.auth,
+              isLoggingIn: false,
+              loginError: error instanceof Error ? error.message : String(error),
+            }
+          }));
+          throw error;
+        }
       },
 
-      setInputSecure: (value: boolean) => {
+      logout: () => {
         set(state => ({
+          auth: {
+            ...state.auth,
+            isAuthenticated: false,
+          },
           settings: {
             ...state.settings,
-            inputSecure: value,
-          }
-        }));
-      },
-
-      setInputEmail: (value: string) => {
-        set(state => ({
-          settings: {
-            ...state.settings,
-            inputEmail: value,
-          }
-        }));
-      },
-      setInputPassword: (value: string) => {
-        set(state => ({
-          settings: {
-            ...state.settings,
-            inputPassword: value,
-          }
-        }));
-      },
-
-      setInputMaptilerApiKey: (value: string) => {
-        set(state => ({
-          settings: {
-            ...state.settings,
-            inputMaptilerApiKey: value,
-          }
-        }));
-      },
-
-      setInputDarkMode: (value: 'light' | 'dark' | 'system') => {
-        set(state => ({
-          settings: {
-            ...state.settings,
-            inputDarkMode: value,
+            email: '',
+            password: '',
           }
         }));
       },
@@ -633,10 +636,63 @@ export const useStore = create<Store>()(
           }
         })();
       },
+
+      // External Config
+      fetchConfig: async () => {
+        try {
+          const response = await fetch('/api/config');
+          const config = await response.json();
+
+          set(state => ({
+            settings: {
+              ...state.settings,
+              baseUrl: config.traccarBaseUrl || state.settings.baseUrl,
+              secure: config.traccarSecure ?? state.settings.secure,
+            }
+          }));
+        } catch (error) {
+          console.error('Failed to fetch config:', error);
+        }
+      },
+
+      fetchMaptilerKey: async () => {
+        try {
+          const { buildAuthHeader } = await import("@/api/httpUtils");
+          const { settings } = get();
+
+          const authHeader = buildAuthHeader({
+            type: "basic",
+            username: settings.email,
+            password: settings.password,
+          });
+
+          const response = await fetch('/api/config/maptiler', {
+            headers: authHeader ? { "Authorization": authHeader } : {},
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to fetch MapTiler key: ${response.status}`);
+          }
+
+          const config = await response.json();
+
+          set(state => ({
+            settings: {
+              ...state.settings,
+              maptilerApiKey: config.maptilerApiKey || state.settings.maptilerApiKey,
+            }
+          }));
+        } catch (error) {
+          console.error('Failed to fetch MapTiler key:', error);
+        }
+      },
     }),
     {
       name: 'flux360-store',
-      partialize: (state) => ({ settings: state.settings }),
+      partialize: (state) => ({
+        settings: state.settings,
+        auth: { isAuthenticated: state.auth.isAuthenticated } // Persist only auth status
+      }),
     }
   )
 );

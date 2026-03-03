@@ -1,68 +1,36 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sun, Moon, Monitor, ChevronDown, ChevronRight } from "lucide-react";
+import { Sun, Moon, Monitor } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
-import React, { useState } from "react";
+import React from "react";
 
 type Props = {
-  baseUrlInput: string;
-  setBaseUrlInput: (value: string) => void;
-  secureInput: boolean;
-  setSecureInput: (value: boolean) => void;
-  emailInput: string;
-  setEmailInput: (value: string) => void;
-  passwordInput: string;
-  setPasswordInput: (value: string) => void;
-  maptilerApiKeyInput: string;
-  setMaptilerApiKeyInput: (value: string) => void;
-  darkModeInput: 'light' | 'dark' | 'system';
-  setDarkModeInput: (value: 'light' | 'dark' | 'system') => void;
-  wsStatus: "Unknown" | "Connecting" | "Connected" | "Disconnected" | "Error";
-  wsError: string | null;
-  onApplySettings: () => void;
+  theme: 'light' | 'dark' | 'system';
   onApplyTheme: (theme: 'light' | 'dark' | 'system') => void;
-  onReconnect: () => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
+  onLogout: () => void;
 };
 
 export const SettingsPanel = React.memo(function SettingsPanel({
-  baseUrlInput,
-  setBaseUrlInput,
-  secureInput,
-  setSecureInput,
-  emailInput,
-  setEmailInput,
-  passwordInput,
-  setPasswordInput,
-  maptilerApiKeyInput,
-  setMaptilerApiKeyInput,
-  darkModeInput,
-  setDarkModeInput,
-  wsStatus,
-  wsError,
-  onApplySettings,
+  theme,
   onApplyTheme,
-  onReconnect,
   debugMode,
   setDebugMode,
+  onLogout,
 }: Props) {
-  const [isExpanded, setIsExpanded] = useState(false);
-
   // Cycle through theme modes: system -> dark -> light -> dark...
   // Applies immediately without needing to click Save
   const cycleTheme = () => {
     const nextTheme: 'light' | 'dark' | 'system' =
-      darkModeInput === 'system' ? 'dark' :
-        darkModeInput === 'dark' ? 'light' : 'dark';
-    setDarkModeInput(nextTheme);
+      theme === 'system' ? 'dark' :
+        theme === 'dark' ? 'light' : 'dark';
     onApplyTheme(nextTheme);
   };
 
   // Get the appropriate icon and label
   const getThemeIcon = () => {
-    switch (darkModeInput) {
+    switch (theme) {
       case 'dark':
         return <Moon className="h-4 w-4" />;
       case 'light':
@@ -74,7 +42,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   };
 
   const getThemeLabel = () => {
-    switch (darkModeInput) {
+    switch (theme) {
       case 'dark':
         return 'Dark';
       case 'light':
@@ -88,34 +56,19 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   return (
     <div className="w-full">
       <div className="p-2 rounded-lg bg-muted/90 border border-border transition-colors duration-300">
-        <div className="flex flex-col gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center gap-1 text-sm font-medium hover:opacity-80 transition-opacity w-fit"
-          >
-            {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-            Connection Settings
-          </Button>
+        <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1">
+            <Switch
+              id="debug-mode"
+              checked={debugMode}
+              onCheckedChange={setDebugMode}
+            />
+            <Label htmlFor="debug-mode" className="cursor-pointer font-medium">
+              Debug
+            </Label>
+          </div>
 
-          <div className="flex items-center justify-between text-xs">
-            <span>
-              <strong className="text-foreground">{wsStatus}</strong>
-            </span>
-            {wsError ? <span className="text-destructive font-semibold ml-2 overflow-hidden text-ellipsis whitespace-nowrap max-w-[120px]" title={wsError}>Error: {wsError}</span> : null}
-
-            <div className="flex items-center gap-1">
-              <Switch
-                id="debug-mode"
-                checked={debugMode}
-                onCheckedChange={setDebugMode}
-              />
-              <Label htmlFor="debug-mode" className="cursor-pointer">
-                Debug
-              </Label>
-            </div>
-
+          <div className="flex items-center gap-2">
             <Button
               variant="outline"
               size="icon"
@@ -125,69 +78,17 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             >
               {getThemeIcon()}
             </Button>
+
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={onLogout}
+              className="h-7 px-2 text-[10px] font-medium"
+            >
+              Logout
+            </Button>
           </div>
         </div>
-
-        {/* Spoiler Body */}
-        {isExpanded && (
-          <div className="mt-3 flex flex-col gap-3 animate-in fade-in slide-in-from-top-1 duration-200">
-            <Input
-              type="text"
-              placeholder="Traccar Base URL (e.g. localhost:8082)"
-              value={baseUrlInput}
-              onChange={(e) => setBaseUrlInput(e.target.value)}
-            />
-
-            <div className="flex items-center gap-2">
-              <Switch
-                id="secure-connection"
-                checked={secureInput}
-                onCheckedChange={setSecureInput}
-              />
-              <Label htmlFor="secure-connection" className="text-sm cursor-pointer">
-                Secure (HTTPS/WSS)
-              </Label>
-            </div>
-
-            <Input
-              type="email"
-              placeholder="Email / Username"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-            />
-
-            <Input
-              type="password"
-              placeholder="Password"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-            />
-
-            <Input
-              type="password"
-              placeholder="MapTiler API Key"
-              value={maptilerApiKeyInput}
-              onChange={(e) => setMaptilerApiKeyInput(e.target.value)}
-            />
-
-            <div className="flex flex-wrap items-center gap-2 ml-auto">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onApplySettings}
-              >
-                Save
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onReconnect}
-              >
-                Reconnect
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

@@ -128,8 +128,6 @@ export async function fetchSession(opts: TraccarClientOptions): Promise<TraccarU
 
     if (res.ok) {
       const user = (await res.json()) as TraccarUser;
-      console.log("[Session] POST login successful.");
-      if (!user.token) console.warn("[Session] No token returned.");
       return user;
     }
     throw new Error(`Login failed: ${res.status}`);

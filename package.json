@@ -5,11 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/server.tsx",
-    "start": "NODE_ENV=production bun src/server.tsx",
-    "build": "bun run build.ts",
     "lint": "eslint src/**/*.ts src/**/*.tsx",
-    "test:run": "bun test",
-    "test:verbose": "VERBOSE=1 bun test"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@maptiler/sdk": "^3.11.1",
