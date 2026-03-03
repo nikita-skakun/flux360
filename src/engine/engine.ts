@@ -285,11 +285,6 @@ export class Engine {
                   duration: 0,
                 };
                 this.outliers = [];
-
-                // Close the previous stationary period by pushing a snapshot to closedAnchors
-                const preMotion = this.activeAnchor.clone();
-                preMotion.endTimestamp = motionStartTimestamp;
-                this.closedAnchors.push(preMotion);
               }
             }
           }
@@ -302,9 +297,7 @@ export class Engine {
             decision = 'motion-end';
             // Finalize motion segment
             if (this.currentMotionSegment) {
-              // Reset start time for the new stationary period
-              this.activeAnchor.startTimestamp = m.timestamp;
-              // Clone the anchor to preserve its state at motion end
+              // Finalize the segment using current activeAnchor
               this.currentMotionSegment.endAnchor = this.activeAnchor.clone();
               this.currentMotionSegment.path.push(this.activeAnchor.mean);
               this.currentMotionSegment.endTime = m.timestamp;
@@ -315,8 +308,31 @@ export class Engine {
               const end = this.activeAnchor.mean;
               const directDistSq = start && end ? distanceSquared(start, end) : 0;
 
-              if (this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0) {
-                this.motionSegments.push(this.currentMotionSegment);
+              const isAboveMin = this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0;
+
+              if (isAboveMin) {
+                // Check for insignificant loop
+                const radiusSq = profile.retrospectiveMaxStationaryRadius * profile.retrospectiveMaxStationaryRadius;
+                let maxDistSq = 0;
+                for (const p of this.currentMotionSegment.path) {
+                  const dSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, p);
+                  if (dSq > maxDistSq) maxDistSq = dSq;
+                }
+                const startEndDistSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, this.activeAnchor.mean);
+                const spatiallyClose = startEndDistSq < radiusSq;
+                const sameTime = this.currentMotionSegment.startAnchor.startTimestamp === this.activeAnchor.startTimestamp;
+                const isInsignificantLoop = (sameTime || spatiallyClose) && (maxDistSq < radiusSq || this.currentMotionSegment.path.length <= 4);
+
+                if (!isInsignificantLoop) {
+                  // Close the pre-motion anchor by pushing its snapshot
+                  const startSnapshot = this.currentMotionSegment.startAnchor.clone();
+                  startSnapshot.endTimestamp = this.currentMotionSegment.startTime;
+                  this.closedAnchors.push(startSnapshot);
+                  // Reset active anchor's start time to mark the new stationary period
+                  this.activeAnchor.startTimestamp = m.timestamp;
+                  // Keep the motion segment
+                  this.motionSegments.push(this.currentMotionSegment);
+                }
               }
               this.currentMotionSegment = null;
             }
@@ -329,10 +345,10 @@ export class Engine {
             if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
             if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
               const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
-               const newMean = computeCentroid(points.map(p => p.mean));
-               const newVariance = this.computeAverageVariance(points);
-               const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
-               this.activeAnchor = newAnchor;
+              const newMean = computeCentroid(points.map(p => p.mean));
+              const newVariance = this.computeAverageVariance(points);
+              const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
+              this.activeAnchor = newAnchor;
               this.outliers = [];
               this.recentMotionPoints = [];
               decision = 'motion-end';
@@ -353,8 +369,29 @@ export class Engine {
                 const end = newAnchor.mean;
                 const directDistSq = start && end ? distanceSquared(start, end) : 0;
 
-                if (this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0) {
-                  this.motionSegments.push(this.currentMotionSegment);
+                const isAboveMin = this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0;
+
+                if (isAboveMin) {
+                  // Check for insignificant loop
+                  const radiusSq = profile.retrospectiveMaxStationaryRadius * profile.retrospectiveMaxStationaryRadius;
+                  let maxDistSq = 0;
+                  for (const p of this.currentMotionSegment.path) {
+                    const dSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, p);
+                    if (dSq > maxDistSq) maxDistSq = dSq;
+                  }
+                  const startEndDistSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, newAnchor.mean);
+                  const spatiallyClose = startEndDistSq < radiusSq;
+                  const sameTime = this.currentMotionSegment.startAnchor.startTimestamp === newAnchor.startTimestamp;
+                  const isInsignificantLoop = (sameTime || spatiallyClose) && (maxDistSq < radiusSq || this.currentMotionSegment.path.length <= 4);
+
+                  if (!isInsignificantLoop) {
+                    // Close the pre-motion anchor by pushing its snapshot
+                    const startSnapshot = this.currentMotionSegment.startAnchor.clone();
+                    startSnapshot.endTimestamp = this.currentMotionSegment.startTime;
+                    this.closedAnchors.push(startSnapshot);
+                    // Keep the motion segment
+                    this.motionSegments.push(this.currentMotionSegment);
+                  }
                 }
                 this.currentMotionSegment = null;
               }
@@ -516,8 +553,20 @@ export class Engine {
     // 1. Prune insignificant excursion loops (paths that start and end on the SAME anchor)
     this.motionSegments = this.motionSegments.filter(segment => {
       if (!segment.endAnchor) return true;
-      if (segment.startAnchor.startTimestamp !== segment.endAnchor.startTimestamp) return true;
 
+      // Determine if start and end anchors are considered the same for loop detection
+      const sameAnchor = segment.startAnchor.startTimestamp === segment.endAnchor.startTimestamp;
+      let spatiallyClose = false;
+      if (!sameAnchor) {
+        // If timestamps differ but positions are very close, treat as same anchor
+        const startEndDistSq = distanceSquared(segment.startAnchor.mean, segment.endAnchor.mean);
+        spatiallyClose = startEndDistSq < profileConfig.retrospectiveMaxStationaryRadius * profileConfig.retrospectiveMaxStationaryRadius;
+      }
+
+      // If anchors are distinct (by timestamp and not spatially close), keep the segment
+      if (!sameAnchor && !spatiallyClose) return true;
+
+      // Now we treat this as a loop that started and ended at (effectively) the same anchor
       let maxDistSq = 0;
       for (const p of segment.path) {
         const dSq = distanceSquared(segment.startAnchor.mean, p);
