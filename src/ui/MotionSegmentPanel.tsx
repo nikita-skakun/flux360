@@ -3,10 +3,10 @@ import { fromWebMercator } from "@/util/webMercator";
 import { X } from "lucide-react";
 import React from "react";
 import type { DebugFrame } from "@/engine/engine";
-import type { MotionSegment, RetrospectiveMotionSegment, Timestamp } from "@/types";
+import type { MotionSegment, Timestamp } from "@/types";
 
 type Props = {
-  segment: MotionSegment | RetrospectiveMotionSegment;
+  segment: MotionSegment;
   debugFrames: DebugFrame[];
   onClose: () => void;
 };
@@ -33,8 +33,6 @@ function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
   const distance = segment.distance;
   const avgSpeedKmh = duration > 0 ? (distance / 1000) / (duration / 3600000) : 0;
 
-  const isRetro = 'confidence' in segment;
-
   const relevantFrames = React.useMemo(() => {
     return debugFrames.filter(f => {
       if (f.timestamp < startTime) return false;
@@ -47,7 +45,7 @@ function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
     <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 flex flex-col shrink-0 min-h-0">
       <div className="flex items-start justify-between mb-2">
         <div className="text-sm font-medium">
-          {isRetro ? 'Retrospective Segment' : 'Motion Segment'}
+          Motion Segment
         </div>
         <Button
           variant="ghost"
@@ -67,7 +65,6 @@ function MotionSegmentPanel({ segment, debugFrames, onClose }: Props) {
         <div><strong>Avg Speed:</strong> {avgSpeedKmh.toFixed(1)} km/h</div>
         <div><strong>Started:</strong> {formatTimestamp(startTime)}</div>
         <div><strong>Ended:</strong> {formatTimestamp(endTime)}</div>
-        {isRetro && <div><strong>Confidence:</strong> {segment.confidence.toFixed(2)}</div>}
         <div><strong>Path points:</strong> {segment.path.length}</div>
       </div>
 

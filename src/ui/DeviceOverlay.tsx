@@ -34,8 +34,8 @@ function humanDurationSince(ts: Timestamp, now: Timestamp = Date.now() as Timest
   return `${d}d`;
 }
 
-const DurationDisplay: React.FC<{ timestamp: Timestamp }> = ({ timestamp }) => {
-  const timeAgo = useTimeAgo(timestamp);
+const DurationDisplay: React.FC<{ timestamp: Timestamp, addSuffix?: boolean }> = ({ timestamp, addSuffix = true }) => {
+  const timeAgo = useTimeAgo(timestamp, addSuffix);
   return <>{timeAgo}</>;
 };
 
@@ -101,7 +101,7 @@ function DeviceOverlayComponent({
             </div>
           )}
           <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
-          <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={chosen.anchorStartTimestamp} /></div>
+          <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={chosen.anchorStartTimestamp} addSuffix={false} /></div>
         </div>
         <div className="flex items-center gap-1">
           <Button

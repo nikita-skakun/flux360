@@ -19,7 +19,7 @@ function getUpdateInterval(ts: Timestamp): number {
   return 86400000;
 }
 
-export function useTimeAgo(ts: Timestamp): string {
+export function useTimeAgo(ts: Timestamp, addSuffix: boolean = true): string {
   const [, setTick] = useState(0);
 
   const interval = useMemo(() => getUpdateInterval(ts), [ts]);
@@ -32,5 +32,5 @@ export function useTimeAgo(ts: Timestamp): string {
     return () => clearInterval(id);
   }, [ts, interval]);
 
-  return humanDurationSince(ts) + " ago";
+  return humanDurationSince(ts) + (addSuffix ? " ago" : "");
 }

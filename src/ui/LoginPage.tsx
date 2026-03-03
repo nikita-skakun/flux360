@@ -17,7 +17,7 @@ export const LoginPage: React.FC = () => {
         e.preventDefault();
         try {
             await login(email, password);
-        } catch (err) {
+        } catch {
             // Error is handled in store and displayed via loginError
         }
     };
@@ -39,7 +39,7 @@ export const LoginPage: React.FC = () => {
                     </div>
 
                     <div className="bg-card/40 backdrop-blur-xl border border-border/50 rounded-2xl p-8 shadow-2xl animate-in fade-in slide-in-from-bottom-8 duration-1000">
-                        <form onSubmit={handleSubmit} className="space-y-6">
+                        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6">
                             <div className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="email" className="text-xs font-semibold text-muted-foreground ml-1 uppercase tracking-wider">Username</Label>

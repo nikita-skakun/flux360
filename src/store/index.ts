@@ -39,11 +39,6 @@ const initialState: StoreState = {
   },
   engineSnapshotsByDevice: {},
   motionSegments: {},
-  retrospective: {
-    byDevice: new Map(),
-    lastUpdate: 0,
-    isAnalyzing: false,
-  },
 };
 
 export const useStore = create<Store>()(
@@ -420,9 +415,8 @@ export const useStore = create<Store>()(
           };
         });
 
-        const { processPositions, runRetrospectiveAnalysis } = get();
+        const { processPositions } = get();
         processPositions();
-        runRetrospectiveAnalysis();
       },
 
       processPositions: () => {
@@ -573,80 +567,16 @@ export const useStore = create<Store>()(
         }));
       },
 
-      runRetrospectiveAnalysis: () => {
-        const state = get();
-
-        // 1. Debounce: If already analyzing or recently analyzed, skip
-        if (state.retrospective.isAnalyzing) return;
-
-        // Simple debounce: don't run if last update was < 2 seconds ago
-        // This prevents rapid-fire executions during initial data load
-        if (Date.now() - state.retrospective.lastUpdate < 2000) return;
-
-        // Get all device IDs
-        const deviceIds = Object.keys(state.devices).map(id => Number(id));
-        if (deviceIds.length === 0) return;
-
-        set(prevState => ({
-          retrospective: {
-            ...prevState.retrospective,
-            isAnalyzing: true,
-          }
-        }));
-
-        // Use dynamic import to avoid circular dependencies
-        void (async () => {
-          try {
-            // Add a small delay to let UI render first (yield to main thread)
-            await new Promise(resolve => setTimeout(resolve, 50));
-
-            const { analyzeAllDevices } = await import('@/engine/retrospective');
-            const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
-              Object.entries(state.devices).map(([id, d]) => [id, d.effectiveMotionProfile])
-            );
-
-            // Group positions by device for efficient retrospective analysis
-            const positionsByDevice = new Map<number, NormalizedPosition[]>();
-            for (const p of state.refs.positionsAll) {
-              const list = positionsByDevice.get(p.device) ?? [];
-              if (list.length === 0) positionsByDevice.set(p.device, list);
-              list.push(p);
-            }
-
-            const results = analyzeAllDevices(
-              positionsByDevice,
-              deviceIds,
-              motionProfiles
-            );
-
-            set(() => ({
-              retrospective: {
-                byDevice: results,
-                lastUpdate: Date.now(),
-                isAnalyzing: false,
-              }
-            }));
-          } catch {
-            set(prevState => ({
-              retrospective: {
-                ...prevState.retrospective,
-                isAnalyzing: false,
-              }
-            }));
-          }
-        })();
-      },
-
       // External Config
       fetchConfig: async () => {
         try {
           const response = await fetch('/api/config');
-          const config = await response.json();
+          const config = await response.json() as { traccarBaseUrl?: string; traccarSecure?: boolean };
 
           set(state => ({
             settings: {
               ...state.settings,
-              baseUrl: config.traccarBaseUrl || state.settings.baseUrl,
+              baseUrl: config.traccarBaseUrl ?? state.settings.baseUrl,
               secure: config.traccarSecure ?? state.settings.secure,
             }
           }));
@@ -674,12 +604,12 @@ export const useStore = create<Store>()(
             throw new Error(`Failed to fetch MapTiler key: ${response.status}`);
           }
 
-          const config = await response.json();
+          const config = await response.json() as { maptilerApiKey?: string };
 
           set(state => ({
             settings: {
               ...state.settings,
-              maptilerApiKey: config.maptilerApiKey || state.settings.maptilerApiKey,
+              maptilerApiKey: config.maptilerApiKey ?? state.settings.maptilerApiKey,
             }
           }));
         } catch (error) {

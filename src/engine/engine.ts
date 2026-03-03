@@ -461,6 +461,164 @@ export class Engine {
     });
   }
 
+  refineHistory(profileConfig: MotionProfileConfig) {
+    if (this.closedAnchors.length < 2) return;
+
+    // 1. Trim start and end points of motion segments
+    for (const segment of this.motionSegments) {
+      if (!segment.endAnchor) continue; // Skip active segment
+
+      const originalLength = segment.path.length;
+      if (originalLength <= 2) continue;
+
+      // Trim from start (points belonging to startAnchor)
+      const startRadiusSq = segment.startAnchor.variance; // Approx radius² from variance
+      let startIndex = 0;
+      while (startIndex < segment.path.length - 1) {
+        if (distanceSquared(segment.startAnchor.mean, segment.path[startIndex]!) <= startRadiusSq * 1.5) { // Lenient boundary
+          startIndex++;
+        } else {
+          break;
+        }
+      }
+
+      // Trim from end (points belonging to endAnchor)
+      const endRadiusSq = segment.endAnchor.variance;
+      let endIndex = segment.path.length - 1;
+      while (endIndex > startIndex) {
+        if (distanceSquared(segment.endAnchor.mean, segment.path[endIndex]!) <= endRadiusSq * 1.5) {
+          endIndex--;
+        } else {
+          break;
+        }
+      }
+
+      if (startIndex > 0 || endIndex < segment.path.length - 1) {
+        segment.path = segment.path.slice(startIndex, endIndex + 1);
+
+        // Recalculate distance
+        segment.distance = this.computePathLength(segment.path);
+      }
+    }
+
+    // 2. Merge adjacent anchors & drop transient ones
+    let i = 0;
+    while (i < this.closedAnchors.length - 1) {
+      const current = this.closedAnchors[i]!;
+      const next = this.closedAnchors[i + 1]!;
+
+      // Find the connecting motion segment
+      const segmentIndex = this.motionSegments.findIndex(s => s.startAnchor.startTimestamp === current.startTimestamp && s.endAnchor?.startTimestamp === next.startTimestamp);
+      if (segmentIndex === -1) {
+        i++;
+        continue;
+      }
+
+      const segment = this.motionSegments[segmentIndex]!;
+
+      // Calculate combined duration
+      const currentDuration = current.lastUpdateTimestamp - current.startTimestamp;
+
+      const distSq = distanceSquared(current.mean, next.mean);
+      const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
+      const mergeRadiusSquared = mergeRadius * mergeRadius;
+
+      // Calculate path extent to ensure it didn't wander far
+      let maxDistSqFromCenter = 0;
+      const center: Vec2 = [(current.mean[0] + next.mean[0]) / 2, (current.mean[1] + next.mean[1]) / 2];
+      for (const p of segment.path) {
+        const dSq = distanceSquared(center, p);
+        if (dSq > maxDistSqFromCenter) maxDistSqFromCenter = dSq;
+      }
+      const midExtentSq = maxDistSqFromCenter * 4; // Approx diameter²
+
+      const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
+      const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
+      const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
+
+      if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
+        // Merge `next` into `current`
+        const weightCurrent = currentDuration || 1;
+        const weightNext = (next.lastUpdateTimestamp - next.startTimestamp) || 1;
+
+        const newMean: Vec2 = [
+          (current.mean[0] * weightCurrent + next.mean[0] * weightNext) / (weightCurrent + weightNext),
+          (current.mean[1] * weightCurrent + next.mean[1] * weightNext) / (weightCurrent + weightNext)
+        ];
+
+        current.mean = newMean;
+        current.endTimestamp = next.endTimestamp;
+        current.lastUpdateTimestamp = next.lastUpdateTimestamp;
+        current.variance = (current.variance * weightCurrent + next.variance * weightNext) / (weightCurrent + weightNext);
+
+        // Remove `next` anchor
+        this.closedAnchors.splice(i + 1, 1);
+
+        // Remove the connecting segment
+        this.motionSegments.splice(segmentIndex, 1);
+
+        // If there's a subsequent segment that started from `next`, update its startAnchor
+        const nextSegment = this.motionSegments.find(s => s.startAnchor.startTimestamp === next.startTimestamp);
+        if (nextSegment) {
+          nextSegment.startAnchor = current;
+        }
+      } else {
+        i++;
+      }
+    }
+
+    // Also check merge with activeAnchor
+    if (this.activeAnchor && this.closedAnchors.length > 0) {
+      const current = this.closedAnchors[this.closedAnchors.length - 1]!;
+      const next = this.activeAnchor;
+
+      const segmentIndex = this.motionSegments.findIndex(s => s.startAnchor.startTimestamp === current.startTimestamp && s.endAnchor?.startTimestamp === next.startTimestamp);
+      if (segmentIndex !== -1) {
+        const segment = this.motionSegments[segmentIndex]!;
+        const currentDuration = current.lastUpdateTimestamp - current.startTimestamp;
+
+        const distSq = distanceSquared(current.mean, next.mean);
+        const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
+        const mergeRadiusSquared = mergeRadius * mergeRadius;
+
+        let maxDistSqFromCenter = 0;
+        const center: Vec2 = [(current.mean[0] + next.mean[0]) / 2, (current.mean[1] + next.mean[1]) / 2];
+        for (const p of segment.path) {
+          const dSq = distanceSquared(center, p);
+          if (dSq > maxDistSqFromCenter) maxDistSqFromCenter = dSq;
+        }
+        const midExtentSq = maxDistSqFromCenter * 4;
+
+        const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
+        const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
+        const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
+
+        if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
+          const weightCurrent = currentDuration || 1;
+          const weightNext = (next.lastUpdateTimestamp - next.startTimestamp) || 1;
+
+          const newMean: Vec2 = [
+            (current.mean[0] * weightCurrent + next.mean[0] * weightNext) / (weightCurrent + weightNext),
+            (current.mean[1] * weightCurrent + next.mean[1] * weightNext) / (weightCurrent + weightNext)
+          ];
+
+          next.mean = newMean;
+          next.startTimestamp = current.startTimestamp; // Inherit older start time
+          next.variance = (current.variance * weightCurrent + next.variance * weightNext) / (weightCurrent + weightNext);
+
+          this.closedAnchors.pop(); // Remove `current`
+          this.motionSegments.splice(segmentIndex, 1);
+
+          // Find any incoming segments to `current` and point them to `next`
+          const incomingSegment = this.motionSegments.find(s => s.endAnchor?.startTimestamp === current.startTimestamp);
+          if (incomingSegment) {
+            incomingSegment.endAnchor = next;
+          }
+        }
+      }
+    }
+  }
+
   restoreSnapshot(state: EngineState): void {
     this.activeAnchor = state.activeAnchor ? state.activeAnchor.clone() : null;
     this.closedAnchors = state.closedAnchors.map(a => a.clone());

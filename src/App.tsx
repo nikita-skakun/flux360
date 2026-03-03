@@ -7,7 +7,7 @@ import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
 import MotionSegmentPanel from "./ui/MotionSegmentPanel";
-import type { MotionSegment, RetrospectiveMotionSegment, DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
+import type { MotionSegment, DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -115,7 +115,7 @@ export function App() {
 
   const logout = useStore((state) => state.logout);
 
-  const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | RetrospectiveMotionSegment | null>(null);
+  const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | null>(null);
 
   useTraccarConnection({
     baseUrl: traccarBaseUrl,

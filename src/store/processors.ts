@@ -1,7 +1,8 @@
-import { Engine, type EngineState } from '@/engine/engine';
 import { dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
-import { toWebMercator } from '@/util/webMercator';
+import { Engine, type EngineState } from '@/engine/engine';
+import { MOTION_PROFILES } from '@/engine/motionDetector';
 import { rgbToHex } from '@/util/color';
+import { toWebMercator } from '@/util/webMercator';
 import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
@@ -136,31 +137,23 @@ export function computeProcessedPositions(
         return true;
     });
 
+    const posByDevice: Record<number, NormalizedPosition[]> = {};
     const groupIdsTouched = new Set<number>();
-    for (const p of newPositions) {
-        const groups = deviceToGroupsMap.get(p.device);
-        if (groups) {
-            for (const groupId of groups) {
-                groupIdsTouched.add(groupId);
-            }
-        }
-    }
 
     // Group positions by device AND by any groups they belong to
-    const posByDevice = newPositions.reduce((acc, p) => {
+    for (const p of newPositions) {
         // Add position to the original device
-        (acc[p.device] ||= []).push(p);
+        (posByDevice[p.device] ||= []).push(p);
 
         // Also add position to any groups this device belongs to
         const groups = deviceToGroupsMap.get(p.device);
         if (groups) {
             for (const groupId of groups) {
-                (acc[groupId] ||= []).push(p);
+                groupIdsTouched.add(groupId);
+                (posByDevice[groupId] ||= []).push(p);
             }
         }
-
-        return acc;
-    }, {} as Record<number, NormalizedPosition[]>);
+    }
 
     // Bootstrap missing group engines (including new groups)
     for (const group of groupDevices) {
@@ -302,7 +295,10 @@ export function computeProcessedPositions(
         }
 
         if (minTimestamp !== Infinity) {
-            for (const engine of engines.values()) {
+            for (const [deviceId, engine] of engines.entries()) {
+                const profile = motionProfiles[deviceId] ?? "person";
+                const profileConfig = MOTION_PROFILES[profile];
+                engine.refineHistory(profileConfig);
                 engine.pruneHistory(minTimestamp);
             }
         }

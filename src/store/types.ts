@@ -1,5 +1,5 @@
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, MotionSegment, RetrospectiveResult, Timestamp } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, MotionSegment, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -59,13 +59,6 @@ export type StoreState = {
 
   // Motion segments
   motionSegments: Record<number, MotionSegment[]>;
-
-  // Retrospective analysis state
-  retrospective: {
-    byDevice: Map<number, RetrospectiveResult>;
-    lastUpdate: Timestamp;
-    isAnalyzing: boolean;
-  };
 };
 
 export type StoreActions = {
@@ -96,9 +89,6 @@ export type StoreActions = {
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
-
-  // Retrospective analysis actions
-  runRetrospectiveAnalysis: () => void;
 
   // External Config
   fetchConfig: () => Promise<void>;

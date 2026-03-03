@@ -3,7 +3,7 @@ import { getColorForDevice, rgbaString } from "@/util/color";
 import { distanceSquared, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, interpolateColor } from "@/util/rendering";
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
-import type { DevicePoint, MotionSegment, RetrospectiveMotionSegment, Vec2, DebugAnchor, DebugFrameView as DebugFrame } from "@/types";
+import type { DevicePoint, MotionSegment, Vec2, DebugAnchor, DebugFrameView as DebugFrame } from "@/types";
 
 export type CanvasViewHandle = {
   hitTestPoint: (x: number, y: number) => { items: DevicePoint[]; x: number; y: number } | null;
@@ -24,7 +24,7 @@ export type CanvasViewProps = {
   debugFrame: DebugFrame | null;
   debugAnchors: DebugAnchor[];
   motionSegments: MotionSegment[];
-  selectedMotionSegment: MotionSegment | RetrospectiveMotionSegment | null;
+  selectedMotionSegment: MotionSegment | null;
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
   darkMode: boolean;

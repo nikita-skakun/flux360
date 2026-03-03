@@ -86,19 +86,3 @@ export type MotionSegment = {
   distance: number;
   duration: number;
 };
-
-// Retrospective analysis types
-export type RetrospectiveMotionSegment = {
-  startTime: Timestamp;
-  endTime: Timestamp;
-  startPosition: Vec2;
-  endPosition: Vec2;
-  path: Vec2[];
-  confidence: number;
-  distance: number;
-  duration: number;
-};
-
-export type RetrospectiveResult = {
-  motionSegments: RetrospectiveMotionSegment[];
-};
