@@ -520,8 +520,12 @@ export class Engine {
       }
 
       // If the maximum departure from the anchor didn't even exceed the normal stationary cluster size
-      if (maxDistSq < profileConfig.retrospectiveMaxStationaryRadius * profileConfig.retrospectiveMaxStationaryRadius) {
-        return false; // Prune insignificant loop
+      // OR if the excursion consists of 2 or fewer intermediate points (a singular GPS spike/bounce)
+      if (
+        maxDistSq < profileConfig.retrospectiveMaxStationaryRadius * profileConfig.retrospectiveMaxStationaryRadius ||
+        segment.path.length <= 4
+      ) {
+        return false; // Prune insignificant loop or uncorroborated spike
       }
       return true;
     });
