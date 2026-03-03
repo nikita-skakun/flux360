@@ -2,6 +2,17 @@ import { Engine, type EngineSnapshot } from "@/engine/engine";
 import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2, Timestamp } from "@/types";
 import { fromWebMercator, toWebMercator } from "@/util/webMercator";
 
+export function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  if (m < 60) return `${m}m ${sec}s`;
+  const h = Math.floor(m / 60);
+  const min = m % 60;
+  return `${h}h ${min}m`;
+}
+
 export function dedupeKey(p: { device: number; timestamp: Timestamp; geo: Vec2 }) {
   return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
 }

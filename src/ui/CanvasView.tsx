@@ -1,7 +1,7 @@
 import { CLUSTER_DISTANCE_PX, clusterRadius, computeClusters, type DrawItem, type Cluster } from "@/util/clustering";
-import { getColorForDevice, rgbaString } from "@/util/color";
 import { distanceSquared, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, interpolateColor } from "@/util/rendering";
+import { getColorForDevice, rgbaString } from "@/util/color";
 import React, { useRef, useEffect, useState, useImperativeHandle, forwardRef } from "react";
 import type { DevicePoint, MotionSegment, Vec2, DebugAnchor, DebugFrameView as DebugFrame } from "@/types";
 
@@ -24,14 +24,13 @@ export type CanvasViewProps = {
   debugFrame: DebugFrame | null;
   debugAnchors: DebugAnchor[];
   motionSegments: MotionSegment[];
-  selectedMotionSegment: MotionSegment | null;
   deviceIcons: Record<number, string>;
   deviceColors: Record<number, string>;
   darkMode: boolean;
   memberDeviceIds: Set<number>;
 };
 
-const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], selectedMotionSegment, deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
+const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, debugAnchors, motionSegments = [], deviceIcons, deviceColors, darkMode, memberDeviceIds = new Set() }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawItemsRef = useRef<DrawItem[]>([]);
   const clustersRef = useRef<Cluster[]>([]);
@@ -282,9 +281,8 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
             }
 
             const isCompleted = segment.endAnchor !== null;
-            const isSelected = selectedMotionSegment?.startTime === segment.startTime &&
-              selectedMotionSegment?.path.length === segment.path.length;
-            const opacity = selectedMotionSegment ? (isSelected ? 1.0 : 0.1) : 0.7;
+            const opacity = 0.7; // Always 0.7 since there's no selection
+            const lineWidth = 3; // Always 3 since there's no selection
 
             // Start: Red (255,0,0)
             const startColor: [number, number, number] = [255, 0, 0];
@@ -293,7 +291,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
 
             ctx.save();
             ctx.globalAlpha = opacity;
-            ctx.lineWidth = isSelected ? 5 : 3;
+            ctx.lineWidth = lineWidth;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
 
@@ -489,7 +487,7 @@ const CanvasView = forwardRef<CanvasViewHandle, CanvasViewProps>(({ components, 
     render();
 
     return () => { };
-  }, [components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, selectedMotionSegment, darkMode, memberDeviceIds]);
+  }, [components, width, height, refMeters, zoom, fitToBounds, selectedDeviceId, openClusterPoint, debugFrame, motionSegments, darkMode, memberDeviceIds]);
 
   return <canvas ref={canvasRef} width={width} height={height} style={{ display: "block", position: "absolute", left: 0, top: 0, width: `${width}px`, height: `${height}px`, pointerEvents: "none" }} />;
 });

@@ -7,11 +7,13 @@ import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp } from "@/types";
-import type { Feature, Point, Polygon } from "geojson";
+import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, MotionSegment } from "@/types";
+import type { Feature, Point, Polygon, LineString } from "geojson";
+import type { Anchor } from "@/engine/anchor";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
+  flyToBounds: (bounds: [Vec2, Vec2]) => void;
 };
 
 type Props = {
@@ -27,6 +29,7 @@ type Props = {
   debugAnchors: DebugAnchor[];
   debugFrame: DebugFrameView | null;
   pulsingDeviceIds: number[];
+  selectedHistoryItem?: Anchor | MotionSegment | null;
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
@@ -42,6 +45,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   debugAnchors = [],
   debugFrame = null,
   pulsingDeviceIds = [],
+  selectedHistoryItem = null,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -90,8 +94,15 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     map.flyTo({ center: device.geo, zoom: 18, duration });
   }, []);
 
+  const flyToBounds = useCallback((bounds: [Vec2, Vec2]) => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.fitBounds(bounds, { padding: 80, maxZoom: 18, duration: 1000 });
+  }, []);
+
   useImperativeHandle(ref, () => ({
     flyToDevice,
+    flyToBounds,
   }));
 
   const updateLayers = useCallback(() => {
@@ -449,7 +460,78 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds]);
+
+    // Process history item
+    const historyFeatures: Feature<Polygon | LineString>[] = [];
+    if (selectedHistoryItem) {
+      if ('startTimestamp' in selectedHistoryItem) {
+        const a = selectedHistoryItem;
+        const radius = getRadiusFromVariance(a.variance);
+        const pts = 64;
+        const coords: Vec2[] = [];
+        for (let j = 0; j <= pts; j++) {
+          const angle = (j * 2 * Math.PI) / pts;
+          coords.push(fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]));
+        }
+        historyFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [coords] },
+          properties: { isAnchor: true },
+        });
+      } else {
+        const s = selectedHistoryItem;
+        if (s.path.length > 1) {
+          historyFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: s.path.map((p: Vec2) => fromWebMercator([p[0], p[1]])) },
+            properties: { isAnchor: false },
+          });
+        }
+      }
+    }
+
+    try {
+      if (!map.getSource('history-source')) {
+        map.addSource('history-source', { type: 'geojson', data: { type: 'FeatureCollection', features: historyFeatures as unknown as Feature[] } });
+        map.addLayer({
+          id: 'history-anchor-layer',
+          type: 'fill',
+          source: 'history-source',
+          filter: ['==', 'isAnchor', true],
+          paint: {
+            'fill-color': '#eab308',
+            'fill-opacity': 0.3,
+          }
+        }, 'dots-layer');
+        map.addLayer({
+          id: 'history-anchor-stroke-layer',
+          type: 'line',
+          source: 'history-source',
+          filter: ['==', 'isAnchor', true],
+          paint: {
+            'line-color': '#eab308',
+            'line-width': 2,
+          }
+        }, 'individuals-layer');
+        map.addLayer({
+          id: 'history-path-layer',
+          type: 'line',
+          source: 'history-source',
+          filter: ['==', 'isAnchor', false],
+          paint: {
+            'line-color': '#eab308',
+            'line-width': 4,
+            'line-dasharray': [2, 2],
+          }
+        }, 'individuals-layer');
+      } else {
+        (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: historyFeatures as unknown as Feature[] });
+      }
+    } catch (e: unknown) {
+      if (e instanceof Error && e.message.includes("Style is not done loading")) return;
+      throw e;
+    }
+  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds, selectedHistoryItem]);
 
   const listenersAttached = useRef(false);
 

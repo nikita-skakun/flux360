@@ -1,12 +1,15 @@
+import { fromWebMercator } from "./util/webMercator";
+import { HistoryObservationBar } from "./ui/HistoryObservationBar";
 import { LoginPage } from "./ui/LoginPage";
 import { SettingsPanel } from "./ui/SettingsPanel";
+import { TimelinePanel, type TimelineEvent } from "./ui/TimelinePanel";
 import { useEffect, useState, useMemo, useRef } from "react";
 import { useStore } from "./store";
 import { useTraccarConnection } from "./hooks/useTraccarConnection";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import MotionSegmentPanel from "./ui/MotionSegmentPanel";
+import type { Anchor } from "./engine/anchor";
 import type { MotionSegment, DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
@@ -115,7 +118,7 @@ export function App() {
 
   const logout = useStore((state) => state.logout);
 
-  const [selectedMotionSegment, setSelectedMotionSegment] = useState<MotionSegment | null>(null);
+  const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
 
   useTraccarConnection({
     baseUrl: traccarBaseUrl,
@@ -145,8 +148,8 @@ export function App() {
     // Create a set of group member IDs to hide them if they should be shown via group
     const groupMemberIds = new Set<number>();
     for (const group of groupDevices) {
-      for (const id of group.memberDeviceIds) {
-        groupMemberIds.add(id);
+      for (const memberId of group.memberDeviceIds) {
+        groupMemberIds.add(memberId);
       }
     }
 
@@ -185,7 +188,7 @@ export function App() {
 
   // Clear selected motion segment when device changes
   useEffect(() => {
-    setSelectedMotionSegment(null);
+    setSelectedTimelineEvent(null);
   }, [selectedDeviceId]);
 
   // Current debug frame for map rendering
@@ -282,6 +285,12 @@ export function App() {
 
   return (
     <div className="h-screen w-screen">
+      {selectedTimelineEvent && (
+        <HistoryObservationBar
+          event={selectedTimelineEvent}
+          onClose={() => setSelectedTimelineEvent(null)}
+        />
+      )}
       <DeviceListSidePanel
         devices={deviceList}
         selectedDeviceId={selectedDeviceId}
@@ -317,6 +326,7 @@ export function App() {
         debugAnchors={debugAnchors}
         debugFrame={debugFrame}
         pulsingDeviceIds={pulsingDeviceIds}
+        selectedHistoryItem={selectedTimelineEvent?.item ?? null}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
@@ -341,13 +351,51 @@ export function App() {
               setEditingTarget={setEditingTarget}
             />
 
-            {debugMode && selectedMotionSegment && selectedDeviceId != null && (
-              <MotionSegmentPanel
-                segment={selectedMotionSegment}
-                debugFrames={[...(enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [])]}
-                onClose={() => setSelectedMotionSegment(null)}
-              />
-            )}
+            <TimelinePanel
+              selectedDeviceId={selectedDeviceId}
+              enginesRef={enginesRef}
+              engineSnapshot={selectedDeviceId != null ? engineSnapshotsByDevice[selectedDeviceId] : undefined}
+              onSelectEvent={(event) => {
+                setSelectedTimelineEvent(event);
+                const isAnchor = 'startTimestamp' in event.item;
+                const startTime = isAnchor ? (event.item as Anchor).startTimestamp : (event.item as MotionSegment).startTime;
+
+                if (debugMode && selectedDeviceId != null) {
+                  const engine = enginesRef.get(selectedDeviceId);
+                  if (engine) {
+                    const frames = [...engine.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp);
+                    const idx = frames.findIndex(f => f.timestamp >= startTime);
+                    if (idx >= 0) {
+                      setDebugFrameIndex(idx);
+                    }
+                  }
+                }
+
+                if (isAnchor) {
+                  const a = event.item as Anchor;
+                  const geo = fromWebMercator(a.mean);
+                  const r = 0.001; // roughly 100m padding
+                  mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
+                } else {
+                  const s = event.item as MotionSegment;
+                  if (s.path.length > 0) {
+                    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+                    for (const p of s.path) {
+                      const geo = fromWebMercator(p);
+                      minLng = Math.min(minLng, geo[0]);
+                      maxLng = Math.max(maxLng, geo[0]);
+                      minLat = Math.min(minLat, geo[1]);
+                      maxLat = Math.max(maxLat, geo[1]);
+                    }
+                    if (minLng !== Infinity) {
+                      const padding = Math.max(0.001, (maxLng - minLng) * 0.1, (maxLat - minLat) * 0.1);
+                      mapViewRef.current?.flyToBounds([[minLng - padding, minLat - padding], [maxLng + padding, maxLat + padding]]);
+                    }
+                  }
+                }
+              }}
+              selectedEventId={selectedTimelineEvent?.id ?? null}
+            />
           </div>
         }
       />
