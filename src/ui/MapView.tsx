@@ -609,6 +609,49 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     return () => { running = false; };
   }, [pulsingDeviceIds]);
 
+  // Animate motion segment path (marching ants effect)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer('history-path-layer')) return;
+
+    const isMotionSegment = selectedHistoryItem && !('startTimestamp' in selectedHistoryItem);
+    if (!isMotionSegment) {
+      map.setPaintProperty('history-path-layer', 'line-dasharray', [2, 2]);
+      return;
+    }
+
+    const dashArraySequence = [
+      [0, 4, 3],
+      [0.5, 4, 2.5],
+      [1, 4, 2],
+      [1.5, 4, 1.5],
+      [2, 4, 1],
+      [2.5, 4, 0.5],
+      [3, 4, 0],
+      [0, 0.5, 3, 3.5],
+      [0, 1, 3, 3],
+      [0, 1.5, 3, 2.5],
+      [0, 2, 3, 2],
+      [0, 2.5, 3, 1.5],
+      [0, 3, 3, 1],
+      [0, 3.5, 3, 0.5],
+    ];
+
+    let running = true;
+    let lastStep = -1;
+    const tick = () => {
+      const map = mapRef.current;
+      const step = Math.floor(Date.now() / 50) % dashArraySequence.length;
+      if (running && map?.getLayer('history-path-layer') && map.getStyle() && step !== lastStep) {
+        lastStep = step;
+        map.setPaintProperty('history-path-layer', 'line-dasharray', dashArraySequence[step] as [number, number, number]);
+      }
+      window.requestAnimationFrame(tick);
+    };
+    window.requestAnimationFrame(tick);
+    return () => { running = false; };
+  }, [selectedHistoryItem]);
+
   // Listeners setup
   useEffect(() => {
     const map = mapRef.current;
