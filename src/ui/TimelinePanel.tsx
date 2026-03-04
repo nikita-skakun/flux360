@@ -42,7 +42,8 @@ const Sparkline = ({ event }: { event: MotionEvent }) => {
     const vbW = size + padding * 2;
     const vbH = size + padding * 2;
 
-    const pointsStr = event.path.map(p => `${p[0]},${p[1]}`).join(' ');
+    const flipY = (y: number) => minY + maxY - y;
+    const pointsStr = event.path.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
 
     return (
         <svg
@@ -58,8 +59,8 @@ const Sparkline = ({ event }: { event: MotionEvent }) => {
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />
-            <circle cx={event.path[0]?.[0] ?? 0} cy={event.path[0]?.[1] ?? 0} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
-            <circle cx={event.path[event.path.length - 1]?.[0] ?? 0} cy={event.path[event.path.length - 1]?.[1] ?? 0} r={vbW * 0.08} fill="currentColor" />
+            <circle cx={event.path[0]?.[0] ?? 0} cy={flipY(event.path[0]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
+            <circle cx={event.path[event.path.length - 1]?.[0] ?? 0} cy={flipY(event.path[event.path.length - 1]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" />
         </svg>
     );
 };
