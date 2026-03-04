@@ -1,4 +1,3 @@
-
 export type Timestamp = number & { readonly __u?: 'timestamp' };
 
 export type Vec2 = [number, number];

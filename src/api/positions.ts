@@ -1,4 +1,4 @@
-import { performRequest, buildAuthHeader, type TraccarClientOptions } from "./httpUtils";
+import { performRequest, buildAuthHeader, buildApiUrl, type TraccarClientOptions } from "./httpUtils";
 import type { NormalizedPosition } from "@/types";
 
 export function normalizePosition(raw: unknown): NormalizedPosition | null {
@@ -30,19 +30,14 @@ export async function fetchPositions(
   params: Record<string, string> = {}
 ): Promise<NormalizedPosition[]> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const protocol = opts.secure ? 'https' : 'http';
-  const base = `${protocol}://${opts.baseUrl}/api`;
-  const paramsBase: Record<string, string> = {
+  const queryParams: Record<string, string> = {
     deviceId: String(device),
     from: from.toISOString(),
+    ...params
   };
-  if (to) paramsBase["to"] = to.toISOString();
-  for (const [k, v] of Object.entries(params)) {
-    paramsBase[k] = v;
-  }
+  if (to) queryParams["to"] = to.toISOString();
 
-  const qs = new URLSearchParams(paramsBase).toString();
-  const url = `${base}/positions?${qs}`;
+  const url = buildApiUrl(opts.baseUrl, opts.secure, "/positions", queryParams);
 
   const headers: Record<string, string> = {
     "Accept": "application/json",

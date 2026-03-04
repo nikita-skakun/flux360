@@ -203,7 +203,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     // Debug frame circles (mean/variance at selected frame)
     type FrameFeature = Feature<Polygon | Point>;
     const debugFrameFeatures: FrameFeature[] = [];
-    if (debugFrame && debugFrame.mean && debugFrame.variance) {
+    if (debugFrame?.mean && debugFrame?.variance) {
       const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
         const pts = 64;
         const coords: Vec2[] = [];
@@ -624,7 +624,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map?.getLayer('history-path-layer')) return;
 
-    const isMotionSegment = selectedHistoryItem && selectedHistoryItem.type === 'motion';
+    const isMotionSegment = selectedHistoryItem?.type === 'motion';
     if (!isMotionSegment) {
       map.setPaintProperty('history-path-layer', 'line-dasharray', [2, 2]);
       return;

@@ -4,6 +4,16 @@
 
 import type { MotionProfileName } from "@/types";
 
+// Engine constants
+export const ENGINE_WINDOW_SIZE = 50; // sliding window for recent points
+export const PENDING_THRESHOLD = 5; // minimum pending points to trigger motion check
+export const MIN_PATH_POINTS = 5; // minimum points in path for significance checks
+export const HARD_BREAKOUT_DISTANCE = 100; // meters from original anchor to force motion
+export const SETTLING_WINDOW_CAP = 20; // max points in motion settling window
+export const DEBUG_FRAME_CAP = 2000; // max debug frames to retain
+export const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+export const MAX_CHECKPOINTS = 50; // maximum number of checkpoints per engine
+
 /**
  * Configuration for motion detection behavior.
  */

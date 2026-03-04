@@ -105,13 +105,17 @@ export const TimelinePanel: React.FC<Props> = ({
             sampledFrames = [...startFrames, ...middleFrames, ...endFrames].filter(Boolean) as typeof relevantFrames;
         }
 
-        const round = (val: any): any => {
+        const round = (val: unknown): unknown => {
             if (typeof val === 'number') return Math.round(val * 100) / 100;
             if (Array.isArray(val)) return val.map(round);
             if (val && typeof val === 'object') {
-                const res: any = {};
-                for (const key in val) {
-                    if (val[key] != null) res[key] = round(val[key]);
+                const res: Record<string, unknown> = {};
+                const obj = val as Record<string, unknown>;
+                for (const key in obj) {
+                    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+                        const v = obj[key];
+                        if (v != null) res[key] = round(v);
+                    }
                 }
                 return res;
             }
@@ -122,7 +126,7 @@ export const TimelinePanel: React.FC<Props> = ({
             const prev = i > 0 ? sampledFrames[i - 1] : null;
             let dist = 0;
             let bearing = 0;
-            if (prev && prev.point && f.point) {
+            if (prev?.point && f.point) {
                 const geoFrom = fromWebMercator(prev.point);
                 const geoTo = fromWebMercator(f.point);
                 dist = haversineDistance(geoFrom, geoTo);
@@ -152,7 +156,9 @@ export const TimelinePanel: React.FC<Props> = ({
             at: new Date().toISOString()
         });
 
-        navigator.clipboard.writeText(JSON.stringify(exportData, null, 2));
+        if (navigator?.clipboard) {
+            void navigator.clipboard.writeText(JSON.stringify(exportData, null, 2)).catch(() => { });
+        }
         setCopiedId(ev.id);
         setTimeout(() => setCopiedId(null), 2000);
     };

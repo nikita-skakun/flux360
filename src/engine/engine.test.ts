@@ -242,7 +242,7 @@ describe("Engine Core Logic", () => {
         }
 
         // Should settle quickly, not drag on as a long false motion
-        const motionEvents = engine.closed.filter(e => e.type === 'motion') as MotionEvent[];
+        const motionEvents = engine.closed.filter((e): e is MotionEvent => e.type === 'motion');
         for (const m of motionEvents) {
             const durationSec = (m.end - m.start) / 1000;
             expect(durationSec).toBeLessThan(1200);

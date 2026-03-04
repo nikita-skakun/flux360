@@ -25,6 +25,15 @@ export function normalizeTraccarUrl(baseUrl: string): string {
   return url;
 }
 
+export function buildApiUrl(baseUrl: string, secure: boolean, path: string, params: Record<string, string> = {}): string {
+  const normalized = normalizeTraccarUrl(baseUrl);
+  const protocol = normalized.startsWith('http') ? '' : `${secure ? 'https' : 'http'}://`;
+  const base = `${protocol}${normalized}`;
+  const fullPath = path.startsWith('/') ? path : `/${path}`;
+  const qs = new URLSearchParams(params).toString();
+  return `${base}/api${fullPath}${qs ? `?${qs}` : ''}`;
+}
+
 export async function performRequest<T = unknown>(
   fetcher: typeof fetch,
   url: string,

@@ -1,5 +1,5 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
-import type { DevicePoint, NormalizedPosition, MotionProfileName, EngineEvent, Vec2, Timestamp } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp } from "@/types";
 import { fromWebMercator } from "@/util/webMercator";
 
 export function formatDuration(ms: number): string {
@@ -22,8 +22,7 @@ export function buildEngineSnapshotsFromByDevice(
   enginesRef: Map<number, Engine>,
   groupIdsRef: Set<number>,
   groupMotionProfiles: Map<number, MotionProfileName>,
-  deviceMotionProfiles: Record<number, MotionProfileName>,
-  _allPosByDevice: Map<number, NormalizedPosition[]>
+  deviceMotionProfiles: Record<number, MotionProfileName>
 ): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; eventsByDevice: Record<number, EngineEvent[]> } {
   try {
     for (const [deviceKey, arr] of Object.entries(byDevice)) {

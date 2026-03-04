@@ -1,6 +1,6 @@
 import { dedupeKey, buildEngineSnapshotsFromByDevice } from '@/util/appUtils';
 import { Engine, type EngineState } from '@/engine/engine';
-import { MOTION_PROFILES } from '@/engine/motionDetector';
+import { MOTION_PROFILES, CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from '@/engine/motionDetector';
 import { rgbToHex } from '@/util/color';
 import { toWebMercator } from '@/util/webMercator';
 import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp } from '@/types';
@@ -105,12 +105,9 @@ export function computeProcessedPositions(
 ): { engineSnapshotsByDevice: Record<number, DevicePoint[]>, eventsByDevice: Record<number, EngineEvent[]> } | null {
     if (!positionsAll || positionsAll.length === 0) return null;
 
-    // Sort once at the beginning to ensure chronological order
-    const sortedPositions = [...positionsAll].sort((a, b) => a.timestamp - b.timestamp);
-
     // Pre-index all positions by deviceId once to avoid O(N*E) filters
     const allPosByDevice = new Map<number, NormalizedPosition[]>();
-    for (const p of sortedPositions) {
+    for (const p of positionsAll) {
         // Add to individual device list
         let list = allPosByDevice.get(p.device);
         if (!list) {
@@ -134,7 +131,7 @@ export function computeProcessedPositions(
     }
 
     // Filter out already processed positions using dedupeKey
-    const newPositions = sortedPositions.filter((p: NormalizedPosition) => {
+    const newPositions = positionsAll.filter((p: NormalizedPosition) => {
         const key = dedupeKey(p);
         if (processedKeys.has(key)) return false;
         processedKeys.add(key);
@@ -243,12 +240,9 @@ export function computeProcessedPositions(
                     }
                 }
             }
-            historical.sort((a, b) => a.timestamp - b.timestamp);
             posByDevice[deviceId] = historical;
         }
     }
-
-    for (const arr of Object.values(posByDevice)) arr.sort((a, b) => a.timestamp - b.timestamp);
 
     const rawByDevice: Record<number, DevicePoint[]> = {};
     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
@@ -264,8 +258,6 @@ export function computeProcessedPositions(
             sourceDeviceId: groupIds.has(deviceId) ? p.device : undefined,
         }));
     }
-
-    // No need to track firstPosition anymore
 
     const groupMotionProfiles = new Map<number, MotionProfileName>();
     for (const group of groupDevices) {
@@ -283,7 +275,7 @@ export function computeProcessedPositions(
         groupMotionProfiles.set(group.id, profile);
     }
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles, allPosByDevice);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles);
 
     // Prune old motion segments from engines based on the current data window
     if (positionsAll.length > 0) {
@@ -316,9 +308,9 @@ export function computeProcessedPositions(
             }
             const lastCp = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1] : null;
             // Checkpoint every 5 minutes
-            if (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > 300000) {
+            if (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS) {
                 checkpoints.push({ timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() });
-                if (checkpoints.length > 50) checkpoints.shift(); // Keep last 50
+                if (checkpoints.length > MAX_CHECKPOINTS) checkpoints.shift(); // Keep last N
             }
         }
     }

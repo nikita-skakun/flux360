@@ -1,5 +1,5 @@
-import { distanceSquared, haversineDistance } from "@/util/geo";
-import { MOTION_PROFILES, type MotionProfileConfig } from "./motionDetector";
+import { haversineDistance } from "@/util/geo";
+import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, DEBUG_FRAME_CAP, type MotionProfileConfig } from "./motionDetector";
 import { fromWebMercator } from "@/util/webMercator";
 import { smoothPath } from "@/util/pathSmoothing";
 import type {
@@ -39,11 +39,6 @@ export type DebugFrame = {
   pendingCount: number;
   draftType: 'stationary' | 'motion' | 'none';
 };
-
-// Internal constants for the stream-centric logic
-const WINDOW = 50;
-const PENDING_MIN = 5;
-const MIN_PATH_POINTS = 5;
 
 export class Engine {
   draft: EngineDraft | null = null;
@@ -104,12 +99,12 @@ export class Engine {
 
     // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
     const distFromStart = haversineDistance(fromWebMercator(p.mean), fromWebMercator(draft.stationaryStartAnchor));
-    const isFar = distFromStart > 100; // 100m hard breakout
+    const isFar = distFromStart > HARD_BREAKOUT_DISTANCE;
 
     if (m2 < profile.stationaryMahalanobisThreshold && !isFar) {
       // It's stationary
       draft.recent.push(p);
-      if (draft.recent.length > WINDOW) draft.recent.shift();
+      if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
       draft.pending = []; // Reset hysteresis
       this.recordDebug(p, 'stationary', stats.mean, stats.variance, m2);
     } else {
@@ -117,7 +112,7 @@ export class Engine {
       draft.pending.push(p);
       this.recordDebug(p, 'pending', stats.mean, stats.variance, m2);
 
-      if (draft.pending.length >= PENDING_MIN) {
+      if (draft.pending.length >= PENDING_THRESHOLD) {
         // Alignment Gate: Transition only if points are coherent
         const directions: Vec2[] = draft.pending.map(pt => {
           const dx = pt.mean[0] - stats.mean[0];
@@ -127,7 +122,7 @@ export class Engine {
         });
 
         const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
-        const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > 100);
+        const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > HARD_BREAKOUT_DISTANCE);
 
         if (isCoherent || anyPendingFar) {
           // Transition to Motion
@@ -145,7 +140,7 @@ export class Engine {
           // Mushy noise. Merge oldest pending into recent to prevent buffer bloat
           const first = draft.pending.shift()!;
           draft.recent.push(first);
-          if (draft.recent.length > WINDOW) draft.recent.shift();
+          if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
           this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
         }
       }
@@ -158,7 +153,7 @@ export class Engine {
 
     // Cap settling window by count to handle sparse GPS data.
     // checkSettled's own duration check handles the time constraint.
-    while (draft.recent.length > 20) {
+    while (draft.recent.length > SETTLING_WINDOW_CAP) {
       draft.recent.shift();
     }
 
@@ -303,10 +298,6 @@ export class Engine {
       sumDistSq += (dx * dx + dy * dy);
     }
 
-    // Convert Web Mercator variance to meters squared approximately
-    // At equator 1 unit is roughly 1 meter? No, Web Mercator is 2*PI*R units.
-    // Let's use a simpler heuristic or the haversine-based variance if needed.
-    // For now, let's keep it in "units squared" and scale if required.
     const variance = sumDistSq / points.length;
 
     // Variance cap to prevent "mega-anchors" that swallow large jumps
@@ -339,7 +330,7 @@ export class Engine {
     let maxD2 = 0;
     const anchorGeo = fromWebMercator(anchor);
     for (const p of path) {
-      const d2 = distanceSquared(fromWebMercator(p.mean), anchorGeo);
+      const d2 = (p.mean[0] - anchorGeo[0]) ** 2 + (p.mean[1] - anchorGeo[1]) ** 2;
       if (d2 > maxD2) maxD2 = d2;
     }
     return Math.sqrt(maxD2);
@@ -357,7 +348,7 @@ export class Engine {
       draftType: this.draft?.type ?? 'none'
     });
     // Cap debug frames
-    if (this.debugFrames.length > 2000) this.debugFrames.shift();
+    if (this.debugFrames.length > DEBUG_FRAME_CAP) this.debugFrames.shift();
   }
 
   getCurrentSnapshot(): EngineSnapshot | null {
@@ -372,8 +363,8 @@ export class Engine {
 
   createSnapshot(): EngineState {
     return {
-      draft: JSON.parse(JSON.stringify(this.draft)),
-      closed: JSON.parse(JSON.stringify(this.closed)),
+      draft: JSON.parse(JSON.stringify(this.draft)) as EngineDraft,
+      closed: JSON.parse(JSON.stringify(this.closed)) as EngineEvent[],
       debugFrames: [...this.debugFrames],
       seenDebugKeys: new Set(this.seenDebugKeys)
     };

@@ -14,17 +14,18 @@ export default [
         project: './tsconfig.json'
       },
       globals: {
-        window: 'readonly',
+        btoa: 'readonly',
+        clearInterval: 'readonly',
+        clearTimeout: 'readonly',
+        console: 'readonly',
         document: 'readonly',
         fetch: 'readonly',
-        btoa: 'readonly',
-        setTimeout: 'readonly',
-        clearTimeout: 'readonly',
-        setInterval: 'readonly',
-        clearInterval: 'readonly',
-        console: 'readonly',
+        navigator: 'readonly',
         process: 'readonly',
-        React: 'readonly'
+        setInterval: 'readonly',
+        setTimeout: 'readonly',
+        window: 'readonly',
+        React: 'readonly',
       }
     },
     plugins: {

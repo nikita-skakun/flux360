@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { CONFIDENCE_HIGH_THRESHOLD, CONFIDENCE_MEDIUM_THRESHOLD } from "@/engine/anchor";
 import { Engine } from "@/engine/engine";
 import { Pencil, X } from "lucide-react";
 import { fromWebMercator } from "@/util/webMercator";
@@ -7,6 +6,10 @@ import { Slider } from "@/components/ui/slider";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React from "react";
 import type { DevicePoint, Timestamp } from "@/types";
+
+// UI confidence thresholds for display
+const CONFIDENCE_HIGH_THRESHOLD = 0.8;
+const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
 
 type Props = {
   selectedDeviceId: number | null;
