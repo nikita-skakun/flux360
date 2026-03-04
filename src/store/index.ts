@@ -38,7 +38,7 @@ const initialState: StoreState = {
     engineCheckpoints: new Map(),
   },
   engineSnapshotsByDevice: {},
-  motionSegments: {},
+  eventsByDevice: {},
 };
 
 export const useStore = create<Store>()(
@@ -441,11 +441,11 @@ export const useStore = create<Store>()(
 
         if (!result) return null;
 
-        const { engineSnapshotsByDevice, motionSegments } = result;
+        const { engineSnapshotsByDevice, eventsByDevice } = result;
 
         set(() => ({
           engineSnapshotsByDevice,
-          motionSegments,
+          eventsByDevice,
         }));
 
         return null;

@@ -3,7 +3,7 @@ import { Engine, type EngineState } from '@/engine/engine';
 import { MOTION_PROFILES } from '@/engine/motionDetector';
 import { rgbToHex } from '@/util/color';
 import { toWebMercator } from '@/util/webMercator';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, Timestamp } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 type ColorFunction = (id: number) => [number, number, number];
@@ -102,7 +102,7 @@ export function computeProcessedPositions(
     engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>,
     groupIds: Set<number>,
     motionProfiles: Record<number, MotionProfileName>
-) {
+): { engineSnapshotsByDevice: Record<number, DevicePoint[]>, eventsByDevice: Record<number, EngineEvent[]> } | null {
     if (!positionsAll || positionsAll.length === 0) return null;
 
     // Pre-index all positions by deviceId once to avoid O(N*E) filters
@@ -326,6 +326,6 @@ export function computeProcessedPositions(
 
     return {
         engineSnapshotsByDevice: result.positionsByDevice,
-        motionSegments: result.motionSegments,
+        eventsByDevice: result.eventsByDevice,
     };
 }

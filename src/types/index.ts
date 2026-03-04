@@ -1,4 +1,3 @@
-import type { Anchor } from "@/engine/anchor";
 
 export type Timestamp = number & { readonly __u?: 'timestamp' };
 
@@ -16,23 +15,14 @@ export type DebugAnchor = {
 
 /** Snapshot of a single debug frame for map rendering. */
 export type DebugFrameView = {
-  /** GPS measurement: geographic position + accuracy radius in meters. */
-  measurement: {
-    geo: Vec2;
-    accuracy: number;
-    mean: Vec2;
-    variance: number;
-  };
-  /** Anchor state at this frame: Web Mercator center + variance (meters²), or null if no anchor yet. */
-  anchor: {
-    mean: Vec2;
-    variance: number;
-    confidence: number;
-    startTimestamp: Timestamp;
-    lastUpdateTimestamp: Timestamp;
-  } | null;
   timestamp: Timestamp;
-  motionStartTimestamp: Timestamp | null;
+  decision: 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
+  point: Vec2 | null;
+  mean: Vec2 | null;
+  variance: number | null;
+  mahalanobis2: number | null;
+  pendingCount: number;
+  draftType: 'stationary' | 'motion' | 'none';
 };
 
 export type DevicePoint = {
@@ -77,12 +67,42 @@ export type UiDevice = {
   color: string | null;
 };
 
-export type MotionSegment = {
-  startAnchor: Anchor;
-  endAnchor: Anchor | null;
-  path: Vec2[];
-  startTime: Timestamp;
-  endTime: Timestamp | null;
-  distance: number;
-  duration: number;
+export type StationaryEvent = {
+  type: 'stationary';
+  start: Timestamp;
+  end: Timestamp;
+  mean: Vec2;
+  variance: number;
 };
+
+export type MotionEvent = {
+  type: 'motion';
+  start: Timestamp;
+  end: Timestamp;
+  startAnchor: Vec2;
+  endAnchor: Vec2;
+  path: Vec2[];
+  distance: number;
+};
+
+export type EngineEvent = StationaryEvent | MotionEvent;
+
+export type StationaryDraft = {
+  type: 'stationary';
+  start: Timestamp;
+  stationaryStartAnchor: Vec2;
+  recent: DevicePoint[];  // Sliding window
+  pending: DevicePoint[]; // Hysteresis buffer
+};
+
+export type MotionDraft = {
+  type: 'motion';
+  start: Timestamp;
+  stationaryCutoff: Timestamp;
+  predecessor: StationaryDraft;
+  startAnchor: Vec2;
+  path: DevicePoint[];
+  recent: DevicePoint[]; // Settling window
+};
+
+export type EngineDraft = StationaryDraft | MotionDraft;

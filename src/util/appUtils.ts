@@ -1,6 +1,6 @@
 import { Engine, type EngineSnapshot } from "@/engine/engine";
-import type { DevicePoint, NormalizedPosition, MotionProfileName, MotionSegment, Vec2, Timestamp } from "@/types";
-import { fromWebMercator, toWebMercator } from "@/util/webMercator";
+import type { DevicePoint, NormalizedPosition, MotionProfileName, EngineEvent, Vec2, Timestamp } from "@/types";
+import { fromWebMercator } from "@/util/webMercator";
 
 export function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -23,11 +23,9 @@ export function buildEngineSnapshotsFromByDevice(
   groupIdsRef: Set<number>,
   groupMotionProfiles: Map<number, MotionProfileName>,
   deviceMotionProfiles: Record<number, MotionProfileName>,
-  allPosByDevice: Map<number, NormalizedPosition[]>
-): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; motionSegments: Record<number, MotionSegment[]> } {
+  _allPosByDevice: Map<number, NormalizedPosition[]>
+): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; eventsByDevice: Record<number, EngineEvent[]> } {
   try {
-    const measurementsByDevice: Record<number, DevicePoint[]> = {};
-
     for (const [deviceKey, arr] of Object.entries(byDevice)) {
       const deviceId = Number(deviceKey);
       if (!enginesRef.has(deviceId)) {
@@ -38,66 +36,68 @@ export function buildEngineSnapshotsFromByDevice(
         ? (groupMotionProfiles.get(deviceId) ?? "person")
         : (deviceMotionProfiles[deviceId] ?? "person");
       engine.setMotionProfile(profile);
-      measurementsByDevice[deviceId] = arr;
       engine.processMeasurements(arr);
     }
 
     const currentSnapshots: Record<number, DevicePoint[]> = {};
     const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
-    const motionSegments: Record<number, MotionSegment[]> = {};
+    const eventsByDevice: Record<number, EngineEvent[]> = {};
+
     for (const deviceId of enginesRef.keys()) {
       try {
         const engine = enginesRef.get(deviceId);
         if (!engine) continue;
         const snapshot = engine.getCurrentSnapshot();
+        const dId = Number(deviceId);
+
         if (snapshot) {
-          snapshotsByDevice.set(Number(deviceId), [snapshot]);
-          motionSegments[deviceId] = engine.motionSegments;
+          snapshotsByDevice.set(dId, [snapshot]);
+          eventsByDevice[dId] = engine.closed;
 
-          const dId = Number(deviceId);
-          const measurements: DevicePoint[] = measurementsByDevice[dId] ?? [];
-          const timestamp = measurements.at(-1)?.timestamp ?? engine.lastTimestamp ?? Date.now() as Timestamp;
+          const draft = snapshot.draft;
+          if (draft) {
+            if (draft.type === 'stationary') {
+              // Get stats from recent points
+              const sumX = draft.recent.reduce((s, p) => s + p.mean[0], 0);
+              const sumY = draft.recent.reduce((s, p) => s + p.mean[1], 0);
+              const mean: Vec2 = [sumX / draft.recent.length, sumY / draft.recent.length];
 
-          if (engine.currentMotionSegment) {
-            const latestRaw = allPosByDevice.get(dId)?.at(-1);
-            if (latestRaw) {
-              const point: DevicePoint = {
-                mean: toWebMercator(latestRaw.geo),
-                timestamp: latestRaw.timestamp,
+              currentSnapshots[dId] = [{
+                mean,
+                timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
                 device: dId,
-                geo: latestRaw.geo,
-                accuracy: latestRaw.accuracy,
-                anchorStartTimestamp: snapshot.activeAnchor.startTimestamp,
-                confidence: 1,
-                sourceDeviceId: groupIdsRef.has(dId) ? latestRaw.device : undefined
-              };
-              currentSnapshots[dId] = [point];
-              continue;
+                geo: fromWebMercator(mean),
+                accuracy: 5, // Default placeholder for UI
+                anchorStartTimestamp: draft.start,
+                confidence: snapshot.activeConfidence,
+                sourceDeviceId: undefined
+              }];
+            } else {
+              // Motion: use last path point
+              const lastPt = draft.path[draft.path.length - 1]!;
+              const lastMean = lastPt.mean;
+              currentSnapshots[dId] = [{
+                mean: lastMean,
+                timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
+                device: dId,
+                geo: fromWebMercator(lastMean),
+                accuracy: 5,
+                anchorStartTimestamp: draft.start,
+                confidence: 1.0,
+                sourceDeviceId: undefined
+              }];
             }
           }
-
-          const point: DevicePoint = {
-            mean: snapshot.activeAnchor.mean,
-            timestamp,
-            device: dId,
-            geo: fromWebMercator(snapshot.activeAnchor.mean),
-            accuracy: Math.max(1, Math.round(Math.sqrt(Math.max(1e-6, snapshot.activeAnchor.variance)))),
-            anchorStartTimestamp: snapshot.activeAnchor.startTimestamp,
-            confidence: snapshot.activeConfidence,
-            sourceDeviceId: undefined
-          };
-          currentSnapshots[dId] = [point];
         } else {
-          currentSnapshots[Number(deviceId)] = [];
+          currentSnapshots[dId] = [];
         }
       } catch (innerError) {
         console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
-        // Continue to next device, don't crash everything
       }
     }
-    return { positionsByDevice: currentSnapshots, snapshotsByDevice, motionSegments };
+    return { positionsByDevice: currentSnapshots, snapshotsByDevice, eventsByDevice };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
-    return { positionsByDevice: {}, snapshotsByDevice: new Map(), motionSegments: {} };
+    return { positionsByDevice: {}, snapshotsByDevice: new Map(), eventsByDevice: {} };
   }
 }

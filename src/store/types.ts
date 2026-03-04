@@ -1,5 +1,5 @@
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, MotionSegment, Timestamp } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -57,8 +57,8 @@ export type StoreState = {
   // Engine snapshots and anchors
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
 
-  // Motion segments
-  motionSegments: Record<number, MotionSegment[]>;
+  // Engine events (Stationary/Motion)
+  eventsByDevice: Record<number, EngineEvent[]>;
 };
 
 export type StoreActions = {

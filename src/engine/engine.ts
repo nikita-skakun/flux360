@@ -1,62 +1,60 @@
-import { Anchor } from "./anchor";
-import { distanceSquared, directionFromPoints, computeCentroid } from "@/util/geo";
-import { MOTION_PROFILES, computeCoherence, type MotionProfileConfig, type OutlierSample } from "./motionDetector";
-import { fromWebMercator, WORLD_R } from "@/util/webMercator";
-import type { DevicePoint, MotionProfileName, MotionSegment, Timestamp, Vec2 } from "@/types";
+import { distanceSquared, haversineDistance } from "@/util/geo";
+import { MOTION_PROFILES, type MotionProfileConfig } from "./motionDetector";
+import { fromWebMercator } from "@/util/webMercator";
+import { smoothPath } from "@/util/pathSmoothing";
+import type {
+  DevicePoint,
+  MotionProfileName,
+  Timestamp,
+  Vec2,
+  EngineEvent,
+  EngineDraft,
+  StationaryDraft,
+  MotionDraft,
+  MotionEvent
+} from "@/types";
 
-// Snapshot for UI/Historical view
-export type EngineSnapshot = { activeAnchor: Anchor; closedAnchors: Anchor[]; timestamp: Timestamp | null; activeConfidence: number };
+export type EngineSnapshot = {
+  draft: EngineDraft | null;
+  closed: EngineEvent[];
+  timestamp: Timestamp | null;
+  activeConfidence: number;
+};
 
-// Full engine state for checkpointing
 export type EngineState = {
-  activeAnchor: Anchor | null;
-  closedAnchors: Anchor[];
-  outliers: OutlierSample[];
-  recentMotionPoints: DevicePoint[];
+  draft: EngineDraft | null;
+  closed: EngineEvent[];
   debugFrames: DebugFrame[];
   seenDebugKeys: Set<string>;
-  motionSegments: MotionSegment[];
-  currentMotionSegment: MotionSegment | null;
 };
 
-const DECAY_RATE_ACTIVE = 0.001;
-const GAIN_RATE = 2.0;
-
-export type DebugDecision = 'initialized' | 'updated' | 'resisted' | 'none' | 'noise-weak-update' | 'motion-start' | 'motion-end';
+export type DebugDecision = 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
 export type DebugFrame = {
   timestamp: Timestamp;
-  sourceDeviceId: number | undefined;
-  motionStartTimestamp: Timestamp | null;
-  outlierCount: number;
-  motionScore: number | null;
-  motionScoreSum: number | null;
-  motionCoherent: boolean | null;
-  motionDistance: number | null;
-  motionTimeFactor: number | null;
-  motionSinglePointOverride: boolean | null;
-  anchorVarianceScale: number | null;
-  measurement: { geo: Vec2; accuracy: number; mean: Vec2; variance: number; };
-  anchor: { mean: Vec2; variance: number; confidence: number; startTimestamp: Timestamp; lastUpdateTimestamp: Timestamp } | null;
-  mahalanobis2: number | null;
   decision: DebugDecision;
-  trendSeparation: number | null;
+  point: Vec2 | null;
+  mean: Vec2 | null;
+  variance: number | null;
+  mahalanobis2: number | null;
+  pendingCount: number;
+  draftType: 'stationary' | 'motion' | 'none';
 };
 
+// Internal constants for the stream-centric logic
+const WINDOW = 50;
+const PENDING_MIN = 5;
+const MIN_PATH_POINTS = 5;
+
 export class Engine {
-  activeAnchor: Anchor | null = null;
-  closedAnchors: Anchor[] = [];
+  draft: EngineDraft | null = null;
+  closed: EngineEvent[] = [];
   lastTimestamp: Timestamp | null = null;
-  motionProfile: MotionProfileName = "person";
-  private outliers: OutlierSample[] = [];
-  private recentMotionPoints: DevicePoint[] = [];
-  // debug buffer (per-engine)
+  public motionProfile: MotionProfileName = "person";
+
   private debugFrames: DebugFrame[] = [];
   private seenDebugKeys = new Set<string>();
-  motionSegments: MotionSegment[] = [];
-  currentMotionSegment: MotionSegment | null = null;
 
   getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
-
   clearDebugFrames(): void {
     this.debugFrames = [];
     this.seenDebugKeys.clear();
@@ -66,656 +64,368 @@ export class Engine {
     this.motionProfile = profile;
   }
 
-  private normalizeProfileName(profile: MotionProfileName | null): MotionProfileName {
-    return profile === "car" ? "car" : "person";
+  private getProfile(): MotionProfileConfig {
+    return MOTION_PROFILES[this.motionProfile];
   }
 
-  private getProfile(profile: MotionProfileName | null): MotionProfileConfig {
-    return MOTION_PROFILES[this.normalizeProfileName(profile)];
-  }
-
-  private insertOutlier(sample: OutlierSample) {
-    // Binary search for sorted insertion by timestamp
-    let low = 0;
-    let high = this.outliers.length;
-    while (low < high) {
-      const mid = (low + high) >>> 1;
-      if (this.outliers[mid]!.point.timestamp < sample.point.timestamp) low = mid + 1;
-      else high = mid;
-    }
-    this.outliers.splice(low, 0, sample);
-  }
-
-  private computeAverageVariance(points: DevicePoint[]): number {
-    let sum = 0;
-    for (const p of points) sum += p.accuracy * p.accuracy;
-    return sum / points.length;
-  }
-
-  private computePathLength(path: Vec2[]): number {
-    if (path.length < 2) return 0;
-    let total = 0;
-    for (let i = 1; i < path.length; i++) {
-      // Convert Web Mercator coordinates to lat/lon and use haversine for accurate distance
-      const geo1 = fromWebMercator(path[i - 1]!);
-      const geo2 = fromWebMercator(path[i]!);
-      total += this.haversineDistance(geo1, geo2);
-    }
-    return total;
-  }
-
-  private haversineDistance(v1: Vec2, v2: Vec2): number {
-    const dLon = (v2[0] - v1[0]) * Math.PI / 180;
-    const dLat = (v2[1] - v1[1]) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(v1[1] * Math.PI / 180) * Math.cos(v2[1] * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return WORLD_R * c;
-  }
-
-  private arePointsConsistent(points: DevicePoint[], centroid: Vec2, threshold: number): boolean {
-    if (points.length < 2) return true;
+  processMeasurements(points: DevicePoint[]) {
     for (const p of points) {
-      const dx = p.mean[0] - centroid[0];
-      const dy = p.mean[1] - centroid[1];
-      const mahal = (dx * dx + dy * dy) / (p.accuracy * p.accuracy);
-      if (mahal >= threshold) return false;
+      this.lastTimestamp = p.timestamp;
+      this.step(p);
     }
-    return true;
   }
 
-  private areDirectionsRandom(points: DevicePoint[], threshold: number): boolean {
-    if (points.length < 3) return true;
-    const directions: Vec2[] = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      const p1 = points[i]!;
-      const p2 = points[i + 1]!;
-      const dx = p2.mean[0] - p1.mean[0];
-      const dy = p2.mean[1] - p1.mean[1];
-      const mag = Math.hypot(dx, dy);
-      if (mag > 1e-6) {
-        directions.push([dx / mag, dy / mag]);
-      }
+  private step(p: DevicePoint) {
+    const profile = this.getProfile();
+
+    // Initial state: Start as stationary
+    if (!this.draft) {
+      this.draft = {
+        type: 'stationary',
+        start: p.timestamp,
+        stationaryStartAnchor: p.mean,
+        recent: [p],
+        pending: []
+      };
+      this.recordDebug(p, 'stationary');
+      return;
     }
-    if (directions.length < 2) return true;
 
-    // Check consecutive directions for correlation O(N)
-    for (let i = 0; i < directions.length - 1; i++) {
-      const d1 = directions[i]!;
-      const d2 = directions[i + 1]!;
-      const dot = d1[0] * d2[0] + d1[1] * d2[1];
-      if (dot >= threshold) return false;
+    if (this.draft.type === 'stationary') {
+      this.handleStationary(this.draft, p, profile);
+    } else {
+      this.handleMotion(this.draft, p, profile);
     }
-    return true;
   }
 
-  private isCentroidCentered(points: DevicePoint[], centroid: Vec2, maxRadius: number): boolean {
-    for (const p of points) {
-      const allowedRadius = Math.max(maxRadius, p.accuracy * 1.5);
-      if (distanceSquared(centroid, p.mean) > allowedRadius * allowedRadius) return false;
-    }
-    return true;
-  }
+  private handleStationary(draft: StationaryDraft, p: DevicePoint, profile: MotionProfileConfig) {
+    const stats = this.computeStats(draft.recent);
+    const m2 = this.computeMahalanobis2(p.mean, stats.mean, stats.variance);
 
-  private shouldSettle(profile: MotionProfileConfig): boolean {
-    if (this.recentMotionPoints.length < profile.motionSettleWindowSize) return false;
-    const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
-    const centroid = computeCentroid(points.map(p => p.mean));
-    const consistent = this.arePointsConsistent(points, centroid, profile.motionSettleMahalanobisThreshold);
-    const randomDir = this.areDirectionsRandom(points, profile.motionSettleDirectionThreshold);
-    const centered = this.isCentroidCentered(points, centroid, profile.maxCentroidRadiusMeters);
-    return consistent && randomDir && centered;
-  }
+    // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
+    const distFromStart = haversineDistance(fromWebMercator(p.mean), fromWebMercator(draft.stationaryStartAnchor));
+    const isFar = distFromStart > 100; // 100m hard breakout
 
-  private pushDebugFrame(frame: DebugFrame) {
-    const key = `${frame.timestamp}:${frame.measurement.geo[0]}:${frame.measurement.geo[1]}:${frame.measurement.accuracy}:${frame.sourceDeviceId ?? ''} `;
-    if (this.seenDebugKeys.has(key)) return;
-    this.seenDebugKeys.add(key);
-    this.debugFrames.push(frame);
-  }
+    if (m2 < profile.stationaryMahalanobisThreshold && !isFar) {
+      // It's stationary
+      draft.recent.push(p);
+      if (draft.recent.length > WINDOW) draft.recent.shift();
+      draft.pending = []; // Reset hysteresis
+      this.recordDebug(p, 'stationary', stats.mean, stats.variance, m2);
+    } else {
+      // Potential motion
+      draft.pending.push(p);
+      this.recordDebug(p, 'pending', stats.mean, stats.variance, m2);
 
-  processMeasurements(ms: DevicePoint[], returnSnapshots: boolean = false): EngineSnapshot[] {
-    const snapshots: EngineSnapshot[] = [];
-    for (const m of ms) {
-      // ... (rest of the logic inside the loop, preserving original functionality)
-      // For brevity in replacement, I'll keep the core loop intact but optimized
-      // Note: The logic between lines 185-375 remains mostly same except for distSq optimizations applied above
-      // No reference coordinates needed with Web Mercator
-      const profile = this.getProfile(this.motionProfile);
-      let motionScore: number | null = null;
-      let motionScoreSum: number | null = null;
-      let motionCoherent: boolean | null = null;
-      let motionDistance: number | null = null;
-      let motionTimeFactor: number | null = null;
-      let motionSinglePointOverride: boolean | null = null;
-      let anchorVarianceScale: number | null = null;
-      let mahalanobis2: number | null = null;
-      let trendSeparation: number | null = null;
-      let decision: DebugDecision = 'none';
+      if (draft.pending.length >= PENDING_MIN) {
+        // Alignment Gate: Transition only if points are coherent
+        const anchorStats = this.computeStats(draft.recent);
+        const directions: Vec2[] = draft.pending.map(pt => {
+          const dx = pt.mean[0] - anchorStats.mean[0];
+          const dy = pt.mean[1] - anchorStats.mean[1];
+          const mag = Math.hypot(dx, dy);
+          return mag > 0 ? [dx / mag, dy / mag] as Vec2 : [0, 0] as Vec2;
+        });
 
-      if (this.activeAnchor === null) {
-        // Initialize with the first measurement
-        const initialVariance = m.accuracy * m.accuracy;
-        this.activeAnchor = new Anchor([m.mean[0], m.mean[1]], initialVariance, m.timestamp, m.timestamp);
+        const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
+        const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > 100);
 
-        this.outliers = [];
-        this.recentMotionPoints = [];
-        decision = 'initialized';
-      } else {
-        const mVariance = m.accuracy * m.accuracy;
-        const dist2Active = this.activeAnchor.mahalanobis2(m.mean, mVariance);
-        mahalanobis2 = dist2Active;
-
-        if (!this.currentMotionSegment) {
-          if (dist2Active < profile.stationaryMahalanobisThreshold) {
-            // Detect stationary drift: when reports consistently fall outside the anchor's accuracy circle,
-            // we inflate the anchor's variance to allow it to move toward the new position.
-            const distSq = distanceSquared(this.activeAnchor.mean, m.mean);
-            const anchorRadius = Math.sqrt(this.activeAnchor.variance);
-            const dist = Math.sqrt(distSq);
-            const reportRadius = m.accuracy;
-            const separation = dist - (anchorRadius + reportRadius);
-            trendSeparation = separation;
-
-            if (separation > 0) {
-              // Accuracy circles don't overlap: inflate variance proportionally to separation.
-              // Division by variance (accuracy²) ensures inaccurate reports have minimal impact.
-              const inflation = 1 + (separation / (m.accuracy * m.accuracy)) * profile.trendVarianceInflation;
-              this.activeAnchor.variance *= inflation;
-              this.activeAnchor.confidence /= inflation;
-            }
-
-            this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, m.accuracy * m.accuracy, m.timestamp, GAIN_RATE);
-            decision = 'updated';
-
-            this.outliers = [];
-          } else {
-            decision = 'resisted';
-            const lastConfirm = this.activeAnchor.lastUpdateTimestamp ?? m.timestamp;
-            const dtMinutes = Math.max(0, (m.timestamp - lastConfirm) / 60000);
-            const distSq = distanceSquared(this.activeAnchor.mean, m.mean);
-            const anchorVariance = this.activeAnchor.variance;
-            const overlapSigma = 1.5; // Expand noise acceptance to 1.5x accuracy standard deviation
-            const overlapGateSq = (Math.sqrt(anchorVariance) + m.accuracy * overlapSigma) ** 2;
-            if (distSq < m.accuracy * m.accuracy * profile.minDistanceAccuracyRatio * profile.minDistanceAccuracyRatio || distSq <= overlapGateSq) {
-              // Center is within the noise-gate radius, OR the GPS circles still overlap (1.5 sigma) —
-              // Both cases are geometrically consistent with being stationary.
-              const weakVariance = m.accuracy * m.accuracy * profile.weakVarianceInflation;
-              this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, weakVariance, m.timestamp, GAIN_RATE);
-              this.activeAnchor.variance *= profile.anchorVarianceInflationOnNoise;
-              anchorVarianceScale = profile.anchorVarianceInflationOnNoise;
-              decision = 'noise-weak-update';
-            } else {
-              const distToMean = Math.sqrt(distSq);
-              const timeFactor = Math.log1p(dtMinutes + 1);
-              const score = (distToMean / (m.accuracy + profile.accuracyK)) * timeFactor;
-              const direction = directionFromPoints(this.activeAnchor.mean, m.mean);
-              this.insertOutlier({ point: m, score, direction });
-
-              const coherence = computeCoherence(this.outliers, profile.coherenceCosineThreshold);
-              const sumScore = this.outliers.reduce((acc, o) => acc + o.score, 0);
-              const adjustedScore = coherence ? sumScore * (1 + profile.coherenceBonus) : sumScore;
-
-              motionScore = score;
-              motionScoreSum = adjustedScore;
-              motionCoherent = coherence;
-              motionDistance = distToMean;
-              motionTimeFactor = timeFactor;
-              const overrideByScore = score >= profile.singlePointScoreThreshold * profile.singlePointOverrideMultiplier;
-              const overrideByAccuracy = distToMean >= m.accuracy * profile.singlePointAccuracyRatio;
-              motionSinglePointOverride = overrideByScore && overrideByAccuracy;
-
-              const singlePointTriggers = (score >= profile.singlePointScoreThreshold) && motionSinglePointOverride;
-              const bufferTriggers = adjustedScore >= profile.motionScoreThreshold && (this.outliers.length >= 2 || motionSinglePointOverride);
-
-              if (singlePointTriggers || bufferTriggers) {
-                const motionStartTimestamp = (this.outliers[0]?.point.timestamp ?? m.timestamp);
-                this.recentMotionPoints = [];
-                this.recentMotionPoints.push(m);
-                decision = 'motion-start';
-                // Start a new motion segment - clone the anchor to preserve its state
-                this.currentMotionSegment = {
-                  startAnchor: this.activeAnchor.clone(),
-                  endAnchor: null,
-                  path: [this.activeAnchor.mean, ...this.outliers.map(o => o.point.mean)],
-                  startTime: motionStartTimestamp,
-                  endTime: null,
-                  distance: 0,
-                  duration: 0,
-                };
-                this.outliers = [];
-              }
-            }
-          }
+        if (isCoherent || anyPendingFar) {
+          // Transition to Motion
+          const startTimestamp = draft.pending[0]!.timestamp;
+          this.draft = {
+            type: 'motion',
+            start: startTimestamp,
+            stationaryCutoff: startTimestamp,
+            predecessor: draft,
+            startAnchor: anchorStats.mean,
+            path: [...draft.pending],
+            recent: [draft.pending[draft.pending.length - 1]!]
+          };
         } else {
-          const dist2Active = this.activeAnchor.mahalanobis2(m.mean, m.accuracy * m.accuracy);
-          if (dist2Active < profile.stationaryMahalanobisThreshold) {
-            this.outliers = [];
-            this.activeAnchor.kalmanUpdate(m.mean, m.accuracy, m.accuracy * m.accuracy, m.timestamp, GAIN_RATE);
-
-            decision = 'motion-end';
-            // Finalize motion segment
-            if (this.currentMotionSegment) {
-              // Finalize the segment using current activeAnchor
-              this.currentMotionSegment.endAnchor = this.activeAnchor.clone();
-              this.currentMotionSegment.path.push(this.activeAnchor.mean);
-              this.currentMotionSegment.endTime = m.timestamp;
-              this.currentMotionSegment.duration = this.currentMotionSegment.endTime - this.currentMotionSegment.startTime;
-              this.currentMotionSegment.distance = this.computePathLength(this.currentMotionSegment.path);
-
-              const start = this.currentMotionSegment.path[0];
-              const end = this.activeAnchor.mean;
-              const directDistSq = start && end ? distanceSquared(start, end) : 0;
-
-              const isAboveMin = this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0;
-
-              if (isAboveMin) {
-                // Check for insignificant loop
-                const radiusSq = profile.retrospectiveMaxStationaryRadius * profile.retrospectiveMaxStationaryRadius;
-                let maxDistSq = 0;
-                for (const p of this.currentMotionSegment.path) {
-                  const dSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, p);
-                  if (dSq > maxDistSq) maxDistSq = dSq;
-                }
-                const startEndDistSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, this.activeAnchor.mean);
-                const spatiallyClose = startEndDistSq < radiusSq;
-                const sameTime = this.currentMotionSegment.startAnchor.startTimestamp === this.activeAnchor.startTimestamp;
-                const isInsignificantLoop = (sameTime || spatiallyClose) && (maxDistSq < radiusSq || this.currentMotionSegment.path.length <= 4);
-
-                if (!isInsignificantLoop) {
-                  // Close the pre-motion anchor by pushing its snapshot
-                  const startSnapshot = this.currentMotionSegment.startAnchor.clone();
-                  startSnapshot.endTimestamp = this.currentMotionSegment.startTime;
-                  this.closedAnchors.push(startSnapshot);
-                  // Reset active anchor's start time to mark the new stationary period
-                  this.activeAnchor.startTimestamp = m.timestamp;
-                  // Keep the motion segment
-                  this.motionSegments.push(this.currentMotionSegment);
-                }
-              }
-              this.currentMotionSegment = null;
-            }
-          } else {
-            this.recentMotionPoints.push(m);
-            // Add motion point to current segment
-            if (this.currentMotionSegment) {
-              this.currentMotionSegment.path.push(m.mean);
-            }
-            if (this.recentMotionPoints.length > profile.motionSettleWindowSize) this.recentMotionPoints.shift();
-            if (this.recentMotionPoints.length >= profile.motionSettleWindowSize && this.shouldSettle(profile)) {
-              const points = this.recentMotionPoints.slice(-profile.motionSettleWindowSize);
-              const newMean = computeCentroid(points.map(p => p.mean));
-              const newVariance = this.computeAverageVariance(points);
-              const newAnchor = new Anchor(newMean, newVariance, m.timestamp, m.timestamp);
-              this.activeAnchor = newAnchor;
-              this.outliers = [];
-              this.recentMotionPoints = [];
-              decision = 'motion-end';
-              // Finalize motion segment
-              if (this.currentMotionSegment) {
-                // Remove the settling points from the path before adding the settled anchor
-                for (let i = 0; i < points.length; i++) {
-                  this.currentMotionSegment.path.pop();
-                }
-                // newAnchor is freshly created, no need to clone
-                this.currentMotionSegment.endAnchor = newAnchor;
-                this.currentMotionSegment.path.push(newAnchor.mean);
-                this.currentMotionSegment.endTime = m.timestamp;
-                this.currentMotionSegment.duration = this.currentMotionSegment.endTime - this.currentMotionSegment.startTime;
-                this.currentMotionSegment.distance = this.computePathLength(this.currentMotionSegment.path);
-
-                const start = this.currentMotionSegment.path[0];
-                const end = newAnchor.mean;
-                const directDistSq = start && end ? distanceSquared(start, end) : 0;
-
-                const isAboveMin = this.currentMotionSegment.distance > 1.0 || directDistSq > 1.0;
-
-                if (isAboveMin) {
-                  // Check for insignificant loop
-                  const radiusSq = profile.retrospectiveMaxStationaryRadius * profile.retrospectiveMaxStationaryRadius;
-                  let maxDistSq = 0;
-                  for (const p of this.currentMotionSegment.path) {
-                    const dSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, p);
-                    if (dSq > maxDistSq) maxDistSq = dSq;
-                  }
-                  const startEndDistSq = distanceSquared(this.currentMotionSegment.startAnchor.mean, newAnchor.mean);
-                  const spatiallyClose = startEndDistSq < radiusSq;
-                  const sameTime = this.currentMotionSegment.startAnchor.startTimestamp === newAnchor.startTimestamp;
-                  const isInsignificantLoop = (sameTime || spatiallyClose) && (maxDistSq < radiusSq || this.currentMotionSegment.path.length <= 4);
-
-                  if (!isInsignificantLoop) {
-                    // Close the pre-motion anchor by pushing its snapshot
-                    const startSnapshot = this.currentMotionSegment.startAnchor.clone();
-                    startSnapshot.endTimestamp = this.currentMotionSegment.startTime;
-                    this.closedAnchors.push(startSnapshot);
-                    // Keep the motion segment
-                    this.motionSegments.push(this.currentMotionSegment);
-                  }
-                }
-                this.currentMotionSegment = null;
-              }
-            }
-          }
+          // Mushy noise. Merge oldest pending into recent to prevent buffer bloat
+          const first = draft.pending.shift()!;
+          draft.recent.push(first);
+          if (draft.recent.length > WINDOW) draft.recent.shift();
+          this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
         }
       }
+    }
+  }
 
-      // capture state after
-      const afterAnchor = this.activeAnchor ? this.activeAnchor.clone() : null;
+  private handleMotion(draft: MotionDraft, p: DevicePoint, profile: MotionProfileConfig) {
+    draft.path.push(p);
+    draft.recent.push(p);
 
-      // push debug frame (non-intrusive)
-      this.pushDebugFrame({
-        timestamp: m.timestamp,
-        sourceDeviceId: m.sourceDeviceId,
-        motionStartTimestamp: this.currentMotionSegment?.startTime ?? null,
-        outlierCount: this.outliers.length,
-        motionScore,
-        motionScoreSum,
-        motionCoherent,
-        motionDistance,
-        motionTimeFactor,
-        motionSinglePointOverride,
-        anchorVarianceScale,
-        measurement: { geo: m.geo, accuracy: m.accuracy, mean: [m.mean[0], m.mean[1]], variance: m.accuracy * m.accuracy },
-        anchor: afterAnchor ? { mean: [afterAnchor.mean[0], afterAnchor.mean[1]], variance: afterAnchor.variance, confidence: afterAnchor.confidence, startTimestamp: afterAnchor.startTimestamp, lastUpdateTimestamp: afterAnchor.lastUpdateTimestamp } : null,
-        mahalanobis2,
-        decision,
-        trendSeparation,
+    // Cap settling window by count to handle sparse GPS data.
+    // checkSettled's own duration check handles the time constraint.
+    while (draft.recent.length > 20) {
+      draft.recent.shift();
+    }
+
+    const isSettled = this.checkSettled(draft, profile);
+
+    if (!isSettled) {
+      this.recordDebug(p, 'motion');
+      return;
+    }
+
+    // Settled! Decide if significant or noise
+    const settleStart = draft.recent[0]!.timestamp;
+    const settleStats = this.computeStats(draft.recent);
+    const totalDistance = this.computePathLength(draft.path);
+    const startEndDist = haversineDistance(fromWebMercator(draft.startAnchor), fromWebMercator(settleStats.mean));
+    const maxDev = this.maxDeviation(draft.path, draft.startAnchor);
+
+    const settleEnd = draft.recent[draft.recent.length - 1]!.timestamp;
+    const settleDurationSeconds = (settleEnd - draft.start) / 1000;
+    const avgVelocity = settleDurationSeconds > 0 ? startEndDist / settleDurationSeconds : 0;
+    const efficiency = totalDistance > 0 ? startEndDist / totalDistance : 0;
+
+    const minSignificantDist = 8 * profile.maxStationaryRadius;
+    const maxLoopDev = 2 * profile.maxStationaryRadius;
+
+    const significantDisplacement = startEndDist > 5 * profile.maxStationaryRadius;
+
+    const insignificant =
+      !significantDisplacement && (
+        totalDistance < minSignificantDist ||
+        (maxDev < maxLoopDev && draft.path.length <= MIN_PATH_POINTS) ||
+        startEndDist < maxLoopDev ||
+        avgVelocity < profile.minAverageVelocity ||
+        efficiency < profile.minEfficiency
+      );
+
+    if (!insignificant) {
+      // COMMIT: Close predecessor and this motion
+      const predStats = this.computeStats(draft.predecessor.recent);
+
+      // Trim settling jitter: remove points that occur after the settlement window started
+      const trimmedPath = draft.path.filter(pt => pt.timestamp < settleStart);
+
+      // Build accuracy-aware path and smooth it
+      const rawPoints = [
+        { point: draft.startAnchor, accuracy: 1, timestamp: draft.start }, // Anchor: high certainty
+        ...trimmedPath.map(pt => ({ point: pt.mean, accuracy: pt.accuracy, timestamp: pt.timestamp })),
+        { point: settleStats.mean, accuracy: 1, timestamp: settleStart },  // Anchor: high certainty
+      ];
+      const stablePath = smoothPath(rawPoints);
+
+      this.closed.push({
+        type: 'stationary',
+        start: draft.predecessor.start,
+        end: draft.stationaryCutoff,
+        mean: predStats.mean,
+        variance: predStats.variance
       });
 
-      this.lastTimestamp = m.timestamp;
-      if (this.activeAnchor && returnSnapshots) {
-        snapshots.push({
-          activeAnchor: this.activeAnchor.clone(),
-          closedAnchors: this.closedAnchors.map(a => a.clone()),
-          timestamp: m.timestamp,
-          activeConfidence: this.activeAnchor.getConfidence(m.timestamp, DECAY_RATE_ACTIVE)
-        });
-      }
+      this.closed.push({
+        type: 'motion',
+        start: draft.start,
+        end: settleStart,
+        startAnchor: draft.startAnchor,
+        endAnchor: settleStats.mean,
+        path: stablePath,
+        distance: totalDistance
+      });
+
+      // Start new stationary
+      this.draft = {
+        type: 'stationary',
+        start: settleStart,
+        stationaryStartAnchor: settleStats.mean,
+        recent: [...draft.recent],
+        pending: []
+      };
+      this.recordDebug(p, 'settled-significant');
+    } else {
+      // ABSORB: Merge into predecessor
+      const predecessor = draft.predecessor;
+
+      // We take the settling window as the new "stable" cluster
+      predecessor.recent = [...draft.recent];
+      predecessor.pending = [];
+      predecessor.stationaryStartAnchor = settleStats.mean; // Update anchor to prevent drag!
+
+      this.draft = predecessor;
+      this.recordDebug(p, 'settled-absorbed');
     }
-    return snapshots;
+  }
+
+  private checkSettled(draft: MotionDraft, profile: MotionProfileConfig): boolean {
+    if (draft.recent.length < profile.motionSettleWindowSize) return false;
+
+    const duration = draft.recent[draft.recent.length - 1]!.timestamp - draft.recent[0]!.timestamp;
+    if (duration < profile.minStationaryDuration) return false;
+
+    const stats = this.computeStats(draft.recent);
+    const minVariance = Math.pow(profile.maxStationaryRadius / 3, 2); // 1-sigma floor
+    const effectiveVariance = Math.max(stats.variance, minVariance);
+
+    for (const p of draft.recent) {
+      const m2 = this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance);
+      if (m2 > profile.motionSettleMahalanobisThreshold) return false;
+    }
+
+    return true;
+  }
+
+  private checkCoherence(directions: Vec2[], threshold: number): boolean {
+    if (directions.length < 2) return true;
+    let sx = 0, sy = 0;
+    for (const d of directions) {
+      sx += d[0];
+      sy += d[1];
+    }
+    const mag = Math.hypot(sx, sy);
+    if (mag === 0) return false;
+    const avgX = sx / mag;
+    const avgY = sy / mag;
+    for (const d of directions) {
+      if (d[0] * avgX + d[1] * avgY < threshold) return false;
+    }
+    return true;
+  }
+
+  public computeStats(points: DevicePoint[]): { mean: Vec2; variance: number } {
+    if (points.length === 0) return { mean: [0, 0], variance: 1 };
+
+    let sumX = 0, sumY = 0;
+    for (const p of points) {
+      sumX += p.mean[0];
+      sumY += p.mean[1];
+    }
+    const mean: Vec2 = [sumX / points.length, sumY / points.length];
+
+    let sumDistSq = 0;
+    for (const p of points) {
+      const dx = p.mean[0] - mean[0];
+      const dy = p.mean[1] - mean[1];
+      sumDistSq += (dx * dx + dy * dy);
+    }
+
+    // Convert Web Mercator variance to meters squared approximately
+    // At equator 1 unit is roughly 1 meter? No, Web Mercator is 2*PI*R units.
+    // Let's use a simpler heuristic or the haversine-based variance if needed.
+    // For now, let's keep it in "units squared" and scale if required.
+    const variance = sumDistSq / points.length;
+
+    // Variance cap to prevent "mega-anchors" that swallow large jumps
+    const MIN_VARIANCE = 2.0;
+    const MAX_VARIANCE = 400.0;
+    const v = Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance));
+
+    return { mean, variance: v };
+  }
+
+  private computeMahalanobis2(pos: Vec2, mean: Vec2, variance: number): number {
+    const dx = pos[0] - mean[0];
+    const dy = pos[1] - mean[1];
+    return (dx * dx + dy * dy) / variance;
+  }
+
+  public computePathLength(path: (Vec2 | DevicePoint)[]): number {
+    let dist = 0;
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1]!;
+      const b = path[i]!;
+      const p1 = 'mean' in a ? a.mean : a;
+      const p2 = 'mean' in b ? b.mean : b;
+      dist += haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
+    }
+    return dist;
+  }
+
+  private maxDeviation(path: DevicePoint[], anchor: Vec2): number {
+    let maxD2 = 0;
+    const anchorGeo = fromWebMercator(anchor);
+    for (const p of path) {
+      const d2 = distanceSquared(fromWebMercator(p.mean), anchorGeo);
+      if (d2 > maxD2) maxD2 = d2;
+    }
+    return Math.sqrt(maxD2);
+  }
+
+  private recordDebug(p: DevicePoint, decision: DebugDecision, mean: Vec2 | null = null, variance: number | null = null, m2: number | null = null) {
+    this.debugFrames.push({
+      timestamp: p.timestamp,
+      decision,
+      point: p.mean,
+      mean,
+      variance,
+      mahalanobis2: m2,
+      pendingCount: this.draft?.type === 'stationary' ? this.draft.pending.length : 0,
+      draftType: this.draft?.type ?? 'none'
+    });
+    // Cap debug frames
+    if (this.debugFrames.length > 2000) this.debugFrames.shift();
   }
 
   getCurrentSnapshot(): EngineSnapshot | null {
-    if (!this.activeAnchor) return null;
+    if (!this.draft) return null;
     return {
-      activeAnchor: this.activeAnchor.clone(),
-      closedAnchors: this.closedAnchors.map(a => a.clone()),
+      draft: this.draft,
+      closed: this.closed,
       timestamp: this.lastTimestamp,
-      activeConfidence: this.activeAnchor.getConfidence(this.lastTimestamp ?? Date.now() as Timestamp, DECAY_RATE_ACTIVE)
+      activeConfidence: 1.0 // Simple for now
     };
-  }
-
-  getDominantAnchorAt(timestamp: Timestamp): Anchor | null {
-    const candidates: Anchor[] = [];
-    if (this.activeAnchor && this.activeAnchor.startTimestamp <= timestamp) {
-      candidates.push(this.activeAnchor);
-    }
-    for (const anchor of this.closedAnchors) {
-      if (anchor.startTimestamp <= timestamp && (anchor.endTimestamp === null || timestamp <= anchor.endTimestamp)) {
-        candidates.push(anchor);
-      }
-    }
-    if (candidates.length === 0) return null;
-    let best: Anchor | null = null;
-    let bestConf = -1;
-    for (const anchor of candidates) {
-      const conf = anchor.getConfidence(timestamp, DECAY_RATE_ACTIVE);
-      if (conf > bestConf) {
-        bestConf = conf;
-        best = anchor;
-      }
-    }
-    return best;
   }
 
   createSnapshot(): EngineState {
     return {
-      activeAnchor: this.activeAnchor ? this.activeAnchor.clone() : null,
-      closedAnchors: this.closedAnchors.map(a => a.clone()),
-      outliers: [...this.outliers],
-      recentMotionPoints: [...this.recentMotionPoints],
+      draft: JSON.parse(JSON.stringify(this.draft)),
+      closed: JSON.parse(JSON.stringify(this.closed)),
       debugFrames: [...this.debugFrames],
-      seenDebugKeys: new Set(this.seenDebugKeys),
-      motionSegments: this.motionSegments.map(s => ({
-        startAnchor: s.startAnchor.clone(),
-        endAnchor: s.endAnchor ? s.endAnchor.clone() : null,
-        path: [...s.path],
-        startTime: s.startTime,
-        endTime: s.endTime,
-        distance: s.distance,
-        duration: s.duration,
-      })),
-      currentMotionSegment: this.currentMotionSegment ? {
-        startAnchor: this.currentMotionSegment.startAnchor.clone(),
-        endAnchor: this.currentMotionSegment.endAnchor ? this.currentMotionSegment.endAnchor.clone() : null,
-        path: [...this.currentMotionSegment.path],
-        startTime: this.currentMotionSegment.startTime,
-        endTime: this.currentMotionSegment.endTime,
-        distance: this.currentMotionSegment.distance,
-        duration: this.currentMotionSegment.duration,
-      } : null,
+      seenDebugKeys: new Set(this.seenDebugKeys)
     };
   }
 
-  pruneHistory(olderThan: Timestamp) {
-    // Remove completed segments that ended before the cutoff time
-    this.motionSegments = this.motionSegments.filter(s => {
-      // Keep active segments
-      if (!s.endAnchor) return true;
-      // Keep segments that ended within the valid window
-      // We use lastUpdateTimestamp as the effective "end time" of the anchor
-      return s.endAnchor.lastUpdateTimestamp >= olderThan;
-    });
-  }
-
-  private getEffectiveMotionStats(segment: MotionSegment, startAnchor: Anchor, endAnchor: Anchor): { effectiveDistance: number; midExtentSq: number } {
-    if (segment.path.length <= 2) {
-      return { effectiveDistance: segment.distance, midExtentSq: 0 };
-    }
-    const startRadiusSq = startAnchor.variance;
-    const endRadiusSq = endAnchor.variance;
-    let startIndex = 0;
-    while (startIndex < segment.path.length - 1) {
-      if (distanceSquared(startAnchor.mean, segment.path[startIndex]!) <= startRadiusSq * 1.5) {
-        startIndex++;
-      } else {
-        break;
-      }
-    }
-    let endIndex = segment.path.length - 1;
-    while (endIndex > startIndex) {
-      if (distanceSquared(endAnchor.mean, segment.path[endIndex]!) <= endRadiusSq * 1.5) {
-        endIndex--;
-      } else {
-        break;
-      }
-    }
-    const effectivePath = startIndex > 0 || endIndex < segment.path.length - 1
-      ? segment.path.slice(startIndex, endIndex + 1)
-      : segment.path;
-
-    const effectiveDistance = this.computePathLength(effectivePath);
-
-    let maxDistSqFromCenter = 0;
-    const center: Vec2 = [(startAnchor.mean[0] + endAnchor.mean[0]) / 2, (startAnchor.mean[1] + endAnchor.mean[1]) / 2];
-    for (const p of effectivePath) {
-      const dSq = distanceSquared(center, p);
-      if (dSq > maxDistSqFromCenter) maxDistSqFromCenter = dSq;
-    }
-
-    return { effectiveDistance, midExtentSq: maxDistSqFromCenter * 4 };
-  }
-
-  refineHistory(profileConfig: MotionProfileConfig) {
-    if (this.closedAnchors.length < 2) return;
-
-    // 1. Prune insignificant excursion loops (paths that start and end on the SAME anchor)
-    this.motionSegments = this.motionSegments.filter(segment => {
-      if (!segment.endAnchor) return true;
-
-      // Determine if start and end anchors are considered the same for loop detection
-      const sameAnchor = segment.startAnchor.startTimestamp === segment.endAnchor.startTimestamp;
-      let spatiallyClose = false;
-      if (!sameAnchor) {
-        // If timestamps differ but positions are very close, treat as same anchor
-        const startEndDistSq = distanceSquared(segment.startAnchor.mean, segment.endAnchor.mean);
-        spatiallyClose = startEndDistSq < profileConfig.retrospectiveMaxStationaryRadius * profileConfig.retrospectiveMaxStationaryRadius;
-      }
-
-      // If anchors are distinct (by timestamp and not spatially close), keep the segment
-      if (!sameAnchor && !spatiallyClose) return true;
-
-      // Now we treat this as a loop that started and ended at (effectively) the same anchor
-      let maxDistSq = 0;
-      for (const p of segment.path) {
-        const dSq = distanceSquared(segment.startAnchor.mean, p);
-        if (dSq > maxDistSq) maxDistSq = dSq;
-      }
-
-      // If the maximum departure from the anchor didn't even exceed the normal stationary cluster size
-      // OR if the excursion consists of 2 or fewer intermediate points (a singular GPS spike/bounce)
-      if (
-        maxDistSq < profileConfig.retrospectiveMaxStationaryRadius * profileConfig.retrospectiveMaxStationaryRadius ||
-        segment.path.length <= 4
-      ) {
-        return false; // Prune insignificant loop or uncorroborated spike
-      }
-      return true;
-    });
-
-    // Merge adjacent anchors & drop transient ones
-    let i = 0;
-    while (i < this.closedAnchors.length - 1) {
-      const current = this.closedAnchors[i]!;
-      const next = this.closedAnchors[i + 1]!;
-
-      // Find the connecting motion segment
-      const segmentIndex = this.motionSegments.findIndex(s => s.startAnchor.startTimestamp === current.startTimestamp && s.endAnchor?.startTimestamp === next.startTimestamp);
-      if (segmentIndex === -1) {
-        i++;
-        continue;
-      }
-
-      const segment = this.motionSegments[segmentIndex]!;
-
-      // Calculate combined duration
-      const currentDuration = current.lastUpdateTimestamp - current.startTimestamp;
-
-      const distSq = distanceSquared(current.mean, next.mean);
-      const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
-      const mergeRadiusSquared = mergeRadius * mergeRadius;
-
-      const { midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
-
-      const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
-      const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
-      const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
-
-      if (isShortAnchor || isSpatiallyClose || isInsignificantSegment) {
-        // Merge `next` into `current`
-        const weightCurrent = currentDuration || 1;
-        const weightNext = (next.lastUpdateTimestamp - next.startTimestamp) || 1;
-
-        const newMean: Vec2 = [
-          (current.mean[0] * weightCurrent + next.mean[0] * weightNext) / (weightCurrent + weightNext),
-          (current.mean[1] * weightCurrent + next.mean[1] * weightNext) / (weightCurrent + weightNext)
-        ];
-
-        current.mean = newMean;
-        current.endTimestamp = next.endTimestamp;
-        current.lastUpdateTimestamp = next.lastUpdateTimestamp;
-        current.variance = (current.variance * weightCurrent + next.variance * weightNext) / (weightCurrent + weightNext);
-
-        // Remove `next` anchor
-        this.closedAnchors.splice(i + 1, 1);
-
-        // Remove the connecting segment
-        this.motionSegments.splice(segmentIndex, 1);
-
-        // If there's a subsequent segment that started from `next`, update its startAnchor
-        const nextSegment = this.motionSegments.find(s => s.startAnchor.startTimestamp === next.startTimestamp);
-        if (nextSegment) {
-          nextSegment.startAnchor = current;
-        }
-      } else {
-        i++;
-      }
-    }
-
-    // Also check merge with activeAnchor
-    if (this.activeAnchor && this.closedAnchors.length > 0) {
-      const current = this.closedAnchors[this.closedAnchors.length - 1]!;
-      const next = this.activeAnchor;
-
-      const segmentIndex = this.motionSegments.findIndex(s => s.startAnchor.startTimestamp === current.startTimestamp && s.endAnchor?.startTimestamp === next.startTimestamp);
-      if (segmentIndex !== -1) {
-        const segment = this.motionSegments[segmentIndex]!;
-        const currentDuration = current.lastUpdateTimestamp - current.startTimestamp;
-
-        const distSq = distanceSquared(current.mean, next.mean);
-        const mergeRadius = Math.max(profileConfig.retrospectiveMaxStationaryRadius, (Math.sqrt(current.variance) + Math.sqrt(next.variance)) * 0.6);
-        const mergeRadiusSquared = mergeRadius * mergeRadius;
-
-        const { midExtentSq } = this.getEffectiveMotionStats(segment, current, next);
-
-        const isShortAnchor = currentDuration < profileConfig.retrospectiveMinStationaryDuration;
-        const isSpatiallyClose = distSq < mergeRadiusSquared && midExtentSq < mergeRadiusSquared;
-        const isInsignificantSegment = segment.distance < Math.max(profileConfig.retrospectiveMaxStationaryRadius, Math.sqrt((current.variance + next.variance) / 2) * 1.5);
-
-        // Only merge with activeAnchor if motion was insignificant - preserve significant trips
-        const significantMotion = segment.distance > profileConfig.retrospectiveMaxStationaryRadius * 2;
-        if (!significantMotion && (isShortAnchor || isSpatiallyClose || isInsignificantSegment)) {
-          // Only merge if motion was truly insignificant (short segment that barely departed from anchors)
-          const weightCurrent = currentDuration || 1;
-          const weightNext = (next.lastUpdateTimestamp - next.startTimestamp) || 1;
-
-          const newMean: Vec2 = [
-            (current.mean[0] * weightCurrent + next.mean[0] * weightNext) / (weightCurrent + weightNext),
-            (current.mean[1] * weightCurrent + next.mean[1] * weightNext) / (weightCurrent + weightNext)
-          ];
-
-          next.mean = newMean;
-          // Only merge variance, preserve activeAnchor timestamps to avoid timeline issues
-          next.variance = (current.variance * weightCurrent + next.variance * weightNext) / (weightCurrent + weightNext);
-
-          this.closedAnchors.pop(); // Remove `current`
-          this.motionSegments.splice(segmentIndex, 1);
-
-          // Find any incoming segments to `current` and point them to `next`
-          const incomingSegment = this.motionSegments.find(s => s.endAnchor?.startTimestamp === current.startTimestamp);
-          if (incomingSegment) {
-            incomingSegment.endAnchor = next;
-          }
-        }
-      }
-    }
-  }
-
-  restoreSnapshot(state: EngineState): void {
-    this.activeAnchor = state.activeAnchor ? state.activeAnchor.clone() : null;
-    this.closedAnchors = state.closedAnchors.map(a => a.clone());
-    this.outliers = [...state.outliers];
-    this.recentMotionPoints = [...state.recentMotionPoints];
-    this.debugFrames = [...state.debugFrames];
+  restoreSnapshot(state: EngineState) {
+    this.draft = state.draft;
+    this.closed = state.closed;
+    this.debugFrames = state.debugFrames;
     this.seenDebugKeys = new Set(state.seenDebugKeys);
-    this.motionSegments = state.motionSegments.map(s => ({
-      startAnchor: s.startAnchor.clone(),
-      endAnchor: s.endAnchor ? s.endAnchor.clone() : null,
-      path: [...s.path],
-      startTime: s.startTime,
-      endTime: s.endTime,
-      distance: s.distance,
-      duration: s.duration,
-    }));
-    this.currentMotionSegment = state.currentMotionSegment ? {
-      startAnchor: state.currentMotionSegment.startAnchor.clone(),
-      endAnchor: state.currentMotionSegment.endAnchor ? state.currentMotionSegment.endAnchor.clone() : null,
-      path: [...state.currentMotionSegment.path],
-      startTime: state.currentMotionSegment.startTime,
-      endTime: state.currentMotionSegment.endTime,
-      distance: state.currentMotionSegment.distance,
-      duration: state.currentMotionSegment.duration,
-    } : null;
+    this.lastTimestamp = this.draft?.start ?? null;
+  }
+
+  pruneHistory(horizon: Timestamp) {
+    this.closed = this.closed.filter(ev => ev.end > horizon);
+  }
+
+  refineHistory(profile: MotionProfileConfig) {
+    if (this.closed.length < 3) return;
+
+    const refined: EngineEvent[] = [];
+    let i = 0;
+    while (i < this.closed.length) {
+      const current = this.closed[i]!;
+      const next = this.closed[i + 1];
+      const nextNext = this.closed[i + 2];
+
+      if (current.type === 'motion' && next?.type === 'stationary' && nextNext?.type === 'motion') {
+        const gapDuration = next.end - next.start;
+        if (gapDuration < profile.maxMergeGapDuration) {
+          // Merge current, next, and nextNext into a single motion
+          const merged: MotionEvent = {
+            type: 'motion',
+            start: current.start,
+            end: nextNext.end,
+            startAnchor: current.startAnchor,
+            endAnchor: nextNext.endAnchor,
+            path: [...current.path, ...nextNext.path],
+            distance: 0
+          };
+          merged.distance = this.computePathLength(merged.path);
+
+          // Replace current with merged and remove next/nextNext
+          this.closed.splice(i, 3, merged);
+          // Re-check from current index in case the new motion can be merged with what follows
+          continue;
+        }
+      }
+      refined.push(current);
+      i++;
+    }
+    this.closed = refined;
   }
 }

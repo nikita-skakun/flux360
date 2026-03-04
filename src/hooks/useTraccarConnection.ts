@@ -86,7 +86,7 @@ export function useTraccarConnection(options: TraccarConnectionOptions) {
             if (onDevices) void onDevices(devices);
             devices.forEach(d => d.id != null && knownDevices.current.add(d.id));
 
-            const from = new Date(Date.now() - 96 * 3600000); // 96h
+            const from = new Date(Date.now() - 48 * 3600000); // 48h
             const res = await Promise.allSettled(Array.from(knownDevices.current).map(id => fetchPositions(opts, id, from, new Date(), {})));
 
             const pos = res.flatMap(r => r.status === "fulfilled" ? r.value : [])

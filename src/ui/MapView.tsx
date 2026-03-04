@@ -7,9 +7,8 @@ import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, MotionSegment } from "@/types";
+import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, EngineEvent } from "@/types";
 import type { Feature, Point, Polygon, LineString } from "geojson";
-import type { Anchor } from "@/engine/anchor";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -29,7 +28,7 @@ type Props = {
   debugAnchors: DebugAnchor[];
   debugFrame: DebugFrameView | null;
   pulsingDeviceIds: number[];
-  selectedHistoryItem?: Anchor | MotionSegment | null;
+  selectedHistoryItem?: EngineEvent | null;
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
@@ -201,10 +200,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     } // end per-device for loop
 
-    // Debug frame circles (measurement + anchor at selected frame)
-    type FrameFeature = Feature<Polygon> | Feature<{ type: 'LineString'; coordinates: Vec2[] }>;
+    // Debug frame circles (mean/variance at selected frame)
+    type FrameFeature = Feature<Polygon>;
     const debugFrameFeatures: FrameFeature[] = [];
-    if (debugFrame) {
+    if (debugFrame && debugFrame.mean && debugFrame.variance) {
       const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
         const pts = 64;
         const coords: Vec2[] = [];
@@ -214,16 +213,15 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         }
         return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } };
       };
-      if (debugFrame.measurement.accuracy > 0)
-        debugFrameFeatures.push(makeCircle(debugFrame.measurement.mean, debugFrame.measurement.accuracy, 'measurement'));
-      if (debugFrame.anchor) {
-        debugFrameFeatures.push(makeCircle(debugFrame.anchor.mean, getRadiusFromVariance(debugFrame.anchor.variance), 'anchor'));
-        // Red line connecting measurement center to anchor center
+      const radius = getRadiusFromVariance(debugFrame.variance);
+      debugFrameFeatures.push(makeCircle(debugFrame.mean, radius, 'anchor'));
+
+      if (debugFrame.point) {
         debugFrameFeatures.push({
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: [debugFrame.measurement.geo, fromWebMercator(debugFrame.anchor.mean)] },
-          properties: { kind: 'link' },
-        } as FrameFeature);
+          geometry: { type: 'Point', coordinates: fromWebMercator(debugFrame.point) },
+          properties: { kind: 'measurement' }
+        } as any);
       }
     }
 
@@ -417,6 +415,19 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
           filter: ['==', ['get', 'kind'], 'link'],
           paint: { 'line-color': '#f44336', 'line-width': 1.5, 'line-opacity': 0.8 },
         });
+        // Individual measurement point
+        map.addLayer({
+          id: 'debug-frame-point-layer',
+          type: 'circle',
+          source: 'debug-frame-source',
+          filter: ['==', ['get', 'kind'], 'measurement'],
+          paint: {
+            'circle-radius': 5,
+            'circle-color': '#f44336',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#ffffff',
+          },
+        });
       } else {
         (map.getSource('debug-frame-source') as GeoJSONSource).setData(frameData as never);
       }
@@ -464,7 +475,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     // Process history item
     const historyFeatures: Feature<Polygon | LineString>[] = [];
     if (selectedHistoryItem) {
-      if ('startTimestamp' in selectedHistoryItem) {
+      if (selectedHistoryItem.type === 'stationary') {
         const a = selectedHistoryItem;
         const radius = getRadiusFromVariance(a.variance);
         const pts = 64;
@@ -480,7 +491,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         const s = selectedHistoryItem;
-        if (s.path.length > 1) {
+        if (s.path && s.path.length > 1) {
           historyFeatures.push({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: s.path.map((p: Vec2) => fromWebMercator([p[0], p[1]])) },
@@ -614,7 +625,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map?.getLayer('history-path-layer')) return;
 
-    const isMotionSegment = selectedHistoryItem && !('startTimestamp' in selectedHistoryItem);
+    const isMotionSegment = selectedHistoryItem && selectedHistoryItem.type === 'motion';
     if (!isMotionSegment) {
       map.setPaintProperty('history-path-layer', 'line-dasharray', [2, 2]);
       return;

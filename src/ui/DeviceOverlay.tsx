@@ -22,18 +22,6 @@ type Props = {
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
 
-function humanDurationSince(ts: Timestamp, now: Timestamp = Date.now() as Timestamp): string {
-  const s = Math.round((now - (ts ?? now)) / 1000);
-  if (s < 5) return "just now";
-  if (s < 60) return `${s}s`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.round(h / 24);
-  return `${d}d`;
-}
-
 const DurationDisplay: React.FC<{ timestamp: Timestamp, addSuffix?: boolean }> = ({ timestamp, addSuffix = true }) => {
   const timeAgo = useTimeAgo(timestamp, addSuffix);
   return <>{timeAgo}</>;
@@ -147,27 +135,19 @@ function DeviceOverlayComponent({
 
           {chosenFrame ? (
             <div className="mt-2 text-xs bg-muted/50 p-2 rounded-lg">
-              <div>Accuracy: {Math.round(chosenFrame.measurement.accuracy)} m</div>
-              <div>Mahalanobis^2: {chosenFrame.mahalanobis2 == null ? '—' : chosenFrame.mahalanobis2.toFixed(2)}</div>
-              {chosenFrame.trendSeparation != null ? <div>Trend separation: {chosenFrame.trendSeparation.toFixed(1)} m</div> : null}
-              <div>Motion active: {chosenFrame.motionStartTimestamp != null ? 'yes' : 'no'}</div>
-              {chosenFrame.motionStartTimestamp != null ? <div>Motion start: {new Date(chosenFrame.motionStartTimestamp).toLocaleString()}</div> : null}
-              {chosenFrame.motionDistance != null ? <div>Motion distance: {Math.round(chosenFrame.motionDistance)} m</div> : null}
-              {chosenFrame.motionScore != null || chosenFrame.motionScoreSum != null ? <div>Motion score: {chosenFrame.motionScoreSum?.toFixed(2)} (+{chosenFrame.motionScore?.toFixed(2)})</div> : null}
-              {chosenFrame.motionTimeFactor != null ? <div>Time factor: {chosenFrame.motionTimeFactor.toFixed(2)}</div> : null}
-              {chosenFrame.motionCoherent != null ? <div>Coherent: {chosenFrame.motionCoherent ? 'yes' : 'no'}</div> : null}
-              {chosenFrame.motionSinglePointOverride != null ? <div>Single-point override: {chosenFrame.motionSinglePointOverride ? 'yes' : 'no'}</div> : null}
-              {chosenFrame.outlierCount > 0 ? <div>Outliers: {chosenFrame.outlierCount}</div> : null}
-              {chosenFrame.anchorVarianceScale != null ? <div>Anchor var inflate: ×{chosenFrame.anchorVarianceScale.toFixed(2)}</div> : null}
-              <div>Confidence: {chosenFrame.anchor ? chosenFrame.anchor.confidence.toFixed(2) : '—'}</div>
-              <div>Decision: <strong>{chosenFrame.decision}</strong></div>
-              <div>Anchor start: {chosenFrame.anchor?.startTimestamp != null ? humanDurationSince(chosenFrame.anchor.startTimestamp) : '—'}</div>
-              <div>Raw lat/lon: {chosenFrame.measurement.geo[1].toFixed(5)}, {chosenFrame.measurement.geo[0].toFixed(5)}</div>
-              <div>Anchor lat/lon: {(() => { if (chosenFrame.anchor?.mean == null) return '—'; const [lon, lat] = fromWebMercator(chosenFrame.anchor.mean); return `${lat.toFixed(5)}, ${lon.toFixed(5)}`; })()}</div>
-              <div>{new Date(chosenFrame.timestamp).toLocaleString()}</div>
+              <div>Decision: <span className="font-bold uppercase text-primary">{chosenFrame.decision}</span></div>
+              <div>Draft Type: {chosenFrame.draftType}</div>
+              <div>Mahalanobis²: {chosenFrame.mahalanobis2?.toFixed(2) ?? '—'}</div>
+              <div>Pending Pts: {chosenFrame.pendingCount}</div>
+              <div>Variance: {chosenFrame.variance?.toFixed(1) ?? '—'}</div>
+              {chosenFrame.mean && (
+                <div>Pos: {fromWebMercator(chosenFrame.mean)[1].toFixed(5)}, {fromWebMercator(chosenFrame.mean)[0].toFixed(5)}</div>
+              )}
+              <div className="mt-1 pt-1 border-t border-border/30 text-muted-foreground">
+                {new Date(chosenFrame.timestamp).toLocaleTimeString()}
+              </div>
             </div>
           ) : null}
-
         </div>
       ) : null}
     </div>

@@ -1,28 +1,30 @@
 import React, { useMemo } from 'react';
-import { MapPin, Activity } from 'lucide-react';
+import { MapPin, Activity, Copy, Check } from 'lucide-react';
 import type { Engine } from '@/engine/engine';
-import type { MotionSegment } from '@/types';
+import type { EngineEvent, StationaryEvent, MotionEvent } from '@/types';
 import { formatDuration } from '@/util/appUtils';
-import type { Anchor } from '@/engine/anchor';
+import { haversineDistance, computeBearing } from '@/util/geo';
+import { fromWebMercator } from '@/util/webMercator';
 
 export type TimelineEvent = {
     id: string;
-    item: Anchor | MotionSegment;
+    item: EngineEvent;
 };
 
 type Props = {
     selectedDeviceId: number | null;
     enginesRef: Map<number, Engine>;
     engineSnapshot?: unknown; // Used as a trigger to re-evaluate when engines mutate
+    eventsByDevice: Record<number, EngineEvent[]>;
     onSelectEvent: (event: TimelineEvent) => void;
     selectedEventId: string | null;
 };
 
-const Sparkline = ({ segment }: { segment: MotionSegment }) => {
-    if (segment.path.length < 2) return null;
+const Sparkline = ({ event }: { event: MotionEvent }) => {
+    if (event.path.length < 2) return null;
 
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const p of segment.path) {
+    for (const p of event.path) {
         if (p[0] < minX) minX = p[0];
         if (p[0] > maxX) maxX = p[0];
         if (p[1] < minY) minY = p[1];
@@ -40,7 +42,7 @@ const Sparkline = ({ segment }: { segment: MotionSegment }) => {
     const vbW = size + padding * 2;
     const vbH = size + padding * 2;
 
-    const pointsStr = segment.path.map(p => `${p[0]},${p[1]}`).join(' ');
+    const pointsStr = event.path.map(p => `${p[0]},${p[1]}`).join(' ');
 
     return (
         <svg
@@ -56,8 +58,8 @@ const Sparkline = ({ segment }: { segment: MotionSegment }) => {
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />
-            <circle cx={segment.path[0]?.[0] ?? 0} cy={segment.path[0]?.[1] ?? 0} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
-            <circle cx={segment.path[segment.path.length - 1]?.[0] ?? 0} cy={segment.path[segment.path.length - 1]?.[1] ?? 0} r={vbW * 0.08} fill="currentColor" />
+            <circle cx={event.path[0]?.[0] ?? 0} cy={event.path[0]?.[1] ?? 0} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
+            <circle cx={event.path[event.path.length - 1]?.[0] ?? 0} cy={event.path[event.path.length - 1]?.[1] ?? 0} r={vbW * 0.08} fill="currentColor" />
         </svg>
     );
 };
@@ -66,108 +68,173 @@ export const TimelinePanel: React.FC<Props> = ({
     selectedDeviceId,
     enginesRef,
     engineSnapshot,
+    eventsByDevice,
     onSelectEvent,
     selectedEventId,
 }) => {
+    const [now, setNow] = React.useState(Date.now());
+    const [copiedId, setCopiedId] = React.useState<string | null>(null);
+
+    const handleCopy = (e: React.MouseEvent, ev: TimelineEvent) => {
+        e.stopPropagation();
+        if (selectedDeviceId == null) return;
+        const engine = enginesRef.get(selectedDeviceId);
+        if (!engine) return;
+
+        const allFrames = engine.getDebugFrames();
+        // Filter frames that occurred during this event's time range
+        // We add a small buffer (5s) to capture context around the edges
+        const buffer = 5000;
+        const relevantFrames = allFrames.filter(f =>
+            f.timestamp >= ev.item.start - buffer &&
+            f.timestamp <= ev.item.end + buffer
+        );
+
+        // Smart sampling for large events (e.g. 24h stationary)
+        let sampledFrames = relevantFrames;
+        if (relevantFrames.length > 30) {
+            const startFrames = relevantFrames.slice(0, 10);
+            const endFrames = relevantFrames.slice(-10);
+            const middleCount = 10;
+            const middleSlice = relevantFrames.slice(10, -10);
+            const step = Math.floor(middleSlice.length / middleCount);
+            const middleFrames = [];
+            for (let i = 0; i < middleCount; i++) {
+                middleFrames.push(middleSlice[i * step]);
+            }
+            sampledFrames = [...startFrames, ...middleFrames, ...endFrames].filter(Boolean) as typeof relevantFrames;
+        }
+
+        const round = (val: any): any => {
+            if (typeof val === 'number') return Math.round(val * 100) / 100;
+            if (Array.isArray(val)) return val.map(round);
+            if (val && typeof val === 'object') {
+                const res: any = {};
+                for (const key in val) {
+                    if (val[key] != null) res[key] = round(val[key]);
+                }
+                return res;
+            }
+            return val;
+        };
+
+        const compressedFrames = sampledFrames.map((f, i) => {
+            const prev = i > 0 ? sampledFrames[i - 1] : null;
+            let dist = 0;
+            let bearing = 0;
+            if (prev && prev.point && f.point) {
+                const geoFrom = fromWebMercator(prev.point);
+                const geoTo = fromWebMercator(f.point);
+                dist = haversineDistance(geoFrom, geoTo);
+                bearing = computeBearing(geoFrom, geoTo);
+            }
+            return round({
+                t: f.timestamp - ev.item.start,
+                d: f.decision,
+                p: f.point,
+                m: f.mean,
+                v: f.variance,
+                m2: f.mahalanobis2,
+                n: (f as any).pendingCount,
+                dt: dist,
+                az: bearing
+            });
+        });
+
+        const exportData = round({
+            id: selectedDeviceId,
+            ev: ev.item,
+            draft: ev.id.startsWith('draft-'),
+            frames: compressedFrames,
+            total: relevantFrames.length,
+            sampled: relevantFrames.length > 30,
+            prof: engine.motionProfile,
+            at: new Date().toISOString()
+        });
+
+        navigator.clipboard.writeText(JSON.stringify(exportData, null, 2));
+        setCopiedId(ev.id);
+        setTimeout(() => setCopiedId(null), 2000);
+    };
+
+    React.useEffect(() => {
+        const interval = setInterval(() => setNow(Date.now()), 30000);
+        return () => clearInterval(interval);
+    }, []);
+
     const events = useMemo(() => {
         if (selectedDeviceId == null || !engineSnapshot) return [];
 
-        let maxTimestamp = 0;
         const engine = enginesRef.get(selectedDeviceId);
-        const anchors = engine ? engine.closedAnchors : [];
-        const segments = engine ? engine.motionSegments : [];
+        if (!engine) return [];
 
-        const updateMax = (ts: number) => {
-            if (ts > maxTimestamp) maxTimestamp = ts;
-        };
+        const closed = eventsByDevice[selectedDeviceId] ?? [];
+        const draft = engine.draft;
 
-        for (const a of anchors) updateMax(a.endTimestamp ?? a.startTimestamp);
-        for (const s of segments) updateMax(s.endTime ?? s.startTime);
-        if (engine?.activeAnchor) updateMax(engine.activeAnchor.endTimestamp ?? engine.activeAnchor.startTimestamp);
-        if (engine?.currentMotionSegment) updateMax(engine.currentMotionSegment.endTime ?? engine.currentMotionSegment.startTime);
-
-        const now = maxTimestamp || Date.now();
-        const cutoff = now - 24 * 60 * 60 * 1000; // Sliding 24h window relative to latest data
+        const cutoff = now - 48 * 60 * 60 * 1000; // Sliding 48h window
 
         const items: TimelineEvent[] = [];
 
-        // Add closed anchors
-        for (const a of anchors) {
-            if ((a.endTimestamp ?? now) < cutoff) continue;
+        // Add closed events
+        for (const ev of closed) {
+            if (ev.end < cutoff) continue;
             items.push({
-                id: `anchor-closed-${a.startTimestamp}`,
-                item: a,
+                id: `${ev.type}-${ev.start}`,
+                item: ev,
             });
         }
 
-        // Add active anchor if it exists
-        const a = engine?.activeAnchor;
-        if (a && (a.endTimestamp ?? now) >= cutoff) {
-            items.push({
-                id: `anchor-active-${a.startTimestamp}`,
-                item: a,
-            });
-        }
-
-        // Add motion segments
-        for (const s of segments) {
-            if ((s.endTime ?? now) < cutoff) continue;
-            items.push({
-                id: `segment-${s.startTime}`,
-                item: s,
-            });
-        }
-
-        // If there is a current motion segment not yet closed
-        const currentS = engine?.currentMotionSegment;
-        if (currentS && (currentS.endTime ?? now) >= cutoff) {
-            items.push({
-                id: `segment-${currentS.startTime}`,
-                item: currentS,
-            });
+        // Add current draft (always show, even if it started before the cutoff)
+        if (draft) {
+            // Convert draft to event for rendering
+            if (draft.type === 'stationary') {
+                const stats = engine.computeStats(draft.recent);
+                items.push({
+                    id: `draft-stationary-${draft.start}`,
+                    item: {
+                        type: 'stationary',
+                        start: draft.start,
+                        end: now,
+                        mean: stats.mean,
+                        variance: stats.variance
+                    } as StationaryEvent
+                });
+            } else {
+                items.push({
+                    id: `draft-motion-${draft.start}`,
+                    item: {
+                        type: 'motion',
+                        start: draft.start,
+                        end: now,
+                        startAnchor: draft.startAnchor,
+                        endAnchor: draft.path[draft.path.length - 1]!.mean,
+                        path: draft.path.map(p => p.mean),
+                        distance: engine.computePathLength(draft.path)
+                    } as MotionEvent
+                });
+            }
         }
 
         // Sort newest first
-        items.sort((aItem, bItem) => {
-            const aStart = 'startTimestamp' in aItem.item ? aItem.item.startTimestamp : aItem.item.startTime;
-            const bStart = 'startTimestamp' in bItem.item ? bItem.item.startTimestamp : bItem.item.startTime;
-            return bStart - aStart;
-        });
+        items.sort((a, b) => b.item.start - a.item.start);
 
         return items;
-    }, [selectedDeviceId, enginesRef, engineSnapshot]);
+    }, [selectedDeviceId, enginesRef, engineSnapshot, eventsByDevice, now]);
 
     if (selectedDeviceId == null || events.length === 0) return null;
 
     return (
         <div className="flex flex-col p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 mt-2 max-h-[350px] overflow-hidden flex-shrink-0">
-            <h3 className="text-sm font-medium mb-2 px-1">Past 24 Hours</h3>
+            <h3 className="text-sm font-medium mb-2 px-1">Past 48 Hours</h3>
             <div className="flex flex-col gap-2 overflow-y-auto pr-1 pb-1 scrollbar-thin">
                 {events.map((ev) => {
                     const isSelected = selectedEventId === ev.id;
-                    let type = '';
-                    let startTime = 0;
-                    let endTime = 0;
-                    let duration = 0;
-                    let distance: number | undefined = undefined;
-                    let sparklineSegment: MotionSegment | null = null;
-                    let isCurrent = false;
-
-                    if ('startTimestamp' in ev.item) {
-                        type = 'stationary';
-                        startTime = ev.item.startTimestamp;
-                        if (ev.item.endTimestamp == null) isCurrent = true;
-                        endTime = ev.item.endTimestamp ?? Date.now();
-                        duration = endTime - startTime;
-                    } else {
-                        type = 'moving';
-                        startTime = ev.item.startTime;
-                        if (ev.item.endTime == null) isCurrent = true;
-                        endTime = ev.item.endTime ?? Date.now();
-                        duration = endTime - startTime;
-                        distance = ev.item.distance;
-                        sparklineSegment = ev.item;
-                    }
+                    const item = ev.item;
+                    const type = item.type;
+                    const startTime = item.start;
+                    const endTime = item.end;
+                    const duration = endTime - startTime;
+                    const isCurrent = ev.id.startsWith('draft-');
 
                     return (
                         <div
@@ -186,20 +253,31 @@ export const TimelinePanel: React.FC<Props> = ({
                                         <><Activity className="w-4 h-4 text-green-500" /> Moving</>
                                     )}
                                 </div>
-                                <div className="text-xs text-muted-foreground font-medium">
+                                <div className="text-xs text-muted-foreground font-medium flex items-center gap-2">
                                     {formatDuration(duration)}
+                                    <button
+                                        onClick={(e) => handleCopy(e, ev)}
+                                        className="p-1 hover:bg-primary/20 rounded-sm transition-colors"
+                                        title="Copy event with internal state"
+                                    >
+                                        {copiedId === ev.id ? (
+                                            <Check className="w-3 h-3 text-green-500" />
+                                        ) : (
+                                            <Copy className="w-3 h-3" />
+                                        )}
+                                    </button>
                                 </div>
                             </div>
 
                             <div className="text-xs text-muted-foreground flex justify-between items-center">
                                 <span>{new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {isCurrent ? 'Present' : new Date(endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                {type === 'moving' && distance !== undefined && (
-                                    <span className="font-medium text-foreground/80">{Math.round(distance)}m</span>
+                                {type === 'motion' && (
+                                    <span className="font-medium text-foreground/80">{Math.round(item.distance)}m</span>
                                 )}
                             </div>
 
-                            {sparklineSegment && (
-                                <Sparkline segment={sparklineSegment} />
+                            {type === 'motion' && (
+                                <Sparkline event={item} />
                             )}
                         </div>
                     );

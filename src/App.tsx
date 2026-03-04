@@ -9,8 +9,7 @@ import { useTraccarConnection } from "./hooks/useTraccarConnection";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import type { Anchor } from "./engine/anchor";
-import type { MotionSegment, DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
+import type { DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -51,7 +50,7 @@ export function App() {
     return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
   }, [devices, groupDevices]);
 
-  const RECENT_DEVICE_CUTOFF_MS = 96 * 60 * 60 * 1000; // 96 hours
+  const RECENT_DEVICE_CUTOFF_MS = 48 * 60 * 60 * 1000; // 48 hours
 
   const traccarSecure = useStore(state => state.settings.secure);
   const traccarEmail = useStore(state => state.settings.email);
@@ -132,6 +131,7 @@ export function App() {
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
+  const eventsByDevice = useStore(state => state.eventsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
 
   // Apply theme immediately
@@ -168,23 +168,51 @@ export function App() {
     const engine = enginesRef.get(selectedDeviceId);
     if (!engine) return [];
     const anchors: DebugAnchor[] = [];
-    for (const a of engine.closedAnchors) {
-      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'closed', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, lastUpdateTimestamp: a.lastUpdateTimestamp });
+
+    // Closed events as anchors
+    for (const ev of engine.closed) {
+      if (ev.type === 'stationary') {
+        anchors.push({
+          mean: ev.mean,
+          variance: ev.variance,
+          confidence: 1.0,
+          type: 'closed',
+          startTimestamp: ev.start,
+          endTimestamp: ev.end,
+          lastUpdateTimestamp: ev.end
+        });
+      }
     }
-    if (engine.activeAnchor) {
-      const a = engine.activeAnchor;
-      anchors.push({ mean: a.mean, variance: a.variance, confidence: a.confidence, type: 'active', startTimestamp: a.startTimestamp, endTimestamp: a.endTimestamp, lastUpdateTimestamp: a.lastUpdateTimestamp });
+
+    // Active draft as active anchor
+    if (engine.draft) {
+      if (engine.draft.type === 'stationary') {
+        const stats = (engine as any).computeStats(engine.draft.recent);
+        anchors.push({
+          mean: stats.mean,
+          variance: stats.variance,
+          confidence: 1.0,
+          type: 'active',
+          startTimestamp: engine.draft.start,
+          endTimestamp: null,
+          lastUpdateTimestamp: engine.lastTimestamp ?? engine.draft.start
+        });
+      }
     }
     return anchors;
   }, [debugMode, selectedDeviceId, engineSnapshotsByDevice]);
 
-  // Reset debug index when device or frame count changes
+  // Reset debug index when device changes
+  const lastSelectedDeviceId = useRef<number | null>(null);
   useEffect(() => {
-    if (selectedDeviceId == null || !debugMode) return;
+    if (selectedDeviceId == null) return;
+    if (selectedDeviceId === lastSelectedDeviceId.current) return;
+    lastSelectedDeviceId.current = selectedDeviceId;
+
     const frames = enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [];
     if (frames.length === 0) setDebugFrameIndex(0);
     else setDebugFrameIndex(Math.max(0, frames.length - 1));
-  }, [selectedDeviceId, debugMode]);
+  }, [selectedDeviceId]);
 
   // Clear selected motion segment when device changes
   useEffect(() => {
@@ -200,12 +228,7 @@ export function App() {
     if (frames.length === 0) return null;
     const f = frames[Math.max(0, Math.min(frames.length - 1, debugFrameIndex))];
     if (!f) return null;
-    return {
-      measurement: { ...f.measurement },
-      anchor: f.anchor ? { ...f.anchor } : null,
-      timestamp: f.timestamp,
-      motionStartTimestamp: f.motionStartTimestamp,
-    };
+    return f as DebugFrameView;
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
   const deviceList = useMemo(() => {
@@ -355,10 +378,10 @@ export function App() {
               selectedDeviceId={selectedDeviceId}
               enginesRef={enginesRef}
               engineSnapshot={selectedDeviceId != null ? engineSnapshotsByDevice[selectedDeviceId] : undefined}
+              eventsByDevice={eventsByDevice}
               onSelectEvent={(event) => {
                 setSelectedTimelineEvent(event);
-                const isAnchor = 'startTimestamp' in event.item;
-                const startTime = isAnchor ? (event.item as Anchor).startTimestamp : (event.item as MotionSegment).startTime;
+                const startTime = event.item.start;
 
                 if (selectedDeviceId != null) {
                   const engine = enginesRef.get(selectedDeviceId);
@@ -371,13 +394,12 @@ export function App() {
                   }
                 }
 
-                if (isAnchor) {
-                  const a = event.item as Anchor;
-                  const geo = fromWebMercator(a.mean);
+                if (event.item.type === 'stationary') {
+                  const geo = fromWebMercator(event.item.mean);
                   const r = 0.001; // roughly 100m padding
                   mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
                 } else {
-                  const s = event.item as MotionSegment;
+                  const s = event.item;
                   if (s.path.length > 0) {
                     let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
                     for (const p of s.path) {

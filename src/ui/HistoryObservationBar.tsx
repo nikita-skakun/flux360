@@ -19,25 +19,22 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
         return () => window.removeEventListener('keydown', handleEsc);
     }, [onClose]);
 
-    let startTime = 0;
+    const item = event.item;
+    const startTime = item.start;
     let detailsNode = null;
 
-    if ('startTimestamp' in event.item) {
-        const a = event.item;
-        startTime = a.startTimestamp;
+    if (item.type === 'stationary') {
         detailsNode = (
             <span className="flex items-center gap-1.5">
                 <MapPin className="w-4 h-4" />
-                Stationary for {Math.round(((a.endTimestamp ?? Date.now()) - a.startTimestamp) / 60000)}m
+                Stationary for {Math.round((item.end - item.start) / 60000)}m
             </span>
         );
     } else {
-        const s = event.item;
-        startTime = s.startTime;
         detailsNode = (
             <span className="flex items-center gap-1.5">
                 <Activity className="w-4 h-4" />
-                Moved {Math.round(s.distance)}m
+                Moved {Math.round(item.distance)}m
             </span>
         );
     }
