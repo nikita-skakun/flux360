@@ -163,20 +163,26 @@ export class Engine {
 
     const settleEnd = draft.recent[draft.recent.length - 1]!.timestamp;
     const settleDurationSeconds = (settleEnd - draft.start) / 1000;
-    const avgVelocity = settleDurationSeconds > 0 ? startEndDist / settleDurationSeconds : 0;
+    const avgRoadSpeed = settleDurationSeconds > 0 ? totalDistance / settleDurationSeconds : 0;
     const efficiency = totalDistance > 0 ? startEndDist / totalDistance : 0;
 
     const minSignificantDist = 8 * profile.maxStationaryRadius;
-    const maxLoopDev = 2 * profile.maxStationaryRadius;
+    const maxLoopDev = 3 * profile.maxStationaryRadius;
 
     const significantDisplacement = startEndDist > 5 * profile.maxStationaryRadius;
+    const significantLoop =
+      totalDistance > 4 * minSignificantDist &&
+      maxDev > 6 * profile.maxStationaryRadius &&
+      draft.path.length > MIN_PATH_POINTS * 2;
 
     const insignificant =
-      !significantDisplacement && (
+      !significantDisplacement &&
+      !significantLoop &&
+      (
         totalDistance < minSignificantDist ||
         (maxDev < maxLoopDev && draft.path.length <= MIN_PATH_POINTS) ||
         startEndDist < maxLoopDev ||
-        avgVelocity < profile.minAverageVelocity ||
+        avgRoadSpeed < profile.minAverageVelocity ||
         efficiency < profile.minEfficiency
       );
 
@@ -318,9 +324,10 @@ export class Engine {
 
   private maxDeviation(path: DevicePoint[], anchor: Vec2): number {
     let maxD2 = 0;
-    const anchorGeo = fromWebMercator(anchor);
     for (const p of path) {
-      const d2 = (p.mean[0] - anchorGeo[0]) ** 2 + (p.mean[1] - anchorGeo[1]) ** 2;
+      const dx = p.mean[0] - anchor[0];
+      const dy = p.mean[1] - anchor[1];
+      const d2 = dx * dx + dy * dy;
       if (d2 > maxD2) maxD2 = d2;
     }
     return Math.sqrt(maxD2);

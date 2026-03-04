@@ -248,4 +248,99 @@ describe("Engine Core Logic", () => {
             expect(durationSec).toBeLessThan(1200);
         }
     });
+
+    test("Motion draft predecessor linkage", () => {
+        const engine = new Engine();
+        let time = START_TIME;
+
+        // 1. Stationary
+        engine.processMeasurements(Array.from({ length: 50 }, (_, i) =>
+            createPoint(P1, time + i * 1000, 107)
+        ));
+        time += 50000;
+
+        // 2. Start moving (but not yet settled)
+        const P2: Vec2 = [P1[0] + 0.001, P1[1]]; // ~110m away
+        engine.processMeasurements(Array.from({ length: 10 }, (_, i) =>
+            createPoint(P2, time + i * 1000, 107)
+        ));
+
+        expect(engine.draft?.type).toBe("motion");
+        const draft = engine.draft as any; // Cast to access private/internal if needed, but it's public in types
+        expect(draft.predecessor).toBeDefined();
+        expect(draft.predecessor.type).toBe("stationary");
+        expect(draft.predecessor.start).toBe(START_TIME);
+    });
+
+    test("Significant loop detection (Reproduction of absorption bug)", () => {
+        const engine = new Engine();
+        let time = START_TIME;
+
+        // 1. Initial Stationary at P1
+        engine.processMeasurements(Array.from({ length: 50 }, (_, i) =>
+            createPoint(P1, time + i * 1000, 108)
+        ));
+        time += 50000;
+
+        // 2. Drive a 2km loop and return to P1
+        // We go 1000m north, then 1000m south back to P1
+        const P_MID: Vec2 = [P1[0], P1[1] + 0.009]; // ~1000m north
+
+        // Outward
+        engine.processMeasurements(Array.from({ length: 10 }, (_, i) =>
+            createPoint([P1[0], P1[1] + i * 0.0009], time + i * 10000, 108)
+        ));
+        time += 100000;
+
+        // Return
+        engine.processMeasurements(Array.from({ length: 10 }, (_, i) =>
+            createPoint([P_MID[0], P_MID[1] - i * 0.0009], time + i * 10000, 108)
+        ));
+        time += 100000;
+
+        // 3. Settle at P1
+        engine.processMeasurements(Array.from({ length: 20 }, (_, i) =>
+            createPoint(P1, time + i * 5000, 108)
+        ));
+
+        // This trip has totalDistance ~2000m, but startEndDist ~0m.
+        // It SHOULD be committed as a motion.
+        // If it's absorbed, engine.closed.length will be 0 (all merged into stationary draft).
+        const motions = engine.closed.filter(e => e.type === 'motion');
+        expect(motions.length).toBe(1);
+    });
+
+    test("Flyer jitter rejection (outlier loop prevention)", () => {
+        const engine = new Engine();
+        let time = START_TIME;
+
+        // 1. Initial Stationary at P1
+        engine.processMeasurements(Array.from({ length: 50 }, (_, i) =>
+            createPoint(P1, time + i * 1000, 109)
+        ));
+        time += 50000;
+
+        // 2. Flyer scenario: 5 points total
+        // p1, p2 near anchor
+        // p3 far flyer (400m away)
+        // p4, p5 near anchor (causes settlement)
+        const flyerPoints: DevicePoint[] = [
+            createPoint(P1, time, 109),
+            createPoint(P1, time + 20000, 109),
+            createPoint([P1[0] + 0.004, P1[1]], time + 387000, 109), // ~400m away
+            createPoint(P1, time + 582000, 109),
+            createPoint(P1, time + 588000, 109),
+        ];
+        engine.processMeasurements(flyerPoints);
+
+        // 3. Settle at P1 for real
+        engine.processMeasurements(Array.from({ length: 20 }, (_, i) =>
+            createPoint(P1, time + 600000 + i * 5000, 109)
+        ));
+
+        // This has distance ~800m and maxDev ~400m, but ONLY 5 points and 1 flyer.
+        // It SHOULD be absorbed as mush, not committed as a motion.
+        const motions = engine.closed.filter(e => e.type === 'motion');
+        expect(motions.length).toBe(0);
+    });
 });

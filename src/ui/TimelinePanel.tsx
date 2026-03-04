@@ -206,6 +206,19 @@ export const TimelinePanel: React.FC<Props> = ({
                     } as StationaryEvent
                 });
             } else {
+                // Motion Draft: Also include its predecessor (which is stationary but not yet closed)
+                const predStats = engine.computeStats(draft.predecessor.recent);
+                items.push({
+                    id: `pred-stationary-${draft.predecessor.start}`,
+                    item: {
+                        type: 'stationary',
+                        start: draft.predecessor.start,
+                        end: draft.start,
+                        mean: predStats.mean,
+                        variance: predStats.variance
+                    } as StationaryEvent
+                });
+
                 items.push({
                     id: `draft-motion-${draft.start}`,
                     item: {
