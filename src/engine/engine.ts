@@ -2,17 +2,7 @@ import { haversineDistance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, DEBUG_FRAME_CAP, type MotionProfileConfig } from "./motionDetector";
 import { fromWebMercator } from "@/util/webMercator";
 import { smoothPath } from "@/util/pathSmoothing";
-import type {
-  DevicePoint,
-  MotionProfileName,
-  Timestamp,
-  Vec2,
-  EngineEvent,
-  EngineDraft,
-  StationaryDraft,
-  MotionDraft,
-  MotionEvent
-} from "@/types";
+import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent } from "@/types";
 
 export type EngineSnapshot = {
   draft: EngineDraft | null;

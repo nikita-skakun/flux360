@@ -233,7 +233,7 @@ export const TimelinePanel: React.FC<Props> = ({
         <div className="flex flex-col p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 mt-2 max-h-[350px] overflow-hidden flex-shrink-0">
             <h3 className="text-sm font-medium mb-2 px-1">Past 48 Hours</h3>
             <div className="flex flex-col gap-2 overflow-y-auto pr-1 pb-1 scrollbar-thin">
-                {events.map((ev) => {
+                {events.map((ev, i) => {
                     const isSelected = selectedEventId === ev.id;
                     const item = ev.item;
                     const type = item.type;
@@ -242,50 +242,78 @@ export const TimelinePanel: React.FC<Props> = ({
                     const duration = endTime - startTime;
                     const isCurrent = ev.id.startsWith('draft-');
 
+                    const currDate = new Date(startTime).toDateString();
+                    const prevDate = i > 0 ? new Date(events[i - 1]!.item.start).toDateString() : null;
+                    const isNewDay = currDate !== prevDate;
+
+                    let dayLabel = currDate;
+                    if (isNewDay) {
+                        const nowObj = new Date(now);
+                        const todayStr = nowObj.toDateString();
+                        const yesterdayObj = new Date(now);
+                        yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+                        const yesterdayStr = yesterdayObj.toDateString();
+
+                        if (currDate === todayStr) {
+                            dayLabel = 'Today';
+                        } else if (currDate === yesterdayStr) {
+                            dayLabel = 'Yesterday';
+                        } else {
+                            dayLabel = new Date(startTime).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+                        }
+                    }
+
                     return (
-                        <div
-                            key={ev.id}
-                            onClick={() => onSelectEvent(ev)}
-                            className={`flex flex-col p-2 rounded-md border transition-all cursor-pointer ${isSelected
-                                ? 'bg-primary/20 border-primary shadow-sm'
-                                : 'bg-background/50 border-border/50 hover:bg-background/80 hover:border-border'
-                                }`}
-                        >
-                            <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-1.5 font-medium text-sm">
-                                    {type === 'stationary' ? (
-                                        <><MapPin className="w-4 h-4 text-blue-500" /> Stationary</>
-                                    ) : (
-                                        <><Activity className="w-4 h-4 text-green-500" /> Moving</>
+                        <React.Fragment key={ev.id}>
+                            {isNewDay && (
+                                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mt-3 mb-1 first:mt-0 flex items-center gap-2">
+                                    {dayLabel}
+                                    <div className="h-px bg-border/50 flex-1" />
+                                </div>
+                            )}
+                            <div
+                                onClick={() => onSelectEvent(ev)}
+                                className={`flex flex-col p-2 rounded-md border transition-all cursor-pointer ${isSelected
+                                    ? 'bg-primary/20 border-primary shadow-sm'
+                                    : 'bg-background/50 border-border/50 hover:bg-background/80 hover:border-border'
+                                    }`}
+                            >
+                                <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center gap-1.5 font-medium text-sm">
+                                        {type === 'stationary' ? (
+                                            <><MapPin className="w-4 h-4 text-blue-500" /> Stationary</>
+                                        ) : (
+                                            <><Activity className="w-4 h-4 text-green-500" /> Moving</>
+                                        )}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground font-medium flex items-center gap-2">
+                                        {formatDuration(duration)}
+                                        <button
+                                            onClick={(e) => handleCopy(e, ev)}
+                                            className="p-1 hover:bg-primary/20 rounded-sm transition-colors"
+                                            title="Copy event with internal state"
+                                        >
+                                            {copiedId === ev.id ? (
+                                                <Check className="w-3 h-3 text-green-500" />
+                                            ) : (
+                                                <Copy className="w-3 h-3" />
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="text-xs text-muted-foreground flex justify-between items-center">
+                                    <span>{new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {isCurrent ? 'Present' : new Date(endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    {type === 'motion' && (
+                                        <span className="font-medium text-foreground/80">{Math.round(item.distance)}m</span>
                                     )}
                                 </div>
-                                <div className="text-xs text-muted-foreground font-medium flex items-center gap-2">
-                                    {formatDuration(duration)}
-                                    <button
-                                        onClick={(e) => handleCopy(e, ev)}
-                                        className="p-1 hover:bg-primary/20 rounded-sm transition-colors"
-                                        title="Copy event with internal state"
-                                    >
-                                        {copiedId === ev.id ? (
-                                            <Check className="w-3 h-3 text-green-500" />
-                                        ) : (
-                                            <Copy className="w-3 h-3" />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
 
-                            <div className="text-xs text-muted-foreground flex justify-between items-center">
-                                <span>{new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {isCurrent ? 'Present' : new Date(endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                 {type === 'motion' && (
-                                    <span className="font-medium text-foreground/80">{Math.round(item.distance)}m</span>
+                                    <Sparkline event={item} />
                                 )}
                             </div>
-
-                            {type === 'motion' && (
-                                <Sparkline event={item} />
-                            )}
-                        </div>
+                        </React.Fragment>
                     );
                 })}
             </div>
