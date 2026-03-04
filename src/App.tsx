@@ -360,7 +360,7 @@ export function App() {
                 const isAnchor = 'startTimestamp' in event.item;
                 const startTime = isAnchor ? (event.item as Anchor).startTimestamp : (event.item as MotionSegment).startTime;
 
-                if (debugMode && selectedDeviceId != null) {
+                if (selectedDeviceId != null) {
                   const engine = enginesRef.get(selectedDeviceId);
                   if (engine) {
                     const frames = [...engine.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp);
