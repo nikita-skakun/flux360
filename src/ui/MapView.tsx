@@ -8,7 +8,7 @@ import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, EngineEvent } from "@/types";
-import type { Feature, Point, Polygon, LineString } from "geojson";
+import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -201,7 +201,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     } // end per-device for loop
 
     // Debug frame circles (mean/variance at selected frame)
-    type FrameFeature = Feature<Polygon>;
+    type FrameFeature = Feature<Polygon | Point>;
     const debugFrameFeatures: FrameFeature[] = [];
     if (debugFrame && debugFrame.mean && debugFrame.variance) {
       const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
@@ -211,17 +211,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
           const angle = (j * 2 * Math.PI) / pts;
           coords.push(fromWebMercator([center[0] + radiusM * Math.cos(angle), center[1] + radiusM * Math.sin(angle)]));
         }
-        return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } };
+        return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } } as Feature<Polygon>;
       };
       const radius = getRadiusFromVariance(debugFrame.variance);
-      debugFrameFeatures.push(makeCircle(debugFrame.mean, radius, 'anchor'));
+      debugFrameFeatures.push(makeCircle(debugFrame.mean, radius, 'anchor') as FrameFeature);
 
       if (debugFrame.point) {
         debugFrameFeatures.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: fromWebMercator(debugFrame.point) },
           properties: { kind: 'measurement' }
-        } as any);
+        } as FrameFeature);
       }
     }
 
@@ -266,8 +266,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
         cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-      const repIdx = drawItems.findIndex(di => di.device === repItem.device);
-      const rep = drawItems[repIdx];
+      const rep = drawItems.find(di => di.device === repItem.device);
       if (!rep) continue;
 
       const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
@@ -388,9 +387,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         (map.getSource('debug-anchors-source') as GeoJSONSource).setData(anchorData);
       }
 
-      const frameData = { type: 'FeatureCollection' as const, features: debugFrameFeatures };
+      const frameData: FeatureCollection = { type: 'FeatureCollection', features: debugFrameFeatures };
       if (!map.getSource('debug-frame-source')) {
-        map.addSource('debug-frame-source', { type: 'geojson', data: frameData as never });
+        map.addSource('debug-frame-source', { type: 'geojson', data: frameData });
         // Light red fill for measurement circle (no outline)
         map.addLayer({
           id: 'debug-frame-fill-layer',
@@ -429,7 +428,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
           },
         });
       } else {
-        (map.getSource('debug-frame-source') as GeoJSONSource).setData(frameData as never);
+        (map.getSource('debug-frame-source') as GeoJSONSource).setData(frameData);
       }
 
       const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };

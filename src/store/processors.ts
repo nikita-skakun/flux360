@@ -105,9 +105,12 @@ export function computeProcessedPositions(
 ): { engineSnapshotsByDevice: Record<number, DevicePoint[]>, eventsByDevice: Record<number, EngineEvent[]> } | null {
     if (!positionsAll || positionsAll.length === 0) return null;
 
+    // Sort once at the beginning to ensure chronological order
+    const sortedPositions = [...positionsAll].sort((a, b) => a.timestamp - b.timestamp);
+
     // Pre-index all positions by deviceId once to avoid O(N*E) filters
     const allPosByDevice = new Map<number, NormalizedPosition[]>();
-    for (const p of positionsAll) {
+    for (const p of sortedPositions) {
         // Add to individual device list
         let list = allPosByDevice.get(p.device);
         if (!list) {
@@ -130,17 +133,18 @@ export function computeProcessedPositions(
         }
     }
 
-    const newPositions = positionsAll.filter((p: NormalizedPosition) => {
+    // Filter out already processed positions using dedupeKey
+    const newPositions = sortedPositions.filter((p: NormalizedPosition) => {
         const key = dedupeKey(p);
         if (processedKeys.has(key)) return false;
         processedKeys.add(key);
         return true;
     });
 
+    // Group new positions by device AND by any groups they belong to
     const posByDevice: Record<number, NormalizedPosition[]> = {};
     const groupIdsTouched = new Set<number>();
 
-    // Group positions by device AND by any groups they belong to
     for (const p of newPositions) {
         // Add position to the original device
         (posByDevice[p.device] ||= []).push(p);
@@ -164,7 +168,6 @@ export function computeProcessedPositions(
                 if (memberPos) historical.push(...memberPos);
             }
             if (historical.length > 0) {
-                historical.sort((a, b) => a.timestamp - b.timestamp);
                 posByDevice[group.id] = historical;
             }
         }
@@ -250,20 +253,16 @@ export function computeProcessedPositions(
     const rawByDevice: Record<number, DevicePoint[]> = {};
     for (const [deviceKey, arr] of Object.entries(posByDevice)) {
         const deviceId = Number(deviceKey);
-        const rawArr: DevicePoint[] = arr.map((p) => {
-            const comp: DevicePoint = {
-                mean: toWebMercator(p.geo),
-                accuracy: p.accuracy,
-                geo: p.geo,
-                device: deviceId,
-                timestamp: p.timestamp,
-                anchorStartTimestamp: p.timestamp,
-                confidence: 0,
-                sourceDeviceId: groupIds.has(deviceId) ? p.device : undefined,
-            };
-            return comp;
-        });
-        rawByDevice[deviceId] = rawArr;
+        rawByDevice[deviceId] = arr.map((p) => ({
+            mean: toWebMercator(p.geo),
+            accuracy: p.accuracy,
+            geo: p.geo,
+            device: deviceId,
+            timestamp: p.timestamp,
+            anchorStartTimestamp: p.timestamp,
+            confidence: 0,
+            sourceDeviceId: groupIds.has(deviceId) ? p.device : undefined,
+        }));
     }
 
     // No need to track firstPosition anymore

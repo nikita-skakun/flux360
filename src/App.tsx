@@ -161,8 +161,6 @@ export function App() {
     });
   }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
 
-  const frame = { components: visibleComponents };
-
   const debugAnchors = useMemo((): DebugAnchor[] => {
     if (!debugMode || selectedDeviceId == null) return [];
     const engine = enginesRef.get(selectedDeviceId);
@@ -187,7 +185,7 @@ export function App() {
     // Active draft as active anchor
     if (engine.draft) {
       if (engine.draft.type === 'stationary') {
-        const stats = (engine as any).computeStats(engine.draft.recent);
+        const stats = engine.computeStats(engine.draft.recent);
         anchors.push({
           mean: stats.mean,
           variance: stats.variance,
@@ -335,7 +333,7 @@ export function App() {
       />
       <MapView
         ref={mapViewRef}
-        components={frame.components}
+        components={visibleComponents}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           mapViewRef.current?.flyToDevice(id);

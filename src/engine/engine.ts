@@ -119,10 +119,9 @@ export class Engine {
 
       if (draft.pending.length >= PENDING_MIN) {
         // Alignment Gate: Transition only if points are coherent
-        const anchorStats = this.computeStats(draft.recent);
         const directions: Vec2[] = draft.pending.map(pt => {
-          const dx = pt.mean[0] - anchorStats.mean[0];
-          const dy = pt.mean[1] - anchorStats.mean[1];
+          const dx = pt.mean[0] - stats.mean[0];
+          const dy = pt.mean[1] - stats.mean[1];
           const mag = Math.hypot(dx, dy);
           return mag > 0 ? [dx / mag, dy / mag] as Vec2 : [0, 0] as Vec2;
         });
@@ -138,7 +137,7 @@ export class Engine {
             start: startTimestamp,
             stationaryCutoff: startTimestamp,
             predecessor: draft,
-            startAnchor: anchorStats.mean,
+            startAnchor: stats.mean,
             path: [...draft.pending],
             recent: [draft.pending[draft.pending.length - 1]!]
           };
@@ -393,39 +392,33 @@ export class Engine {
   }
 
   refineHistory(profile: MotionProfileConfig) {
-    if (this.closed.length < 3) return;
-
-    const refined: EngineEvent[] = [];
     let i = 0;
-    while (i < this.closed.length) {
+    while (i < this.closed.length - 2) {
       const current = this.closed[i]!;
-      const next = this.closed[i + 1];
-      const nextNext = this.closed[i + 2];
+      const next = this.closed[i + 1]!;
+      const nextNext = this.closed[i + 2]!;
 
-      if (current.type === 'motion' && next?.type === 'stationary' && nextNext?.type === 'motion') {
-        const gapDuration = next.end - next.start;
-        if (gapDuration < profile.maxMergeGapDuration) {
-          // Merge current, next, and nextNext into a single motion
-          const merged: MotionEvent = {
-            type: 'motion',
-            start: current.start,
-            end: nextNext.end,
-            startAnchor: current.startAnchor,
-            endAnchor: nextNext.endAnchor,
-            path: [...current.path, ...nextNext.path],
-            distance: 0
-          };
-          merged.distance = this.computePathLength(merged.path);
+      if (
+        current.type === 'motion' &&
+        next.type === 'stationary' &&
+        nextNext.type === 'motion' &&
+        next.end - next.start < profile.maxMergeGapDuration
+      ) {
+        const merged: MotionEvent = {
+          type: 'motion',
+          start: current.start,
+          end: nextNext.end,
+          startAnchor: current.startAnchor,
+          endAnchor: nextNext.endAnchor,
+          path: [...current.path, ...nextNext.path],
+          distance: 0
+        };
+        merged.distance = this.computePathLength(merged.path);
 
-          // Replace current with merged and remove next/nextNext
-          this.closed.splice(i, 3, merged);
-          // Re-check from current index in case the new motion can be merged with what follows
-          continue;
-        }
+        this.closed.splice(i, 3, merged);
+      } else {
+        i++;
       }
-      refined.push(current);
-      i++;
     }
-    this.closed = refined;
   }
 }

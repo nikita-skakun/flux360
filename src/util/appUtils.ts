@@ -48,11 +48,10 @@ export function buildEngineSnapshotsFromByDevice(
         const engine = enginesRef.get(deviceId);
         if (!engine) continue;
         const snapshot = engine.getCurrentSnapshot();
-        const dId = Number(deviceId);
 
         if (snapshot) {
-          snapshotsByDevice.set(dId, [snapshot]);
-          eventsByDevice[dId] = engine.closed;
+          snapshotsByDevice.set(deviceId, [snapshot]);
+          eventsByDevice[deviceId] = engine.closed;
 
           const draft = snapshot.draft;
           if (draft) {
@@ -62,10 +61,10 @@ export function buildEngineSnapshotsFromByDevice(
               const sumY = draft.recent.reduce((s, p) => s + p.mean[1], 0);
               const mean: Vec2 = [sumX / draft.recent.length, sumY / draft.recent.length];
 
-              currentSnapshots[dId] = [{
+              currentSnapshots[deviceId] = [{
                 mean,
                 timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
-                device: dId,
+                device: deviceId,
                 geo: fromWebMercator(mean),
                 accuracy: 5, // Default placeholder for UI
                 anchorStartTimestamp: draft.start,
@@ -76,10 +75,10 @@ export function buildEngineSnapshotsFromByDevice(
               // Motion: use last path point
               const lastPt = draft.path[draft.path.length - 1]!;
               const lastMean = lastPt.mean;
-              currentSnapshots[dId] = [{
+              currentSnapshots[deviceId] = [{
                 mean: lastMean,
                 timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
-                device: dId,
+                device: deviceId,
                 geo: fromWebMercator(lastMean),
                 accuracy: 5,
                 anchorStartTimestamp: draft.start,
@@ -89,7 +88,7 @@ export function buildEngineSnapshotsFromByDevice(
             }
           }
         } else {
-          currentSnapshots[dId] = [];
+          currentSnapshots[deviceId] = [];
         }
       } catch (innerError) {
         console.error(`Error processing snapshot for device ${deviceId}:`, innerError);

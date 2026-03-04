@@ -135,7 +135,7 @@ export const TimelinePanel: React.FC<Props> = ({
                 m: f.mean,
                 v: f.variance,
                 m2: f.mahalanobis2,
-                n: (f as any).pendingCount,
+                n: f.pendingCount,
                 dt: dist,
                 az: bearing
             });
