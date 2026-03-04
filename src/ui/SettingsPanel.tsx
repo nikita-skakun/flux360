@@ -1,57 +1,21 @@
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Sun, Moon, Monitor } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { ThemeToggle } from "./ThemeToggle";
 import React from "react";
 
 type Props = {
-  theme: 'light' | 'dark' | 'system';
-  onApplyTheme: (theme: 'light' | 'dark' | 'system') => void;
   debugMode: boolean;
   setDebugMode: (value: boolean) => void;
   onLogout: () => void;
 };
 
 export const SettingsPanel = React.memo(function SettingsPanel({
-  theme,
-  onApplyTheme,
   debugMode,
   setDebugMode,
   onLogout,
 }: Props) {
-  // Cycle through theme modes: system -> dark -> light -> dark...
-  // Applies immediately without needing to click Save
-  const cycleTheme = () => {
-    const nextTheme: 'light' | 'dark' | 'system' =
-      theme === 'system' ? 'dark' :
-        theme === 'dark' ? 'light' : 'dark';
-    onApplyTheme(nextTheme);
-  };
-
-  // Get the appropriate icon and label
-  const getThemeIcon = () => {
-    switch (theme) {
-      case 'dark':
-        return <Moon className="h-4 w-4" />;
-      case 'light':
-        return <Sun className="h-4 w-4" />;
-      case 'system':
-      default:
-        return <Monitor className="h-4 w-4" />;
-    }
-  };
-
-  const getThemeLabel = () => {
-    switch (theme) {
-      case 'dark':
-        return 'Dark';
-      case 'light':
-        return 'Light';
-      case 'system':
-      default:
-        return 'Auto';
-    }
-  };
 
   return (
     <div className="w-full">
@@ -69,23 +33,16 @@ export const SettingsPanel = React.memo(function SettingsPanel({
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={cycleTheme}
-              className="h-7 w-7 rounded-full"
-              title={`Theme: ${getThemeLabel()} (click to cycle)`}
-            >
-              {getThemeIcon()}
-            </Button>
+            <ThemeToggle />
 
             <Button
               variant="destructive"
-              size="sm"
+              size="icon"
               onClick={onLogout}
-              className="h-7 px-2 text-[10px] font-medium"
+              className="h-7 w-7 rounded-full"
+              title="Logout"
             >
-              Logout
+              <LogOut className="h-4 w-4" />
             </Button>
           </div>
         </div>

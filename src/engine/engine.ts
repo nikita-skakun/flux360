@@ -380,6 +380,9 @@ export class Engine {
   }
 
   refineHistory(profile: MotionProfileConfig) {
+    // Safety: ensure chronological order before merging
+    this.closed.sort((a, b) => a.start - b.start);
+
     let i = 0;
     while (i < this.closed.length - 2) {
       const current = this.closed[i]!;
@@ -390,6 +393,7 @@ export class Engine {
         current.type === 'motion' &&
         next.type === 'stationary' &&
         nextNext.type === 'motion' &&
+        next.end > next.start && // Basic validity check
         next.end - next.start < profile.maxMergeGapDuration
       ) {
         const merged: MotionEvent = {

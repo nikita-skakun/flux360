@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, MapPin } from "lucide-react";
+import { ThemeToggle } from "./ThemeToggle";
 import { useStore } from "@/store";
 import React from "react";
 
@@ -95,6 +96,10 @@ export const LoginPage: React.FC = () => {
                         </form>
                     </div>
                 </div>
+            </div>
+
+            <div className="fixed bottom-6 right-6 z-50">
+                <ThemeToggle className="h-10 w-10 bg-background/50 backdrop-blur-md border-border/50 shadow-xl hover:bg-background/80 transition-all duration-300" />
             </div>
         </div>
     );

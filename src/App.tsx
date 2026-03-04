@@ -58,7 +58,6 @@ export function App() {
   const traccarBaseUrl = useStore(state => state.settings.baseUrl);
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const theme = useStore(state => state.settings.theme);
-  const setTheme = useStore(state => state.setTheme);
 
   // Handle theme switching with support for 'system', 'light', and 'dark'
   const isDark = useMemo(() => {
@@ -134,10 +133,6 @@ export function App() {
   const eventsByDevice = useStore(state => state.eventsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
 
-  // Apply theme immediately
-  const applyTheme = (nextTheme: 'light' | 'dark' | 'system') => {
-    setTheme(nextTheme);
-  };
 
   const visibleComponents = useMemo(() => {
     const allComps = Object.values(engineSnapshotsByDevice).flat();
@@ -351,8 +346,6 @@ export function App() {
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
-              theme={theme}
-              onApplyTheme={applyTheme}
               debugMode={debugMode}
               setDebugMode={setDebugMode}
               onLogout={logout}

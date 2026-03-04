@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import { formatDuration } from '@/util/appUtils';
+import { fromWebMercator } from '@/util/webMercator';
+import { haversineDistance, computeBearing } from '@/util/geo';
 import { MapPin, Activity, Copy, Check } from 'lucide-react';
+import React, { useMemo } from 'react';
 import type { Engine } from '@/engine/engine';
 import type { EngineEvent, StationaryEvent, MotionEvent } from '@/types';
-import { formatDuration } from '@/util/appUtils';
-import { haversineDistance, computeBearing } from '@/util/geo';
-import { fromWebMercator } from '@/util/webMercator';
 
 export type TimelineEvent = {
     id: string;
@@ -243,7 +243,7 @@ export const TimelinePanel: React.FC<Props> = ({
     if (selectedDeviceId == null || events.length === 0) return null;
 
     return (
-        <div className="flex flex-col p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 mt-2 max-h-[350px] overflow-hidden flex-shrink-0">
+        <div className="flex flex-col p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 max-h-[350px] overflow-hidden flex-shrink-0">
             <h3 className="text-sm font-medium mb-2 px-1">Past 48 Hours</h3>
             <div className="flex flex-col gap-2 overflow-y-auto pr-1 pb-1 scrollbar-thin">
                 {events.map((ev, i) => {
@@ -287,7 +287,7 @@ export const TimelinePanel: React.FC<Props> = ({
                             <div
                                 onClick={() => onSelectEvent(ev)}
                                 className={`flex flex-col p-2 rounded-md border transition-all cursor-pointer ${isSelected
-                                    ? 'bg-primary/20 border-primary shadow-sm'
+                                    ? 'bg-primary/2 border-primary shadow-sm'
                                     : 'bg-background/50 border-border/50 hover:bg-background/80 hover:border-border'
                                     }`}
                             >

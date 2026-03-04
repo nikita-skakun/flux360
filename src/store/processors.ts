@@ -164,6 +164,9 @@ export function computeProcessedPositions(
                 const memberPos = allPosByDevice.get(memberId);
                 if (memberPos) historical.push(...memberPos);
             }
+            if (historical.length > 1) {
+                historical.sort((a, b) => a.timestamp - b.timestamp);
+            }
             if (historical.length > 0) {
                 posByDevice[group.id] = historical;
             }
@@ -239,6 +242,9 @@ export function computeProcessedPositions(
                         if (p.timestamp > replayFrom) historical.push(p);
                     }
                 }
+            }
+            if (historical.length > 1) {
+                historical.sort((a, b) => a.timestamp - b.timestamp);
             }
             posByDevice[deviceId] = historical;
         }

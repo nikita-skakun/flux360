@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { formatDuration } from '@/util/appUtils';
 import { X, Clock, MapPin, Activity } from 'lucide-react';
+import React, { useEffect } from 'react';
 import type { TimelineEvent } from './TimelinePanel';
 
 type Props = {
@@ -9,6 +10,8 @@ type Props = {
 };
 
 export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
+    const [now, setNow] = React.useState(Date.now());
+
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
@@ -16,31 +19,40 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
             }
         };
         window.addEventListener('keydown', handleEsc);
-        return () => window.removeEventListener('keydown', handleEsc);
+
+        const interval = setInterval(() => setNow(Date.now()), 10000);
+
+        return () => {
+            window.removeEventListener('keydown', handleEsc);
+            clearInterval(interval);
+        };
     }, [onClose]);
 
     const item = event.item;
     const startTime = item.start;
     let detailsNode = null;
 
+    const isDraft = event.id.startsWith('draft-');
+    const endTime = isDraft ? now : item.end;
+
     if (item.type === 'stationary') {
         detailsNode = (
             <span className="flex items-center gap-1.5">
                 <MapPin className="w-4 h-4" />
-                Stationary for {Math.round((item.end - item.start) / 60000)}m
+                Stationary for {formatDuration(endTime - item.start)}
             </span>
         );
     } else {
         detailsNode = (
             <span className="flex items-center gap-1.5">
                 <Activity className="w-4 h-4" />
-                Moved {Math.round(item.distance)}m
+                Moved {Math.round(item.distance)}m ({formatDuration(endTime - item.start)})
             </span>
         );
     }
 
     return (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-6 py-3 rounded-full bg-primary text-primary-foreground shadow-2xl backdrop-blur-md animate-in slide-in-from-top-4 font-medium pointer-events-auto">
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-6 py-3 rounded-full bg-background/90 text-foreground shadow-2xl backdrop-blur-md border border-border animate-in slide-in-from-top-4 font-medium pointer-events-auto transition-colors duration-500">
             <div className="flex items-center gap-2">
                 <Clock className="w-5 h-5 opacity-80" />
                 <span>Observing History</span>
@@ -54,7 +66,7 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
             <Button
                 variant="ghost"
                 size="icon"
-                className="ml-2 hover:bg-primary-foreground/10 text-primary-foreground rounded-full h-8 w-8"
+                className="ml-2 hover:bg-accent hover:text-accent-foreground text-foreground/70 rounded-full h-8 w-8"
                 onClick={onClose}
             >
                 <X className="w-4 h-4" />
