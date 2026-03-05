@@ -1,7 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { Engine } from "./engine";
 import { toWebMercator } from "../util/webMercator";
-import type { DevicePoint, Vec2, Timestamp, MotionEvent } from "../types";
+import type { DevicePoint, Vec2, Timestamp, MotionEvent, MotionDraft } from "../types";
 
 const START_TIME = 1000000 as Timestamp;
 const P1: Vec2 = [13.405, 52.520]; // Berlin center
@@ -266,7 +266,7 @@ describe("Engine Core Logic", () => {
         ));
 
         expect(engine.draft?.type).toBe("motion");
-        const draft = engine.draft as any; // Cast to access private/internal if needed, but it's public in types
+        const draft = engine.draft as MotionDraft;
         expect(draft.predecessor).toBeDefined();
         expect(draft.predecessor.type).toBe("stationary");
         expect(draft.predecessor.start).toBe(START_TIME);

@@ -16,13 +16,24 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 
 ## Future Ideas
 
-- **Extended Motion History**: Expand the 24-hour window to persist and visualize deeper historical motion segments with scrub-through timeline controls.
 - **Route Inference**: Integrate with routing data (e.g., OSM) to infer likely paths and constrain predictions based on road networks.
 - **Enhanced Visualization**: Expand map options for better performance with large datasets.
 - **Advanced Analytics**: Add route optimization, geofencing, and alert systems for fleet management.
+- **Push Notifications**: Alert users when a device enters or leaves a defined geofence, or when it has been stationary past a configurable threshold.
 
 ## Usage
 
-Configure the connection in the in-app **Settings** panel: enter your Traccar server Base URL, email, and password. These settings are saved locally and used automatically.
+Copy `config.sample.json` to `config.json`:
 
-The app displays live device positions on an interactive map, with smooth anchoring to reduce GPS noise during stationary periods. Use debug mode to analyze processing details.
+| Field | Description |
+|---|---|
+| `traccarBaseUrl` | Hostname of your [Traccar](https://www.traccar.org) server |
+| `traccarSecure` | `true` for HTTPS/WSS, `false` for HTTP/WS |
+| `maptilerApiKey` | [MapTiler](https://www.maptiler.com) API key |
+
+
+Run the server:
+```bash
+bun run dev # runs on port 3000
+```
+

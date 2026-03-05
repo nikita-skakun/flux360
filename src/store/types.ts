@@ -1,5 +1,5 @@
 import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp } from '@/types';
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp, Vec2 } from '@/types';
 import type { TraccarDevice } from '@/api/devices';
 
 export type Refs = {
@@ -33,6 +33,7 @@ export type StoreState = {
     password: string;
     maptilerApiKey: string;
     theme: 'light' | 'dark' | 'system';
+    mockMode: boolean;
   };
 
   // Auth State
@@ -49,6 +50,7 @@ export type StoreState = {
     debugMode: boolean;
     debugFrameIndex: number;
     editingTarget: { type: 'device' | 'group', id: number } | null;
+    isMockUiVisible: boolean;
   };
 
   // Refs slice (reactive)
@@ -89,6 +91,11 @@ export type StoreActions = {
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
+
+  // Mock Mode
+  createMockDevice: (name: string, emoji: string, color: string) => number;
+  addMockPositions: (deviceId: number, positions: { geo: Vec2; timestamp?: Timestamp }[]) => void;
+  setMockUiVisible: (visible: boolean) => void;
 
   // External Config
   fetchConfig: () => Promise<void>;

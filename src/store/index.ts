@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
 import { rgbToHex } from '@/util/color';
-import type { GroupDevice, MotionProfileName, NormalizedPosition } from '@/types';
+import type { GroupDevice, MotionProfileName, NormalizedPosition, Vec2, Timestamp } from '@/types';
 import type { Store, StoreState } from './types';
 import type { TraccarDevice } from '@/api/devices';
 
@@ -16,6 +16,7 @@ const initialState: StoreState = {
     password: '',
     maptilerApiKey: '',
     theme: 'system',
+    mockMode: false,
   },
   auth: {
     isAuthenticated: false,
@@ -28,6 +29,7 @@ const initialState: StoreState = {
     debugMode: false,
     debugFrameIndex: 0,
     editingTarget: null,
+    isMockUiVisible: true,
   },
   refs: {
     deviceToGroupsMap: new Map(),
@@ -118,6 +120,8 @@ export const useStore = create<Store>()(
           }
         }));
 
+        if (get().settings.mockMode) return;
+
         try {
           const { baseUrl, secure, email, password } = get().settings;
           const created = await createGroupDevice({
@@ -202,6 +206,8 @@ export const useStore = create<Store>()(
           };
         });
 
+        if (get().settings.mockMode || groupId < 0) return;
+
         try {
           const { baseUrl, secure, email, password } = get().settings;
           await deleteGroupDevice({
@@ -256,6 +262,8 @@ export const useStore = create<Store>()(
           };
         });
 
+        if (get().settings.mockMode || groupId < 0 || deviceId < 0) return;
+
         try {
           const { baseUrl, secure, email, password } = get().settings;
           await updateGroupDevice({
@@ -292,6 +300,8 @@ export const useStore = create<Store>()(
             }
           };
         });
+
+        if (get().settings.mockMode || groupId < 0 || deviceId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -344,6 +354,8 @@ export const useStore = create<Store>()(
           }
         }));
 
+        if (get().settings.mockMode || groupId < 0) return;
+
         try {
           const { baseUrl, secure, email, password } = get().settings;
           await updateGroupDevice({
@@ -381,6 +393,8 @@ export const useStore = create<Store>()(
             }
           }
         }));
+
+        if (get().settings.mockMode || deviceId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -567,17 +581,27 @@ export const useStore = create<Store>()(
         }));
       },
 
+      setMockUiVisible: (visible: boolean) => {
+        set(state => ({
+          ui: {
+            ...state.ui,
+            isMockUiVisible: visible,
+          }
+        }));
+      },
+
       // External Config
       fetchConfig: async () => {
         try {
           const response = await fetch('/api/config');
-          const config = await response.json() as { traccarBaseUrl?: string; traccarSecure?: boolean };
+          const config = await response.json() as { traccarBaseUrl?: string; traccarSecure?: boolean; mockMode?: boolean };
 
           set(state => ({
             settings: {
               ...state.settings,
               baseUrl: config.traccarBaseUrl ?? state.settings.baseUrl,
               secure: config.traccarSecure ?? state.settings.secure,
+              mockMode: config.mockMode ?? state.settings.mockMode,
             }
           }));
         } catch (error) {
@@ -615,6 +639,57 @@ export const useStore = create<Store>()(
         } catch (error) {
           console.error('Failed to fetch MapTiler key:', error);
         }
+      },
+
+      createMockDevice: (name: string, emoji: string, color: string) => {
+        const id = -Math.floor(Math.random() * 1000000) - 1; // Negative IDs for mock devices
+        set(state => ({
+          devices: {
+            ...state.devices,
+            [id]: {
+              name,
+              emoji,
+              lastSeen: Date.now(),
+              effectiveMotionProfile: 'person',
+              motionProfile: null,
+              color,
+            }
+          }
+        }));
+        return id;
+      },
+
+      addMockPositions: (deviceId: number, positions: { geo: Vec2; timestamp?: Timestamp }[]) => {
+        const state = get();
+        const positionsAll = state.refs.positionsAll;
+
+        // Find last position for this device
+        let lastTimestamp: number | null = null;
+        for (let i = positionsAll.length - 1; i >= 0; i--) {
+          const p = positionsAll[i];
+          if (p?.device === deviceId) {
+            lastTimestamp = p.timestamp;
+            break;
+          }
+        }
+
+        // Gap of 30 minutes between strokes if there's previous data to separate sections
+        const gapMs = 30 * 60 * 1000;
+        let currentTimestamp = lastTimestamp !== null
+          ? lastTimestamp + gapMs
+          : (Date.now() - 24 * 60 * 60 * 1000); // Start 24h ago by default to allow plenty of room
+
+        const normalized: NormalizedPosition[] = positions.map(p => {
+          const ts = (p.timestamp ?? currentTimestamp) as Timestamp;
+          currentTimestamp = ts + 1000;
+          return {
+            device: deviceId,
+            geo: p.geo,
+            timestamp: ts,
+            accuracy: 5,
+          };
+        });
+        get().addPositions(normalized);
       },
     }),
     {

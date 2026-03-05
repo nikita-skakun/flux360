@@ -8,6 +8,7 @@ interface Config {
   traccarBaseUrl: string;
   traccarSecure: boolean;
   maptilerApiKey: string;
+  mockMode: boolean;
 }
 
 // Validate mandatory configuration on startup
@@ -26,6 +27,11 @@ try {
 }
 
 const requiredFields: (keyof Config)[] = ["traccarBaseUrl", "maptilerApiKey"];
+const isMockMode = process.argv.includes("--mock");
+if (isMockMode) {
+  console.log("Mock Mode enabled via CLI flag");
+}
+
 const missingFields = requiredFields.filter(field => !config[field]);
 
 if (missingFields.length > 0) {
@@ -90,6 +96,7 @@ if (isProduction) {
         return Response.json({
           traccarBaseUrl: config.traccarBaseUrl,
           traccarSecure: config.traccarSecure,
+          mockMode: isMockMode,
         });
       }
 
@@ -114,6 +121,7 @@ if (isProduction) {
         return Response.json({
           traccarBaseUrl: config.traccarBaseUrl,
           traccarSecure: config.traccarSecure,
+          mockMode: isMockMode,
         });
       },
       "/api/config/maptiler": async (request: Request) => {

@@ -40,3 +40,9 @@ body::before {
     animation: none !important;
   }
 }
+
+.hide-ui .fixed,
+.hide-ui .absolute.top-8.right-8,
+.hide-ui .maplibregl-ctrl {
+  display: none !important;
+}

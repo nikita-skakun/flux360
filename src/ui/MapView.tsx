@@ -1,11 +1,12 @@
 import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clustering";
 import { ClusterPopup } from "./map/ClusterPopup";
+import { distance, getRadiusFromVariance } from "@/util/geo";
+import { drawPin, PIN_R } from "@/util/rendering";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
 import { getColorForDevice, type Color } from "@/util/color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
-import { distance, getRadiusFromVariance } from "@/util/geo";
-import { drawPin, PIN_R } from "@/util/rendering";
+import { useStore } from "@/store";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, EngineEvent } from "@/types";
 import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
@@ -678,11 +679,46 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     };
 
+    let isPainting = false;
+    let paintedPoints: Vec2[] = [];
+
+    const onMouseDown = (e: MapMouseEvent) => {
+      const mockMode = useStore.getState().settings.mockMode;
+      if (mockMode && e.originalEvent.shiftKey && selectedDeviceIdRef.current != null) {
+        isPainting = true;
+        paintedPoints = [];
+        e.preventDefault();
+      }
+    };
+
+    const onMouseMove = (e: MapMouseEvent) => {
+      if (isPainting) {
+        const geo: Vec2 = [e.lngLat.lng, e.lngLat.lat];
+        const lastPoint = paintedPoints[paintedPoints.length - 1];
+
+        // Only add if it's the first point or we've moved significantly
+        if (!lastPoint || distance(geo, lastPoint) > 0.0001) {
+          paintedPoints.push(geo);
+        }
+      }
+    };
+
+    const onMouseUp = () => {
+      if (isPainting) {
+        isPainting = false;
+        if (paintedPoints.length > 0 && selectedDeviceIdRef.current != null) {
+          const addMockPositions = useStore.getState().addMockPositions;
+          addMockPositions(selectedDeviceIdRef.current, paintedPoints.map(geo => ({ geo })));
+        }
+        paintedPoints = [];
+      }
+    };
+
     const onIndividualClick = (e: MapMouseEvent) => {
       e.preventDefault();
-      const features = (e as unknown as { features: Feature<Point>[] }).features;
-      const props = features?.[0]?.properties;
-      const device: unknown = props ? props['device'] : undefined;
+      const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer'] });
+      const props = features[0]?.properties;
+      const device: unknown = props?.['device'];
       if (typeof device === 'number') {
         onSelectDeviceRef.current(device);
         flyToDevice(device);
@@ -691,23 +727,22 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     const onClusterClick = (e: MapMouseEvent) => {
       e.preventDefault();
-      const features = (e as unknown as { features: Feature<Point>[] }).features;
-      const props = features?.[0]?.properties;
-      const membersProp: unknown = props ? props['members'] : undefined;
-
+      const features = map.queryRenderedFeatures(e.point, { layers: ['clusters-layer'] });
+      const props = features[0]?.properties;
+      const members: unknown = props?.['members'];
       let memberIds: number[] = [];
-      if (typeof membersProp === 'string') {
+      if (typeof members === 'string') {
         try {
-          const parsed: unknown = JSON.parse(membersProp) as unknown;
-          if (Array.isArray(parsed)) memberIds = parsed as number[];
-        } catch { /* ignore */ }
-      } else if (Array.isArray(membersProp)) {
-        memberIds = membersProp as number[];
+          const parsed: unknown = JSON.parse(members);
+          if (Array.isArray(parsed)) memberIds = (parsed as unknown[]).map(Number);
+        } catch { /* ignore malformed data */ }
+      } else if (Array.isArray(members)) {
+        memberIds = (members as unknown[]).map(Number);
       }
 
-      const coords = features?.[0]?.geometry as Point;
-      if (memberIds && memberIds.length > 0 && coords) {
-        const screen = map.project(coords.coordinates as Vec2);
+      const geo = features[0]?.geometry;
+      if (memberIds.length > 0 && geo?.type === 'Point') {
+        const screen = map.project(geo.coordinates as Vec2);
         const items: DevicePoint[] = memberIds
           .map(deviceId => componentsRef.current.find(c => c.device === deviceId))
           .filter((c): c is DevicePoint => !!c);
@@ -724,6 +759,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     };
 
     if (!listenersAttached.current) {
+      map.on('mousedown', onMouseDown);
+      map.on('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+
       map.on('move', onMove);
       map.on('moveend', onMove);
       map.on('zoom', onMove);

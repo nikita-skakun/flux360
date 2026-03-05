@@ -118,8 +118,10 @@ export function App() {
 
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
 
+  const mockMode = useStore(state => state.settings.mockMode);
+
   useTraccarConnection({
-    baseUrl: traccarBaseUrl,
+    baseUrl: mockMode ? null : traccarBaseUrl,
     secure: traccarSecure,
     email: traccarEmail,
     password: traccarPassword,
@@ -295,7 +297,7 @@ export function App() {
       }));
   }, [deviceNames, groupDevices, deviceIcons]);
 
-  if (!isAuthenticated) {
+  if (!isAuthenticated && !mockMode) {
     return <LoginPage />;
   }
 
