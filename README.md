@@ -2,6 +2,14 @@
 
 A real-time GPS tracking visualization tool that connects to Traccar servers for live device monitoring. It uses advanced anchoring algorithms to smooth position data, detect stationary vs. moving states, and provide accurate location estimates even in noisy GPS environments.
 
+## Screenshots
+
+### Event History View
+<img width="1920" height="1080" alt="Event History View" src="https://github.com/user-attachments/assets/efb4fcf0-e22f-494e-a539-1547d32def58" />
+
+### Cluster Menu and Device Panel
+<img width="1920" height="1080" alt="Devices Panel" src="https://github.com/user-attachments/assets/212fda4e-8eec-43f9-a88a-bce242e6ecdf" />
+
 ## Features
 
 - **Real-time Data Ingestion**: WebSocket connection to Traccar for streaming position updates, with automatic fallback to historical API fetches.
@@ -31,6 +39,10 @@ Copy `config.sample.json` to `config.json`:
 | `traccarSecure` | `true` for HTTPS/WSS, `false` for HTTP/WS |
 | `maptilerApiKey` | [MapTiler](https://www.maptiler.com) API key |
 
+Install dependancies:
+```bash
+bun run i
+```
 
 Run the server:
 ```bash
