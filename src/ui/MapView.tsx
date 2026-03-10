@@ -6,7 +6,6 @@ import { drawPin, PIN_R } from "@/util/rendering";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
 import { getColorForDevice, type Color } from "@/util/color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
-import { useStore } from "@/store";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, EngineEvent } from "@/types";
 import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
@@ -679,41 +678,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     };
 
-    let isPainting = false;
-    let paintedPoints: Vec2[] = [];
-
-    const onMouseDown = (e: MapMouseEvent) => {
-      const mockMode = useStore.getState().settings.mockMode;
-      if (mockMode && e.originalEvent.shiftKey && selectedDeviceIdRef.current != null) {
-        isPainting = true;
-        paintedPoints = [];
-        e.preventDefault();
-      }
-    };
-
-    const onMouseMove = (e: MapMouseEvent) => {
-      if (isPainting) {
-        const geo: Vec2 = [e.lngLat.lng, e.lngLat.lat];
-        const lastPoint = paintedPoints[paintedPoints.length - 1];
-
-        // Only add if it's the first point or we've moved significantly
-        if (!lastPoint || distance(geo, lastPoint) > 0.0001) {
-          paintedPoints.push(geo);
-        }
-      }
-    };
-
-    const onMouseUp = () => {
-      if (isPainting) {
-        isPainting = false;
-        if (paintedPoints.length > 0 && selectedDeviceIdRef.current != null) {
-          const addMockPositions = useStore.getState().addMockPositions;
-          addMockPositions(selectedDeviceIdRef.current, paintedPoints.map(geo => ({ geo })));
-        }
-        paintedPoints = [];
-      }
-    };
-
     const onIndividualClick = (e: MapMouseEvent) => {
       e.preventDefault();
       const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer'] });
@@ -759,10 +723,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     };
 
     if (!listenersAttached.current) {
-      map.on('mousedown', onMouseDown);
-      map.on('mousemove', onMouseMove);
-      window.addEventListener('mouseup', onMouseUp);
-
       map.on('move', onMove);
       map.on('moveend', onMove);
       map.on('zoom', onMove);

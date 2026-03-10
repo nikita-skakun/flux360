@@ -1,10 +1,7 @@
 import { formatDuration } from '@/util/appUtils';
-import { fromWebMercator } from '@/util/webMercator';
-import { haversineDistance, computeBearing } from '@/util/geo';
-import { MapPin, Activity, Copy, Check } from 'lucide-react';
+import { MapPin, Activity, Check, Copy } from 'lucide-react';
 import React, { useMemo } from 'react';
-import type { Engine } from '@/engine/engine';
-import type { EngineEvent, StationaryEvent, MotionEvent } from '@/types';
+import type { EngineEvent, MotionEvent } from '@/types';
 
 export type TimelineEvent = {
     id: string;
@@ -13,8 +10,6 @@ export type TimelineEvent = {
 
 type Props = {
     selectedDeviceId: number | null;
-    enginesRef: Map<number, Engine>;
-    engineSnapshot?: unknown; // Used as a trigger to re-evaluate when engines mutate
     eventsByDevice: Record<number, EngineEvent[]>;
     onSelectEvent: (event: TimelineEvent) => void;
     selectedEventId: string | null;
@@ -67,8 +62,6 @@ const Sparkline = ({ event }: { event: MotionEvent }) => {
 
 export const TimelinePanel: React.FC<Props> = ({
     selectedDeviceId,
-    enginesRef,
-    engineSnapshot,
     eventsByDevice,
     onSelectEvent,
     selectedEventId,
@@ -79,32 +72,6 @@ export const TimelinePanel: React.FC<Props> = ({
     const handleCopy = (e: React.MouseEvent, ev: TimelineEvent) => {
         e.stopPropagation();
         if (selectedDeviceId == null) return;
-        const engine = enginesRef.get(selectedDeviceId);
-        if (!engine) return;
-
-        const allFrames = engine.getDebugFrames();
-        // Filter frames that occurred during this event's time range
-        // We add a small buffer (5s) to capture context around the edges
-        const buffer = 5000;
-        const relevantFrames = allFrames.filter(f =>
-            f.timestamp >= ev.item.start - buffer &&
-            f.timestamp <= ev.item.end + buffer
-        );
-
-        // Smart sampling for large events (e.g. 24h stationary)
-        let sampledFrames = relevantFrames;
-        if (relevantFrames.length > 30) {
-            const startFrames = relevantFrames.slice(0, 10);
-            const endFrames = relevantFrames.slice(-10);
-            const middleCount = 10;
-            const middleSlice = relevantFrames.slice(10, -10);
-            const step = Math.floor(middleSlice.length / middleCount);
-            const middleFrames = [];
-            for (let i = 0; i < middleCount; i++) {
-                middleFrames.push(middleSlice[i * step]);
-            }
-            sampledFrames = [...startFrames, ...middleFrames, ...endFrames].filter(Boolean) as typeof relevantFrames;
-        }
 
         const round = (val: unknown): unknown => {
             if (typeof val === 'number') return Math.round(val * 100) / 100;
@@ -123,37 +90,9 @@ export const TimelinePanel: React.FC<Props> = ({
             return val;
         };
 
-        const compressedFrames = sampledFrames.map((f, i) => {
-            const prev = i > 0 ? sampledFrames[i - 1] : null;
-            let dist = 0;
-            let bearing = 0;
-            if (prev?.point && f.point) {
-                const geoFrom = fromWebMercator(prev.point);
-                const geoTo = fromWebMercator(f.point);
-                dist = haversineDistance(geoFrom, geoTo);
-                bearing = computeBearing(geoFrom, geoTo);
-            }
-            return round({
-                t: f.timestamp - ev.item.start,
-                d: f.decision,
-                p: f.point,
-                m: f.mean,
-                v: f.variance,
-                m2: f.mahalanobis2,
-                n: f.pendingCount,
-                dt: dist,
-                az: bearing
-            });
-        });
-
         const exportData = round({
             id: selectedDeviceId,
             ev: ev.item,
-            draft: ev.id.startsWith('draft-'),
-            frames: compressedFrames,
-            total: relevantFrames.length,
-            sampled: relevantFrames.length > 30,
-            prof: engine.motionProfile,
             at: new Date().toISOString()
         });
 
@@ -170,84 +109,39 @@ export const TimelinePanel: React.FC<Props> = ({
     }, []);
 
     const events = useMemo(() => {
-        if (selectedDeviceId == null || !engineSnapshot) return [];
-
-        const engine = enginesRef.get(selectedDeviceId);
-        if (!engine) return [];
+        if (selectedDeviceId == null) return [];
 
         const closed = eventsByDevice[selectedDeviceId] ?? [];
-        const draft = engine.draft;
-
         const cutoff = now - 48 * 60 * 60 * 1000; // Sliding 48h window
 
         const items: TimelineEvent[] = [];
 
         // Add closed events
         for (const ev of closed) {
-            if (ev.end < cutoff) continue;
+            if (!ev.isDraft && ev.end < cutoff) continue;
             items.push({
-                id: `${ev.type}-${ev.start}`,
+                id: ev.isDraft ? `draft-${ev.type}-${ev.start}` : `${ev.type}-${ev.start}`,
                 item: ev,
             });
-        }
-
-        // Add current draft (always show, even if it started before the cutoff)
-        if (draft) {
-            // Convert draft to event for rendering
-            if (draft.type === 'stationary') {
-                const stats = engine.computeStats(draft.recent);
-                items.push({
-                    id: `draft-stationary-${draft.start}`,
-                    item: {
-                        type: 'stationary',
-                        start: draft.start,
-                        end: now,
-                        mean: stats.mean,
-                        variance: stats.variance
-                    } as StationaryEvent
-                });
-            } else {
-                // Motion Draft: Also include its predecessor (which is stationary but not yet closed)
-                const predStats = engine.computeStats(draft.predecessor.recent);
-                items.push({
-                    id: `pred-stationary-${draft.predecessor.start}`,
-                    item: {
-                        type: 'stationary',
-                        start: draft.predecessor.start,
-                        end: draft.start,
-                        mean: predStats.mean,
-                        variance: predStats.variance
-                    } as StationaryEvent
-                });
-
-                items.push({
-                    id: `draft-motion-${draft.start}`,
-                    item: {
-                        type: 'motion',
-                        start: draft.start,
-                        end: now,
-                        startAnchor: draft.startAnchor,
-                        endAnchor: draft.path[draft.path.length - 1]!.mean,
-                        path: draft.path.map(p => p.mean),
-                        distance: engine.computePathLength(draft.path)
-                    } as MotionEvent
-                });
-            }
         }
 
         // Sort newest first
         items.sort((a, b) => b.item.start - a.item.start);
 
         return items;
-    }, [selectedDeviceId, enginesRef, engineSnapshot, eventsByDevice, now]);
+    }, [selectedDeviceId, eventsByDevice, now]);
 
-    if (selectedDeviceId == null || events.length === 0) return null;
+    if (selectedDeviceId == null) return null;
 
     return (
         <div className="flex flex-col p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 max-h-[350px] overflow-hidden flex-shrink-0">
             <h3 className="text-sm font-medium mb-2 px-1">Past 48 Hours</h3>
             <div className="flex flex-col gap-2 overflow-y-auto pr-1 pb-1 scrollbar-thin">
-                {events.map((ev, i) => {
+                {events.length === 0 ? (
+                    <div className="text-xs text-muted-foreground p-4 text-center">
+                        No events found in the last 48 hours.
+                    </div>
+                ) : events.map((ev, i) => {
                     const isSelected = selectedEventId === ev.id;
                     const item = ev.item;
                     const type = item.type;

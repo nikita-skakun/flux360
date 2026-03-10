@@ -3,7 +3,6 @@ import { Label } from "@/components/ui/label";
 import { LogOut } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ThemeToggle } from "./ThemeToggle";
-import { useStore } from "@/store";
 import React from "react";
 
 type Props = {
@@ -17,8 +16,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
   setDebugMode,
   onLogout,
 }: Props) {
-  const isMockMode = useStore(state => state.settings.mockMode);
-  const isMockUiVisible = useStore(state => state.ui.isMockUiVisible);
   return (
     <div className="w-full flex flex-col gap-2">
       <div className="p-2 rounded-lg bg-muted/90 border border-border transition-colors duration-300">
@@ -40,15 +37,9 @@ export const SettingsPanel = React.memo(function SettingsPanel({
             <Button
               variant="destructive"
               size="icon"
-              onClick={isMockMode
-                ? () => useStore.getState().setMockUiVisible(!isMockUiVisible)
-                : onLogout
-              }
+              onClick={onLogout}
               className="h-7 w-7 rounded-full"
-              title={isMockMode
-                ? (isMockUiVisible ? "Hide Mock Elements" : "Show Mock Elements")
-                : "Logout"
-              }
+              title={"Logout"}
             >
               <LogOut className="h-4 w-4" />
             </Button>

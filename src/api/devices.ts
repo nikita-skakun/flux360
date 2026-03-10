@@ -54,7 +54,7 @@ function parseTraccarDevice(d: unknown): TraccarDevice | null {
 }
 
 export async function fetchDevices(opts: TraccarClientOptions): Promise<TraccarDevice[]> {
-  const url = buildApiUrl(opts.baseUrl, opts.secure, "/devices");
+  const url = buildApiUrl(opts.baseUrl, opts.secure, "/devices", {}, opts.auth);
   const res = await performRequest<TraccarDeviceResponse[] | { data: TraccarDeviceResponse[] }>(opts.fetchImpl ?? fetch, url, "GET", buildHeaders(opts));
   const arr = Array.isArray(res) ? res : (res?.data && Array.isArray(res.data) ? res.data : []);
   return arr.flatMap((d: unknown) => parseTraccarDevice(d) ?? []);
@@ -66,7 +66,7 @@ export async function createGroupDevice(
   emoji: string,
   memberDeviceIds: number[]
 ): Promise<TraccarDevice> {
-  const url = buildApiUrl(opts.baseUrl, opts.secure, "/devices");
+  const url = buildApiUrl(opts.baseUrl, opts.secure, "/devices", {}, opts.auth);
   const payload = { name, uniqueId: `group-${Date.now()}`, attributes: { emoji, memberDeviceIds: JSON.stringify(memberDeviceIds) } };
   const obj = await performRequest<TraccarDeviceResponse>(opts.fetchImpl ?? fetch, url, "POST", buildHeaders(opts, true), payload);
   return {
@@ -88,7 +88,7 @@ type DeviceUpdates = {
 
 async function updateDeviceBase(opts: TraccarClientOptions, deviceId: number, updates: DeviceUpdates, notFoundError: string): Promise<void> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const url = buildApiUrl(opts.baseUrl, opts.secure, `/devices/${deviceId}`);
+  const url = buildApiUrl(opts.baseUrl, opts.secure, `/devices/${deviceId}`, {}, opts.auth);
   const headers = buildHeaders(opts, true);
 
   const obj = await performRequest<TraccarDeviceResponse>(fetcher, url, "GET", headers);
@@ -105,11 +105,11 @@ async function updateDeviceBase(opts: TraccarClientOptions, deviceId: number, up
 
 export const updateGroupDevice = (opts: TraccarClientOptions, id: number, up: DeviceUpdates) => updateDeviceBase(opts, id, up, "Group not found");
 export const updateDevice = (opts: TraccarClientOptions, id: number, up: Omit<DeviceUpdates, 'memberDeviceIds'>) => updateDeviceBase(opts, id, up, "Device not found");
-export const deleteGroupDevice = (opts: TraccarClientOptions, id: number) => performRequest(opts.fetchImpl ?? fetch, buildApiUrl(opts.baseUrl, opts.secure, `/devices/${id}`), "DELETE", buildHeaders(opts));
+export const deleteGroupDevice = (opts: TraccarClientOptions, id: number) => performRequest(opts.fetchImpl ?? fetch, buildApiUrl(opts.baseUrl, opts.secure, `/devices/${id}`, {}, opts.auth), "DELETE", buildHeaders(opts));
 
 export async function fetchSession(opts: TraccarClientOptions): Promise<TraccarUser> {
   const fetcher = opts.fetchImpl ?? fetch;
-  const url = buildApiUrl(opts.baseUrl, opts.secure, "/session");
+  const url = buildApiUrl(opts.baseUrl, opts.secure, "/session", {}, opts.auth);
 
   if (opts.auth?.type === "basic") {
     const params = new URLSearchParams({ email: opts.auth.username, password: opts.auth.password });

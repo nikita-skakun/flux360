@@ -1,5 +1,6 @@
 export type TraccarAuth =
   | { type: "basic"; username: string; password: string }
+  | { type: "token"; token: string }
   | { type: "none" };
 
 export type TraccarClientOptions = {
@@ -15,6 +16,9 @@ export function buildAuthHeader(auth?: TraccarAuth) {
     const b = btoa(`${auth.username}:${auth.password}`);
     return `Basic ${b}`;
   }
+  if (auth.type === "token") {
+    return `Bearer ${auth.token}`;
+  }
   return undefined;
 }
 
@@ -25,12 +29,16 @@ export function normalizeTraccarUrl(baseUrl: string): string {
   return url;
 }
 
-export function buildApiUrl(baseUrl: string, secure: boolean, path: string, params: Record<string, string> = {}): string {
+export function buildApiUrl(baseUrl: string, secure: boolean, path: string, params: Record<string, string> = {}, auth?: TraccarAuth): string {
   const normalized = normalizeTraccarUrl(baseUrl);
   const protocol = normalized.startsWith('http') ? '' : `${secure ? 'https' : 'http'}://`;
   const base = `${protocol}${normalized}`;
   const fullPath = path.startsWith('/') ? path : `/${path}`;
-  const qs = new URLSearchParams(params).toString();
+  const combinedParams = { ...params };
+  if (auth?.type === "token") {
+    combinedParams["token"] = auth.token;
+  }
+  const qs = new URLSearchParams(combinedParams).toString();
   return `${base}/api${fullPath}${qs ? `?${qs}` : ''}`;
 }
 
@@ -53,7 +61,7 @@ export async function performRequest<T = unknown>(
   const res = await fetcher(url, options);
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "<no body>");
-    throw new Error(`Traccar ${method} failed: ${res.status} ${res.statusText} - ${errorBody}`);
+    throw new Error(`Traccar ${method} failed for ${url}: ${res.status} ${res.statusText} - ${errorBody}`);
   }
 
   if (method === "DELETE") return undefined as T;

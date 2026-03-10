@@ -50,28 +50,46 @@ export function buildEngineSnapshotsFromByDevice(
 
         if (snapshot) {
           snapshotsByDevice.set(deviceId, [snapshot]);
-          eventsByDevice[deviceId] = engine.closed;
-
+          
+          const events = [...engine.closed];
           const draft = snapshot.draft;
           if (draft) {
             if (draft.type === 'stationary') {
-              // Get stats from recent points
-              const sumX = draft.recent.reduce((s, p) => s + p.mean[0], 0);
-              const sumY = draft.recent.reduce((s, p) => s + p.mean[1], 0);
-              const mean: Vec2 = [sumX / draft.recent.length, sumY / draft.recent.length];
+              const stats = engine.computeStats(draft.recent);
+              events.push({
+                type: 'stationary',
+                start: draft.start,
+                end: (snapshot.timestamp ?? Date.now()) as Timestamp,
+                mean: stats.mean,
+                variance: stats.variance,
+                isDraft: true
+              });
 
+              // Also use these stats for currentSnapshots
               currentSnapshots[deviceId] = [{
-                mean,
+                mean: stats.mean,
                 timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
                 device: deviceId,
-                geo: fromWebMercator(mean),
+                geo: fromWebMercator(stats.mean),
                 accuracy: 5, // Default placeholder for UI
                 anchorStartTimestamp: draft.start,
                 confidence: snapshot.activeConfidence,
-                sourceDeviceId: undefined
+                sourceDeviceId: null
               }];
             } else {
-              // Motion: use last path point
+              // Motion
+              events.push({
+                type: 'motion',
+                start: draft.start,
+                end: (snapshot.timestamp ?? Date.now()) as Timestamp,
+                startAnchor: draft.startAnchor,
+                endAnchor: draft.path[draft.path.length - 1]!.mean, // last known point
+                path: draft.path.map(p => p.mean),
+                distance: engine.computePathLength(draft.path),
+                isDraft: true
+              });
+
+              // Motion: use last path point for currentSnapshots
               const lastPt = draft.path[draft.path.length - 1]!;
               const lastMean = lastPt.mean;
               currentSnapshots[deviceId] = [{
@@ -82,10 +100,11 @@ export function buildEngineSnapshotsFromByDevice(
                 accuracy: 5,
                 anchorStartTimestamp: draft.start,
                 confidence: 1.0,
-                sourceDeviceId: undefined
+                sourceDeviceId: null
               }];
             }
           }
+          eventsByDevice[deviceId] = events;
         } else {
           currentSnapshots[deviceId] = [];
         }

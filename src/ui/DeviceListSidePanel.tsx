@@ -6,7 +6,6 @@ import { EMOJI_OPTIONS } from "@/util/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/store";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 
@@ -42,8 +41,6 @@ const DeviceListSidePanel: React.FC<{
   onCreateGroupSelectionChange,
   allDevices
 }) => {
-    const isMockMode = useStore(state => state.settings.mockMode);
-    const isMockUiVisible = useStore(state => state.ui.isMockUiVisible);
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [mode, setMode] = useState<"list" | "create">("list");
 
@@ -148,7 +145,7 @@ const DeviceListSidePanel: React.FC<{
       return (
         <React.Fragment key={`${device.isGroup ? "g" : "d"}-${device.id}`}>
           <li onContextMenu={(e) => {
-            if (device.isGroup) {
+            if (device.isGroup && device.isOwner) {
               handleContextMenu(e, device.id);
             }
           }}>
@@ -232,20 +229,6 @@ const DeviceListSidePanel: React.FC<{
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
-                {isMockMode && isMockUiVisible && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => {
-                      const id = useStore.getState().createMockDevice("Mock Device", "smartphone", "#3b82f6");
-                      onSelectDevice(id);
-                    }}
-                    className="h-8 w-8 rounded-full bg-yellow-500/10 border-yellow-500/50 hover:bg-yellow-500/20"
-                    title="Add Mock Device"
-                  >
-                    <Smartphone className="h-4 w-4 text-yellow-600" />
-                  </Button>
-                )}
               </>
             ) : (
               <div className="flex items-center w-full">

@@ -15,7 +15,7 @@ function createPoint(lngLat: Vec2, time: number, device = 1): DevicePoint {
         accuracy: 5,
         anchorStartTimestamp: time as Timestamp,
         confidence: 1,
-        sourceDeviceId: undefined
+        sourceDeviceId: null
     };
 }
 

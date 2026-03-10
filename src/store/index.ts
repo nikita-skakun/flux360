@@ -1,10 +1,8 @@
 import { create } from 'zustand';
-import { parseDevices, computeProcessedPositions } from './processors';
 import { persist } from 'zustand/middleware';
 import { rgbToHex } from '@/util/color';
-import type { GroupDevice, MotionProfileName, NormalizedPosition, Vec2, Timestamp } from '@/types';
+import type { GroupDevice, MotionProfileName } from '@/types';
 import type { Store, StoreState } from './types';
-import type { TraccarDevice } from '@/api/devices';
 
 const initialState: StoreState = {
   devices: {},
@@ -16,7 +14,6 @@ const initialState: StoreState = {
     password: '',
     maptilerApiKey: '',
     theme: 'system',
-    mockMode: false,
   },
   auth: {
     isAuthenticated: false,
@@ -29,15 +26,6 @@ const initialState: StoreState = {
     debugMode: false,
     debugFrameIndex: 0,
     editingTarget: null,
-    isMockUiVisible: true,
-  },
-  refs: {
-    deviceToGroupsMap: new Map(),
-    groupIds: new Set(),
-    engines: new Map(),
-    processedKeys: new Set(),
-    positionsAll: [],
-    engineCheckpoints: new Map(),
   },
   engineSnapshotsByDevice: {},
   eventsByDevice: {},
@@ -48,48 +36,55 @@ export const useStore = create<Store>()(
     (set, get) => ({
       ...initialState,
 
-      // Device/Group Management
-      setDevicesFromApi: async (devices: TraccarDevice[]) => {
-        const { colorForDevice } = await import("@/util/color");
-
-        const {
-          nameMap,
-          iconMap,
-          lastSeenMap,
-          motionProfileMap,
-          motionProfileAttributeMap,
-          colorAttributeMap,
-          groups,
-          deviceToGroupsMap,
-          groupIds
-        } = parseDevices(devices, colorForDevice);
-
-        set(state => ({
-          devices: Object.fromEntries(
-            Object.entries(nameMap).map(([id, name]) => {
-              const numId = Number(id);
-              return [
-                numId,
-                {
-                  name,
-                  emoji: iconMap[numId] ?? '',
-                  lastSeen: lastSeenMap[numId] ?? null,
-                  effectiveMotionProfile: motionProfileMap[numId] ?? 'person',
-                  motionProfile: motionProfileAttributeMap[numId] ?? null,
-                  color: colorAttributeMap[numId] ?? null,
-                }
-              ];
-            })
-          ),
-          groups,
-          refs: {
-            ...state.refs,
-            deviceToGroupsMap,
-            groupIds,
-          }
+      // Data Handlers from WebSocket
+      setInitialState: (payload) => {
+        set(() => ({
+          devices: payload.devices,
+          groups: payload.groups,
+          engineSnapshotsByDevice: payload.engineSnapshotsByDevice,
+          eventsByDevice: payload.eventsByDevice,
         }));
       },
 
+      updatePositions: (payload) => {
+        set(state => ({
+          engineSnapshotsByDevice: { ...state.engineSnapshotsByDevice, ...payload.snapshots },
+          eventsByDevice: { ...state.eventsByDevice, ...payload.events },
+        }));
+      },
+
+      updateConfig: (payload) => {
+        set(state => {
+          // 1. Merge devices, preserving 'isOwner' status if already known
+          const newDevices = { ...state.devices };
+          if (payload.devices) {
+            for (const [idStr, newDev] of Object.entries(payload.devices)) {
+              const id = parseInt(idStr);
+        newDevices[id] = {
+          ...newDev,
+          isOwner: state.devices[id]?.isOwner ?? newDev.isOwner ?? false,
+        };
+            }
+          }
+
+          // 2. Merge groups by ID
+          let newGroups = [...state.groups];
+          if (payload.groups) {
+            const groupIdsIncoming = new Set(payload.groups.map(g => g.id));
+            // Remove existing ones that are being replaced
+            newGroups = newGroups.filter(g => !groupIdsIncoming.has(g.id));
+            // Add new ones
+            newGroups.push(...payload.groups);
+          }
+
+          return {
+            devices: newDevices,
+            groups: newGroups,
+          };
+        });
+      },
+
+      // Device/Group Management
       createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
         const { createGroupDevice } = await import("@/api/devices");
         const { colorForDevice } = await import("@/util/color");
@@ -97,7 +92,18 @@ export const useStore = create<Store>()(
         // Optimistic update
         const tempId = Date.now(); // Temporary ID until API response
         const color = rgbToHex(...colorForDevice(tempId));
-        const newGroup: GroupDevice = { id: tempId, name, emoji, color, memberDeviceIds, motionProfile: null };
+        const newGroup: GroupDevice = {
+          id: tempId,
+          name,
+          emoji,
+          color,
+          memberDeviceIds,
+          motionProfile: null,
+          lastSeen: null,
+          isGroup: true,
+          effectiveMotionProfile: 'person',
+          isOwner: true
+        };
 
         set(state => ({
           ui: { ...state.ui, selectedDeviceId: tempId },
@@ -110,17 +116,11 @@ export const useStore = create<Store>()(
               lastSeen: Math.max(...memberDeviceIds.map(id => state.devices[id]?.lastSeen ?? 0), 0) || null,
               effectiveMotionProfile: 'person',
               motionProfile: null,
-              color
+              color,
+              isOwner: true
             }
           },
-          refs: {
-            ...state.refs,
-            groupIds: new Set([...state.refs.groupIds, tempId]),
-            deviceToGroupsMap: new Map(state.refs.deviceToGroupsMap), // Update mapping
-          }
         }));
-
-        if (get().settings.mockMode) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -136,23 +136,11 @@ export const useStore = create<Store>()(
               newDevices[created.id] = { ...newDevices[tempId], color: newColor };
               delete newDevices[tempId];
             }
-            const newDeviceToGroupsMap = new Map(state.refs.deviceToGroupsMap);
-            for (const memberId of memberDeviceIds) {
-              const groups = newDeviceToGroupsMap.get(memberId) ?? [];
-              if (!groups.includes(created.id)) {
-                newDeviceToGroupsMap.set(memberId, [...groups, created.id]);
-              }
-            }
 
             return {
               ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: created.id } : state.ui,
               groups: state.groups.map(g => g.id === tempId ? { ...g, id: created.id, color: newColor } : g),
               devices: newDevices,
-              refs: {
-                ...state.refs,
-                groupIds: new Set([...Array.from(state.refs.groupIds).filter(id => id !== tempId), created.id]),
-                deviceToGroupsMap: newDeviceToGroupsMap,
-              }
             };
           });
         } catch (error) {
@@ -164,10 +152,6 @@ export const useStore = create<Store>()(
               ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: null } : state.ui,
               groups: state.groups.filter(g => g.id !== tempId),
               devices: newDevices,
-              refs: {
-                ...state.refs,
-                groupIds: new Set([...state.refs.groupIds].filter(id => id !== tempId)),
-              }
             };
           });
           throw error;
@@ -184,29 +168,14 @@ export const useStore = create<Store>()(
           const newDevices = { ...state.devices };
           delete newDevices[groupId];
 
-          const newDeviceToGroupsMap = new Map(state.refs.deviceToGroupsMap);
-          if (groupToDelete) {
-            for (const memberId of groupToDelete.memberDeviceIds) {
-              const groups = newDeviceToGroupsMap.get(memberId);
-              if (groups) {
-                newDeviceToGroupsMap.set(memberId, groups.filter(id => id !== groupId));
-              }
-            }
-          }
-
           return {
             ui: state.ui.selectedDeviceId === groupId ? { ...state.ui, selectedDeviceId: null } : state.ui,
             groups: state.groups.filter(g => g.id !== groupId),
             devices: newDevices,
-            refs: {
-              ...state.refs,
-              groupIds: new Set([...state.refs.groupIds].filter(id => id !== groupId)),
-              deviceToGroupsMap: newDeviceToGroupsMap,
-            }
           };
         });
 
-        if (get().settings.mockMode || groupId < 0) return;
+        if (groupId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -227,11 +196,8 @@ export const useStore = create<Store>()(
                   effectiveMotionProfile: 'person',
                   motionProfile: null,
                   color: null,
+                  isOwner: true
                 }
-              },
-              refs: {
-                ...state.refs,
-                groupIds: new Set([...state.refs.groupIds, groupId]),
               }
             }));
           }
@@ -248,21 +214,12 @@ export const useStore = create<Store>()(
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = [...originalMembers, deviceId];
         set(state => {
-          const newMap = new Map(state.refs.deviceToGroupsMap);
-          const deviceGroups = newMap.get(deviceId) ?? [];
-          if (!deviceGroups.includes(groupId)) {
-            newMap.set(deviceId, [...deviceGroups, groupId]);
-          }
           return {
             groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
-            refs: {
-              ...state.refs,
-              deviceToGroupsMap: newMap,
-            }
           };
         });
 
-        if (get().settings.mockMode || groupId < 0 || deviceId < 0) return;
+        if (groupId < 0 || deviceId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -287,21 +244,12 @@ export const useStore = create<Store>()(
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = originalMembers.filter(id => id !== deviceId);
         set(state => {
-          const newMap = new Map(state.refs.deviceToGroupsMap);
-          const deviceGroups = newMap.get(deviceId);
-          if (deviceGroups) {
-            newMap.set(deviceId, deviceGroups.filter(id => id !== groupId));
-          }
           return {
             groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
-            refs: {
-              ...state.refs,
-              deviceToGroupsMap: newMap,
-            }
           };
         });
 
-        if (get().settings.mockMode || groupId < 0 || deviceId < 0) return;
+        if (groupId < 0 || deviceId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -350,11 +298,12 @@ export const useStore = create<Store>()(
               emoji: newGroup.emoji,
               color: newGroup.color,
               motionProfile: newGroup.motionProfile,
+              isOwner: true,
             }
           }
         }));
 
-        if (get().settings.mockMode || groupId < 0) return;
+        if (groupId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -390,11 +339,12 @@ export const useStore = create<Store>()(
               effectiveMotionProfile: newEffectiveProfile,
               motionProfile: newProfileAttribute,
               color: updates.color !== undefined ? updates.color : existing.color,
+              isOwner: true,
             }
           }
         }));
 
-        if (get().settings.mockMode || deviceId < 0) return;
+        if (deviceId < 0) return;
 
         try {
           const { baseUrl, secure, email, password } = get().settings;
@@ -413,56 +363,6 @@ export const useStore = create<Store>()(
       updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => {
         // Wrapper for updateDevice just for motion profile (fire-and-forget)
         void get().updateDevice(deviceId, { motionProfile: profile });
-      },
-
-      addPositions: (positions: NormalizedPosition[]) => {
-        set(state => {
-          const newPositions = [...state.refs.positionsAll, ...positions];
-          // Sort once here so engine and retrospective don't have to
-          newPositions.sort((a, b) => a.timestamp - b.timestamp);
-
-          return {
-            refs: {
-              ...state.refs,
-              positionsAll: newPositions,
-            }
-          };
-        });
-
-        const { processPositions } = get();
-        processPositions();
-      },
-
-      processPositions: () => {
-        const state = get();
-        const { refs } = state;
-        const { deviceToGroupsMap, groupIds, engines, processedKeys, positionsAll, engineCheckpoints } = refs;
-
-        const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
-          Object.entries(state.devices).map(([id, d]) => [id, d.effectiveMotionProfile])
-        );
-
-        const result = computeProcessedPositions(
-          positionsAll,
-          processedKeys,
-          deviceToGroupsMap,
-          state.groups,
-          engines,
-          engineCheckpoints,
-          groupIds,
-          motionProfiles
-        );
-
-        if (!result) return null;
-
-        const { engineSnapshotsByDevice, eventsByDevice } = result;
-
-        set(() => ({
-          engineSnapshotsByDevice,
-          eventsByDevice,
-        }));
-
-        return null;
       },
 
       setTheme: (theme: 'light' | 'dark' | 'system') => {
@@ -581,15 +481,6 @@ export const useStore = create<Store>()(
         }));
       },
 
-      setMockUiVisible: (visible: boolean) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            isMockUiVisible: visible,
-          }
-        }));
-      },
-
       // External Config
       fetchConfig: async () => {
         try {
@@ -601,7 +492,6 @@ export const useStore = create<Store>()(
               ...state.settings,
               baseUrl: config.traccarBaseUrl ?? state.settings.baseUrl,
               secure: config.traccarSecure ?? state.settings.secure,
-              mockMode: config.mockMode ?? state.settings.mockMode,
             }
           }));
         } catch (error) {
@@ -641,62 +531,12 @@ export const useStore = create<Store>()(
         }
       },
 
-      createMockDevice: (name: string, emoji: string, color: string) => {
-        const id = -Math.floor(Math.random() * 1000000) - 1; // Negative IDs for mock devices
-        set(state => ({
-          devices: {
-            ...state.devices,
-            [id]: {
-              name,
-              emoji,
-              lastSeen: Date.now(),
-              effectiveMotionProfile: 'person',
-              motionProfile: null,
-              color,
-            }
-          }
-        }));
-        return id;
-      },
-
-      addMockPositions: (deviceId: number, positions: { geo: Vec2; timestamp?: Timestamp }[]) => {
-        const state = get();
-        const positionsAll = state.refs.positionsAll;
-
-        // Find last position for this device
-        let lastTimestamp: number | null = null;
-        for (let i = positionsAll.length - 1; i >= 0; i--) {
-          const p = positionsAll[i];
-          if (p?.device === deviceId) {
-            lastTimestamp = p.timestamp;
-            break;
-          }
-        }
-
-        // Gap of 30 minutes between strokes if there's previous data to separate sections
-        const gapMs = 30 * 60 * 1000;
-        let currentTimestamp = lastTimestamp !== null
-          ? lastTimestamp + gapMs
-          : (Date.now() - 24 * 60 * 60 * 1000); // Start 24h ago by default to allow plenty of room
-
-        const normalized: NormalizedPosition[] = positions.map(p => {
-          const ts = (p.timestamp ?? currentTimestamp) as Timestamp;
-          currentTimestamp = ts + 1000;
-          return {
-            device: deviceId,
-            geo: p.geo,
-            timestamp: ts,
-            accuracy: 5,
-          };
-        });
-        get().addPositions(normalized);
-      },
     }),
     {
       name: 'flux360-store',
       partialize: (state) => ({
         settings: state.settings,
-        auth: { isAuthenticated: state.auth.isAuthenticated } // Persist only auth status
+        auth: { isAuthenticated: state.auth.isAuthenticated, isLoggingIn: false, loginError: null } // Persist only auth status
       }),
     }
   )

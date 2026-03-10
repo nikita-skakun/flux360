@@ -1,7 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Engine } from "@/engine/engine";
-import { Pencil, X } from "lucide-react";
-import { fromWebMercator } from "@/util/webMercator";
+import { Pencil, UserPlus, X } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { useTimeAgo } from "@/hooks/useTimeAgo";
 import React from "react";
@@ -19,10 +17,10 @@ type Props = {
   setDebugFrameIndex: (value: number) => void;
   deviceNames: Record<number, string>;
   deviceLastSeen: Record<number, Timestamp | null>;
-  groupDevices: Array<{ id: number; name: string; emoji: string; color: string; memberDeviceIds: number[] }>;
+   groupDevices: Array<{ id: number; name: string; emoji: string; color: string | null; memberDeviceIds: number[] }>;
   setSelectedDeviceId: (id: number | null) => void;
-  enginesRef: Map<number, Engine>;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
+  isOwner?: boolean;
 };
 
 const DurationDisplay: React.FC<{ timestamp: Timestamp, addSuffix?: boolean }> = ({ timestamp, addSuffix = true }) => {
@@ -40,8 +38,8 @@ function DeviceOverlayComponent({
   deviceLastSeen,
   groupDevices,
   setSelectedDeviceId,
-  enginesRef,
   setEditingTarget,
+  isOwner,
 }: Props) {
   if (selectedDeviceId == null) return null;
 
@@ -63,10 +61,7 @@ function DeviceOverlayComponent({
   }
 
   // debug frames for this device (if debug enabled)
-  const engineForDevice = enginesRef.get(selectedDeviceId);
-  const frames = debugMode && engineForDevice
-    ? [...engineForDevice.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp)
-    : [];
+  const frames = debugMode ? engArr : [];
   const frameIndex = Math.max(0, Math.min(frames.length - 1, debugFrameIndex));
   const chosenFrame = frames.length > 0 ? frames[frameIndex] : null;
 
@@ -88,23 +83,49 @@ function DeviceOverlayComponent({
             <div className="text-xs text-muted-foreground mt-1">
               <span className="font-medium">Sources:</span> {contributors.join(", ")}
               {mostRecentSourceName && <div className="text-muted-foreground/70 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
-              {(chosen).sourceDeviceId !== undefined && <div className="text-muted-foreground/70 text-xs mt-0.5">Current source: {deviceNames[(chosen).sourceDeviceId] ?? `Device ${(chosen).sourceDeviceId}`}</div>}
+               {(chosen).sourceDeviceId != null && <div className="text-muted-foreground/70 text-xs mt-0.5">Current source: {deviceNames[(chosen).sourceDeviceId] ?? `Device ${(chosen).sourceDeviceId}`}</div>}
             </div>
           )}
           <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
           <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={chosen.anchorStartTimestamp} addSuffix={false} /></div>
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Edit settings"
-            title="Edit Settings"
-            className="h-8 w-8"
-            onClick={() => setEditingTarget({ type: group ? 'group' : 'device', id: chosen.device })}
-          >
-            <Pencil className="h-4 w-4" />
-          </Button>
+          {isOwner && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Share device"
+                title="Share Device"
+                className="h-8 w-8 text-primary"
+                onClick={() => {
+                  const username = window.prompt("Enter username to share with:");
+                    if (username) {
+                     void fetch(`/api/devices/${chosen.device}/share`, {
+                       method: "POST",
+                       body: JSON.stringify({ username }),
+                       headers: { "Content-Type": "application/json" }
+                     }).then(r => {
+                       if (r.ok) window.alert("Shared successfully!");
+                       else window.alert("Sharing failed.");
+                     });
+                   }
+                }}
+              >
+                <UserPlus className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Edit settings"
+                title="Edit Settings"
+                className="h-8 w-8"
+                onClick={() => setEditingTarget({ type: group ? 'group' : 'device', id: chosen.device })}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+            </>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -138,17 +159,7 @@ function DeviceOverlayComponent({
 
           {chosenFrame ? (
             <div className="mt-2 text-xs bg-muted/50 p-2 rounded-lg">
-              <div>Decision: <span className="font-bold uppercase text-primary">{chosenFrame.decision}</span></div>
-              <div>Draft Type: {chosenFrame.draftType}</div>
-              <div>Mahalanobis²: {chosenFrame.mahalanobis2?.toFixed(2) ?? '—'}</div>
-              <div>Pending Pts: {chosenFrame.pendingCount}</div>
-              <div>Variance: {chosenFrame.variance?.toFixed(1) ?? '—'}</div>
-              {chosenFrame.mean && (
-                <div>Pos: {fromWebMercator(chosenFrame.mean)[1].toFixed(5)}, {fromWebMercator(chosenFrame.mean)[0].toFixed(5)}</div>
-              )}
-              <div className="mt-1 pt-1 border-t border-border/30 text-muted-foreground">
-                {new Date(chosenFrame.timestamp).toLocaleTimeString()}
-              </div>
+              <div>Device point at {new Date(chosenFrame.timestamp).toLocaleTimeString()}</div>
             </div>
           ) : null}
         </div>

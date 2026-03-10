@@ -15,7 +15,7 @@ export type EngineState = {
   draft: EngineDraft | null;
   closed: EngineEvent[];
   debugFrames: DebugFrame[];
-  seenDebugKeys: Set<string>;
+  seenDebugKeys: string[];
 };
 
 export type DebugDecision = 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
@@ -206,7 +206,8 @@ export class Engine {
         start: draft.predecessor.start,
         end: draft.stationaryCutoff,
         mean: predStats.mean,
-        variance: predStats.variance
+        variance: predStats.variance,
+        isDraft: false
       });
 
       this.closed.push({
@@ -216,7 +217,8 @@ export class Engine {
         startAnchor: draft.startAnchor,
         endAnchor: settleStats.mean,
         path: stablePath,
-        distance: totalDistance
+        distance: totalDistance,
+        isDraft: false
       });
 
       // Start new stationary
@@ -359,19 +361,19 @@ export class Engine {
   }
 
   createSnapshot(): EngineState {
-    return {
-      draft: JSON.parse(JSON.stringify(this.draft)) as EngineDraft,
-      closed: JSON.parse(JSON.stringify(this.closed)) as EngineEvent[],
-      debugFrames: [...this.debugFrames],
-      seenDebugKeys: new Set(this.seenDebugKeys)
-    };
+    return JSON.parse(JSON.stringify({
+      draft: this.draft,
+      closed: this.closed,
+      debugFrames: this.debugFrames,
+      seenDebugKeys: [...this.seenDebugKeys]
+    })) as EngineState;
   }
 
   restoreSnapshot(state: EngineState) {
     this.draft = state.draft;
-    this.closed = state.closed;
+    this.closed = (state.closed ?? []).map(ev => ({ ...ev, isDraft: ev.isDraft ?? false }));
     this.debugFrames = state.debugFrames;
-    this.seenDebugKeys = new Set(state.seenDebugKeys);
+    this.seenDebugKeys = new Set(state.seenDebugKeys ?? []);
     this.lastTimestamp = this.draft?.start ?? null;
   }
 
@@ -403,7 +405,8 @@ export class Engine {
           startAnchor: current.startAnchor,
           endAnchor: nextNext.endAnchor,
           path: [...current.path, ...nextNext.path],
-          distance: 0
+          distance: 0,
+          isDraft: false
         };
         merged.distance = this.computePathLength(merged.path);
 

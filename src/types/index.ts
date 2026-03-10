@@ -26,7 +26,7 @@ export type DebugFrameView = {
 
 export type DevicePoint = {
   device: number;
-  sourceDeviceId: number | undefined;
+  sourceDeviceId: number | null;
   geo: Vec2;
   mean: Vec2;
   timestamp: Timestamp;
@@ -50,9 +50,13 @@ export type GroupDevice = {
   id: number;
   name: string;
   emoji: string;
-  color: string;
+  color: string | null;
+  lastSeen: Timestamp | null;
+  isGroup: true;
   memberDeviceIds: number[];
   motionProfile: MotionProfileName | null;
+  effectiveMotionProfile: MotionProfileName;
+  isOwner: boolean;
 };
 
 export type UiDevice = {
@@ -64,6 +68,7 @@ export type UiDevice = {
   hasPosition: boolean;
   memberDeviceIds: number[];
   color: string | null;
+  isOwner: boolean;
 };
 
 export type StationaryEvent = {
@@ -72,6 +77,7 @@ export type StationaryEvent = {
   end: Timestamp;
   mean: Vec2;
   variance: number;
+  isDraft: boolean;
 };
 
 export type MotionEvent = {
@@ -82,6 +88,7 @@ export type MotionEvent = {
   endAnchor: Vec2;
   path: Vec2[];
   distance: number;
+  isDraft: boolean;
 };
 
 export type EngineEvent = StationaryEvent | MotionEvent;
@@ -105,3 +112,33 @@ export type MotionDraft = {
 };
 
 export type EngineDraft = StationaryDraft | MotionDraft;
+
+// --- WebSocket Protocol ---
+
+export interface BaseAppDevice {
+  name: string;
+  emoji: string;
+  lastSeen: Timestamp | null;
+  effectiveMotionProfile: MotionProfileName;
+  motionProfile: MotionProfileName | null;
+  color: string | null;
+}
+
+export interface AppDevice extends BaseAppDevice {
+  isOwner: boolean;
+}
+
+export type InitialStatePayload = {
+  devices: Record<number, AppDevice>; // Will map to StoreState.devices
+  groups: GroupDevice[];
+  engineSnapshotsByDevice: Record<number, DevicePoint[]>;
+  eventsByDevice: Record<number, EngineEvent[]>;
+};
+
+export type ServerMessage = 
+  | { type: "initial_state"; payload: InitialStatePayload }
+  | { type: "positions_update"; payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> } }
+  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: GroupDevice[] | null } };
+
+export type ClientMessage = 
+  | { type: "authenticate"; token: string }; // Client sends its Traccar session token
