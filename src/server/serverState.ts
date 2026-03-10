@@ -18,11 +18,11 @@ export class ServerState {
 
   engineSnapshotsByDevice: Record<number, DevicePoint[]> = {};
   eventsByDevice: Record<number, EngineEvent[]> = {};
-
-  // We maintain a 24h trailing window of positions to reply if needed
   positionsAll: NormalizedPosition[] = [];
+  private historyMs: number;
 
-  constructor() {
+  constructor(public readonly historyDays: number) {
+    this.historyMs = historyDays * 24 * 60 * 60 * 1000;
     this.restoreFromDb();
   }
 
@@ -46,8 +46,8 @@ export class ServerState {
     }
 
     // 2. Restore recent raw positions so `positionsAll` is populated
-    const twentyFourHrsAgo = Date.now() - 24 * 60 * 60 * 1000;
-    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(twentyFourHrsAgo) as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number }[];
+    const cutoff = Date.now() - this.historyMs;
+    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff) as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number }[];
     for (const row of posRows) {
       const p: NormalizedPosition = {
         device: row.device_id,
@@ -140,25 +140,21 @@ export class ServerState {
 
     // 2. Rebuild derived state from FULL master map
     for (const device of this.rawTraccarDevices.values()) {
-      const attributes = device.attributes;
-      const id = device.id;
+      const { attributes, id, name, lastUpdate } = device;
+      const lastSeen = lastUpdate ? (Date.parse(lastUpdate) as Timestamp) : null;
 
-      const emoji = (attributes["emoji"] as string) ?? "";
-      const lastSeen = device.lastUpdate ? (Date.parse(device.lastUpdate) as Timestamp) : null;
+      // Filter devices not seen within the history window
+      if (lastSeen && lastSeen < Date.now() - this.historyMs) continue;
 
-      let motionProfile: MotionProfileName = "person";
       const profileAttr = attributes["motionProfile"];
-      if (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) {
-        motionProfile = profileAttr;
-      }
-      const motionProfileActual = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
-
-      const color = typeof attributes["color"] === "string" ? attributes["color"] : rgbToHex(...colorForDevice(id));
+      const motionProfile: MotionProfileName = (profileAttr === "person" || profileAttr === "car") ? profileAttr : "person";
+      const motionProfileActual = (profileAttr === "person" || profileAttr === "car") ? profileAttr : null;
+      const color = (typeof attributes["color"] === "string") ? attributes["color"] : rgbToHex(...colorForDevice(id));
 
       nextDevices[id] = {
         id,
-        name: device.name,
-        emoji,
+        name,
+        emoji: (attributes["emoji"] as string) ?? "",
         lastSeen,
         effectiveMotionProfile: motionProfile,
         motionProfile: motionProfileActual,
@@ -168,16 +164,16 @@ export class ServerState {
       const memberDeviceIdsAttr = attributes["memberDeviceIds"];
       if (typeof memberDeviceIdsAttr === "string") {
         try {
-          const memberDeviceIds = JSON.parse(memberDeviceIdsAttr) as unknown;
-          if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((mId: unknown): mId is number => typeof mId === "number")) {
+          const memberDeviceIds = JSON.parse(memberDeviceIdsAttr);
+          if (Array.isArray(memberDeviceIds)) {
             groupDevicesMap.set(id, {
               id,
-              name: device.name,
+              name,
               emoji: (attributes["emoji"] as string) ?? 'group',
               color: color ?? '#3b82f6',
               lastSeen: null,
               isGroup: true,
-              memberDeviceIds,
+              memberDeviceIds: memberDeviceIds.filter((mId): mId is number => typeof mId === "number"),
               motionProfile: motionProfileActual,
               effectiveMotionProfile: motionProfile,
               isOwner: false,
@@ -204,7 +200,6 @@ export class ServerState {
     this.devices = nextDevices;
 
     console.log(`[ServerState] Handled ${devices.length} updates. Total devices in state: ${Object.keys(this.devices).length}`);
-    console.log(`[ServerState] Handled ${devices.length} updates. Total devices in state: ${Object.keys(this.devices).length}`);
   }
 
   handlePositions(positions: NormalizedPosition[]) {
@@ -226,13 +221,13 @@ export class ServerState {
     this.positionsAll.push(...newPosArr);
     this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
 
-    // Prune positions older than 24 hours
-    const twentyFourHrsAgo = Date.now() - 24 * 60 * 60 * 1000;
-    this.positionsAll = this.positionsAll.filter(p => p.timestamp > twentyFourHrsAgo);
+    // Prune positions older than history window
+    const cutoff = Date.now() - this.historyMs;
+    this.positionsAll = this.positionsAll.filter(p => p.timestamp > cutoff);
 
     // Also periodically cleanup the db table of old data so it doesn't grow forever
     if (saveToDb && Math.random() < 0.05) { // ~ 5% chance per batch
-      db.run('DELETE FROM position_events WHERE timestamp < ?', [twentyFourHrsAgo]);
+      db.run('DELETE FROM position_events WHERE timestamp < ?', [cutoff]);
     }
 
     const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
@@ -268,239 +263,124 @@ export class ServerState {
     groupIds: Set<number>,
     motionProfiles: Record<number, MotionProfileName>
   ): { engineSnapshotsByDevice: Record<number, DevicePoint[]>, eventsByDevice: Record<number, EngineEvent[]> } | null {
-    if (!positionsAll || positionsAll.length === 0) return null;
+    if (!positionsAll?.length) return null;
 
-    // Pre-index all positions by deviceId once to avoid O(N*E) filters
-    const allPosByDevice = new Map<number, NormalizedPosition[]>();
-    for (const p of positionsAll) {
-      // Add to individual device list
-      let list = allPosByDevice.get(p.device);
-      if (!list) {
-        list = [];
-        allPosByDevice.set(p.device, list);
-      }
-      list.push(p);
-
-      // Also add to any group this device belongs to
-      const groups = deviceToGroupsMap.get(p.device);
-      if (groups) {
-        for (const groupId of groups) {
-          let groupList = allPosByDevice.get(groupId);
-          if (!groupList) {
-            groupList = [];
-            allPosByDevice.set(groupId, groupList);
-          }
-          groupList.push(p);
-        }
-      }
-    }
-
-    // Filter out already processed positions using dedupeKey
-    const newPositions = positionsAll.filter((p: NormalizedPosition) => {
-      const key = dedupeKey(p);
-      if (processedKeys.has(key)) return false;
-      processedKeys.add(key);
-      return true;
-    });
-
-    // Group new positions by device AND by any groups they belong to
-    const posByDevice: Record<number, NormalizedPosition[]> = {};
+    // 1. Index everything and find what needs processing
+    const allPosById = new Map<number, NormalizedPosition[]>();
+    const posById = new Map<number, NormalizedPosition[]>();
     const groupIdsTouched = new Set<number>();
 
-    for (const p of newPositions) {
-      // Add position to the original device
-      (posByDevice[p.device] ||= []).push(p);
+    for (const p of positionsAll) {
+      const ids = [p.device, ...(deviceToGroupsMap.get(p.device) ?? [])];
+      for (const id of ids) {
+        let list = allPosById.get(id);
+        if (!list) allPosById.set(id, list = []);
+        list.push(p);
+      }
 
-      // Also add position to any groups this device belongs to
-      const groups = deviceToGroupsMap.get(p.device);
-      if (groups) {
-        for (const groupId of groups) {
-          groupIdsTouched.add(groupId);
-          (posByDevice[groupId] ||= []).push(p);
+      const key = dedupeKey(p);
+      if (!processedKeys.has(key)) {
+        processedKeys.add(key);
+        for (const id of ids) {
+          let list = posById.get(id);
+          if (!list) posById.set(id, list = []);
+          list.push(p);
+          if (groupIds.has(id)) groupIdsTouched.add(id);
         }
       }
     }
 
-    // Bootstrap missing group engines (including new groups)
+    // Bootstrap missing group engines
     for (const group of groupDevices) {
       if (!engines.has(group.id)) {
-        const historical: NormalizedPosition[] = [];
-        for (const memberId of group.memberDeviceIds) {
-          const memberPos = allPosByDevice.get(memberId);
-          if (memberPos) historical.push(...memberPos);
-        }
-        if (historical.length > 1) {
-          historical.sort((a, b) => a.timestamp - b.timestamp);
-        }
-        if (historical.length > 0) {
-          posByDevice[group.id] = historical;
-        }
+        const historical = group.memberDeviceIds.flatMap(mId => allPosById.get(mId) ?? []).sort((a, b) => a.timestamp - b.timestamp);
+        if (historical.length) posById.set(group.id, historical);
       }
     }
 
-    if (Object.keys(posByDevice).length === 0) return null;
+    if (!posById.size) return null;
 
-    if (groupIdsTouched.size > 0) {
-      const membersByGroup = new Map<number, number[]>();
-      for (const group of groupDevices) {
-        membersByGroup.set(group.id, group.memberDeviceIds);
+    // 2. Handle out-of-order data and replay
+    for (const [id, newPos] of posById) {
+      const engine = engines.get(id);
+      if (!engine?.lastTimestamp || !newPos[0] || newPos[0].timestamp >= engine.lastTimestamp) continue;
+
+      const minTs = newPos[0].timestamp;
+      const checkpoints = engineCheckpoints.get(id) ?? [];
+      const cpIndex = checkpoints.findLastIndex(c => c.timestamp < minTs);
+      const cp = cpIndex >= 0 ? checkpoints[cpIndex] : null;
+
+      if (cp) {
+        engine.restoreSnapshot(cp.snapshot);
+        engineCheckpoints.set(id, checkpoints.slice(0, cpIndex + 1));
+        db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp > ?`, [id, cp.timestamp]);
+      } else {
+        engines.set(id, new Engine());
+        engineCheckpoints.set(id, []);
+        db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [id]);
       }
-      for (const groupId of groupIdsTouched) {
-        const memberIds = membersByGroup.get(groupId);
-        if (!memberIds || memberIds.length === 0) continue;
-        const memberSet = new Set(memberIds);
-        posByDevice[groupId] = newPositions.filter((p) => memberSet.has(p.device));
-      }
+
+      const replayFrom = cp?.timestamp ?? 0;
+      const relevantIds = groupIds.has(id) ? new Set(groupDevices.find(g => g.id === id)?.memberDeviceIds) : [id];
+      const historical = Array.from(relevantIds).flatMap(rId => allPosById.get(rId) ?? []).filter(p => p.timestamp > replayFrom).sort((a, b) => a.timestamp - b.timestamp);
+      posById.set(id, historical);
     }
 
-    // Check for out-of-order data and replay if necessary
-    for (const [key, newPositionsForDevice] of Object.entries(posByDevice)) {
-      const deviceId = Number(key);
-      const engine = engines.get(deviceId);
-      if (!engine?.lastTimestamp) continue;
-
-      if (newPositionsForDevice.length === 0 || !newPositionsForDevice[0]) continue;
-      const minTs = newPositionsForDevice[0].timestamp;
-
-      if (minTs < engine.lastTimestamp) {
-        const checkpoints = engineCheckpoints.get(deviceId) ?? [];
-        let cp = null;
-        let cpIndex = -1;
-        for (let i = checkpoints.length - 1; i >= 0; i--) {
-          const checkpoint = checkpoints[i];
-          if (checkpoint && checkpoint.timestamp < minTs) {
-            cp = checkpoint;
-            cpIndex = i;
-            break;
-          }
-        }
-
-        let replayFrom: Timestamp = 0 as Timestamp;
-        if (cp) {
-          engine.restoreSnapshot(cp.snapshot);
-          replayFrom = cp.timestamp;
-          // Prune invalid future checkpoints
-          const validCheckpoints = checkpoints.slice(0, cpIndex + 1);
-          engineCheckpoints.set(deviceId, validCheckpoints);
-
-          // Delete invalid future checkpoints from Db
-          db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp > ?`, [deviceId, cp.timestamp]);
-        } else {
-          engines.set(deviceId, new Engine());
-          engineCheckpoints.set(deviceId, []);
-          replayFrom = 0 as Timestamp;
-          // Delete all checkpoints for device
-          db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [deviceId]);
-        }
-
-        // Gather all historical positions > replayFrom
-        let relevantDeviceIds = new Set<number>();
-        if (groupIds.has(deviceId)) {
-          const group = groupDevices.find(g => g.id === deviceId);
-          if (group) {
-            group.memberDeviceIds.forEach(id => relevantDeviceIds.add(id));
-          }
-        } else {
-          relevantDeviceIds.add(deviceId);
-        }
-
-        const historical: NormalizedPosition[] = [];
-        for (const dId of relevantDeviceIds) {
-          const devicePos = allPosByDevice.get(dId);
-          if (devicePos) {
-            for (const p of devicePos) {
-              if (p.timestamp > replayFrom) historical.push(p);
-            }
-          }
-        }
-        if (historical.length > 1) {
-          historical.sort((a, b) => a.timestamp - b.timestamp);
-        }
-        posByDevice[deviceId] = historical;
-      }
-    }
-
+    // 3. Convert to DevicePoint for engine processing
     const rawByDevice: Record<number, DevicePoint[]> = {};
-    for (const [deviceKey, arr] of Object.entries(posByDevice)) {
-      const deviceId = Number(deviceKey);
-      rawByDevice[deviceId] = arr.map((p) => ({
+    for (const [id, arr] of posById) {
+      rawByDevice[id] = arr.map(p => ({
         mean: toWebMercator(p.geo),
         accuracy: p.accuracy,
         geo: p.geo,
-        device: deviceId,
+        device: id,
         timestamp: p.timestamp,
         anchorStartTimestamp: p.timestamp,
         confidence: 0,
-        sourceDeviceId: groupIds.has(deviceId) ? p.device : null,
+        sourceDeviceId: groupIds.has(id) ? p.device : null,
       }));
     }
 
-    const groupMotionProfiles = new Map<number, MotionProfileName>();
-    for (const group of groupDevices) {
-      if (group.motionProfile) {
-        groupMotionProfiles.set(group.id, group.motionProfile);
-        continue;
-      }
-      let profile: MotionProfileName = "person";
-      for (const memberId of group.memberDeviceIds) {
-        if ((motionProfiles[memberId] ?? "person") === "car") {
-          profile = "car";
-          break;
-        }
-      }
-      groupMotionProfiles.set(group.id, profile);
-    }
+    // 4. Determine motion profiles and build snapshots
+    const groupMotionProfiles = new Map(groupDevices.map(g => [
+      g.id,
+      g.motionProfile || (g.memberDeviceIds.some(mId => motionProfiles[mId] === "car") ? "car" : "person")
+    ]));
 
     const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles);
 
-    // Prune closed events older than 48 hours to match client timeline display
-    const fortyEightHoursAgo = Date.now() - 48 * 60 * 60 * 1000;
-    if (positionsAll.length > 0) {
-      for (const [deviceId, engine] of engines.entries()) {
-        const profile = motionProfiles[deviceId] ?? "person";
-        const profileConfig = MOTION_PROFILES[profile];
-        engine.refineHistory(profileConfig);
-        engine.pruneHistory(fortyEightHoursAgo as Timestamp);
-      }
-    }
+    // 5. Final pass: Prune and Checkpoint
+    const eventsCutoff = Date.now() - (this.historyMs * 2);
+    const cpToDb: { id: number, cp: { timestamp: Timestamp, snapshot: EngineState } }[] = [];
 
-    // Update checkpoints
-    const insertCpStmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (device_id, timestamp, snapshot_json) VALUES (?, ?, ?)`);
-    const saveCheckpoints = db.transaction((checkpointsToSave: { deviceId: number, cp: { timestamp: Timestamp, snapshot: EngineState } }[]) => {
-      for (const item of checkpointsToSave) {
-        insertCpStmt.run(item.deviceId, item.cp.timestamp, JSON.stringify(item.cp.snapshot));
-      }
-    });
-    const checkpointsToDb = [];
+    for (const id of engines.keys()) {
+      const engine = engines.get(id)!;
+      if (engine.lastTimestamp) {
+        // Prune
+        engine.refineHistory(MOTION_PROFILES[motionProfiles[id] ?? "person"]);
+        engine.pruneHistory(eventsCutoff as Timestamp);
 
-    for (const [key, points] of Object.entries(rawByDevice)) {
-      if (points.length === 0) continue;
-      const deviceId = Number(key);
-      const engine = engines.get(deviceId);
-      if (engine?.lastTimestamp) {
-        let checkpoints = engineCheckpoints.get(deviceId);
-        if (!checkpoints) {
-          checkpoints = [];
-          engineCheckpoints.set(deviceId, checkpoints);
-        }
-        const lastCp = checkpoints.length > 0 ? checkpoints[checkpoints.length - 1] : null;
-        // Checkpoint every 5 minutes
-        if (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS) {
+        // Checkpoint
+        const checkpoints = engineCheckpoints.get(id) ?? [];
+        const lastCp = checkpoints[checkpoints.length - 1];
+        if (rawByDevice[id]?.length && (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS)) {
           const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
           checkpoints.push(cp);
-          checkpointsToDb.push({ deviceId, cp });
+          engineCheckpoints.set(id, checkpoints);
+          cpToDb.push({ id, cp });
 
           if (checkpoints.length > MAX_CHECKPOINTS) {
-            const oldest = checkpoints.shift(); // Keep last N
-            if (oldest) {
-              db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [deviceId, oldest.timestamp]);
-            }
+            const oldest = checkpoints.shift();
+            if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [id, oldest.timestamp]);
           }
         }
       }
     }
 
-    if (checkpointsToDb.length > 0) saveCheckpoints(checkpointsToDb);
+    if (cpToDb.length) {
+      const stmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (device_id, timestamp, snapshot_json) VALUES (?, ?, ?)`);
+      db.transaction(() => cpToDb.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
+    }
 
     return {
       engineSnapshotsByDevice: result.positionsByDevice,

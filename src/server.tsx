@@ -9,6 +9,7 @@ interface Config {
   traccarSecure: boolean;
   maptilerApiKey: string;
   traccarApiToken: string;
+  historyDays: number;
 }
 
 interface WSData {
@@ -31,7 +32,24 @@ import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { ServerState } from "./server/serverState";
 import { TraccarAdminClient } from "./server/traccarClient";
 
-const serverState = new ServerState();
+let config: Config;
+try {
+  config = await configFile.json();
+} catch (e) {
+  console.error("Error: config.json is not valid JSON.");
+  process.exit(1);
+}
+
+const requiredFields: (keyof Config)[] = ["traccarBaseUrl", "maptilerApiKey", "traccarApiToken", "historyDays"];
+
+const missingFields = requiredFields.filter(field => !config[field]);
+
+if (missingFields.length > 0) {
+  console.error(`Error: Mandatory configuration fields are missing in config.json: ${missingFields.join(", ")}`);
+  process.exit(1);
+}
+
+const serverState = new ServerState(config.historyDays);
 
 // Helper to broadcast state to specific device topics
 function broadcastUpdate(server: import("bun").Server<WSData>) {
@@ -79,22 +97,6 @@ function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string
   traccarClient.connect();
 }
 
-let config: Config;
-try {
-  config = await configFile.json();
-} catch (e) {
-  console.error("Error: config.json is not valid JSON.");
-  process.exit(1);
-}
-
-const requiredFields: (keyof Config)[] = ["traccarBaseUrl", "maptilerApiKey", "traccarApiToken"];
-
-const missingFields = requiredFields.filter(field => !config[field]);
-
-if (missingFields.length > 0) {
-  console.error(`Error: Mandatory configuration fields are missing in config.json: ${missingFields.join(", ")}`);
-  process.exit(1);
-}
 
 // Session store and token manager for WebSocket authentication
 import { sessionStore } from "./server/sessionStore";
