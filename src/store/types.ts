@@ -9,12 +9,9 @@ export type StoreState = {
 
   // Settings slice (persisted)
   settings: {
-    baseUrl: string;
-    secure: boolean;
-    email: string;
-    password: string;
     maptilerApiKey: string;
     theme: 'light' | 'dark' | 'system';
+    sessionToken: string | null;
   };
 
   // Auth State
@@ -68,10 +65,6 @@ export type StoreActions = {
   setDebugMode: (value: boolean) => void;
   setDebugFrameIndex: (value: number) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
-
-  // External Config
-  fetchConfig: () => Promise<void>;
-  fetchMaptilerKey: () => Promise<void>;
 };
 
 export type Store = StoreState & StoreActions;

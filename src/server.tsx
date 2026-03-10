@@ -13,6 +13,7 @@ interface Config {
 
 interface WSData {
   username: string | null;
+  traccarToken: string | null;
   allowedDeviceIds: Set<number>;
   ownedDeviceIds: Set<number>;
 }
@@ -25,9 +26,10 @@ if (!(await configFile.exists())) {
 }
 
 // Application state and Traccar Client
+import { db } from "./server/db";
+import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { ServerState } from "./server/serverState";
 import { TraccarAdminClient } from "./server/traccarClient";
-import { db } from "./server/db";
 
 const serverState = new ServerState();
 
@@ -53,7 +55,7 @@ function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
     onDevicesReceived: (devices) => {
       serverState.handleDevices(devices);
-      
+
       // Broadcast global device changes to all relevant device topics.
       // Individual clients only receive updates for devices they are subscribed to.
       for (const deviceId of Object.keys(serverState.devices)) {
@@ -94,66 +96,36 @@ if (missingFields.length > 0) {
   process.exit(1);
 }
 
-async function verifyTraccarSession(request: Request): Promise<{ username: string; ownedDeviceIds: number[] } | null> {
+// Session store and token manager for WebSocket authentication
+import { sessionStore } from "./server/sessionStore";
+import { TraccarTokenManager } from "./server/traccarTokenManager";
+
+async function verifyTraccarSession(request: Request): Promise<{ username: string; ownedDeviceIds: number[]; traccarToken: string } | null> {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader) return null;
 
   try {
-    let baseUrl = config.traccarBaseUrl.trim();
-    let host = baseUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    const [authType, token] = authHeader.split(" ");
+    if (authType !== "Bearer" || !token) return null;
 
-    const hasApi = host.endsWith("/api") || host.includes("/api/");
-    if (hasApi) {
-      host = host.replace(/\/api\/?.*$/, "");
-    }
+    const session = sessionStore.getSession(token);
+    if (!session) return null;
 
-    const protocol = config.traccarSecure ? "https" : "http";
-    const base = `${protocol}://${host}`;
+    const base = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
 
-    // 1. Try to extract username from Basic Auth header
-    let username: string | null = null;
-    const [authType, credentials] = authHeader.split(" ");
-    if (authType === "Basic" && credentials) {
-      try {
-        const decoded = Buffer.from(credentials, "base64").toString("utf-8");
-        const parts = decoded.split(":");
-        if (parts.length >= 1 && parts[0]) username = parts[0];
-      } catch (e) {
-        console.warn("[verifyTraccarSession] Failed to decode Basic Auth header");
-      }
-    }
-
-    // 2. Fetch devices to verify credentials and get ownership
-    const devicesUrl = `${base}/api/devices`;
-    const devicesRes = await fetch(devicesUrl, {
-      headers: { "Authorization": authHeader, "Accept": "application/json" }
+    const devicesRes = await fetch(`${base}/api/devices`, {
+      headers: { "Authorization": `Bearer ${session.traccarToken}`, "Accept": "application/json" }
     });
 
-    if (!devicesRes.ok) {
-      console.error(`[verifyTraccarSession] Auth check failed at ${devicesUrl}: ${devicesRes.status} ${devicesRes.statusText}`);
-      return null;
-    }
+    if (!devicesRes.ok) return null;
 
     const devices = await devicesRes.json() as { id: number }[];
-    const ownedDeviceIds = devices.map(d => d.id);
-
-    // 3. Fallback for username if not using Basic Auth
-    if (!username) {
-      console.log(`[verifyTraccarSession] Not Basic Auth, attempting /api/session for username...`);
-      const sessionRes = await fetch(`${base}/api/session`, {
-        headers: { "Authorization": authHeader, "Accept": "application/json" }
-      });
-      if (sessionRes.ok) {
-        const user = await sessionRes.json();
-        username = user.email || user.name || "unknown";
-      } else {
-        username = "token_user"; 
-      }
-    }
-
-    return { username: username || "unknown", ownedDeviceIds };
+    return {
+      username: session.username,
+      ownedDeviceIds: devices.map(d => d.id),
+      traccarToken: session.traccarToken
+    };
   } catch (e) {
-    console.error(`[verifyTraccarSession] Network error during verification:`, e);
     return null;
   }
 }
@@ -161,6 +133,7 @@ async function verifyTraccarSession(request: Request): Promise<{ username: strin
 // Config is validated and ready
 const currentBaseUrl = config.traccarBaseUrl;
 const currentToken = config.traccarApiToken;
+const tokenManager = new TraccarTokenManager(currentBaseUrl, config.traccarSecure);
 
 let serverInst: import("bun").Server<WSData>;
 
@@ -187,22 +160,6 @@ if (isProduction) {
       }
 
       // SPA fallback
-      if (pathname === "/api/config") {
-        return Response.json({
-          traccarBaseUrl: config.traccarBaseUrl,
-          traccarSecure: config.traccarSecure,
-        });
-      }
-
-      if (pathname === "/api/config/maptiler") {
-        if (!(await verifyTraccarSession(request))) {
-          return new Response("Unauthorized", { status: 401 });
-        }
-        return Response.json({
-          maptilerApiKey: config.maptilerApiKey,
-        });
-      }
-
       return new Response(Bun.file("dist/index.html"));
     },
   });
@@ -211,23 +168,54 @@ if (isProduction) {
   serverInst = serve<WSData>({
     port,
     routes: {
-      "/api/config": () => {
-        return Response.json({
-          traccarBaseUrl: config.traccarBaseUrl,
-          traccarSecure: config.traccarSecure,
-        });
-      },
-      "/api/config/maptiler": async (request: Request) => {
-        const userInfo = await verifyTraccarSession(request);
-        if (!userInfo) return new Response("Unauthorized", { status: 401 });
-        return Response.json({ maptilerApiKey: config.maptilerApiKey });
+      "/api/login": async (request: Request) => {
+        try {
+          const { email, password } = await request.json() as { email: string; password: string };
+          if (!email || !password) {
+            return new Response("Email and password required", { status: 400 });
+          }
+
+          const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
+          const sessionUrl = `${apiBase}/session`;
+
+          let username = email;
+          try {
+            const params = new URLSearchParams({ email, password });
+            const sessionRes = await fetch(sessionUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+              body: params.toString()
+            });
+
+            if (!sessionRes.ok) {
+              return new Response("Invalid credentials", { status: 401 });
+            }
+
+            const user = await sessionRes.json();
+            username = user.email || user.name || email;
+          } catch {
+            return new Response("Login failed", { status: 500 });
+          }
+
+          const traccarToken = await tokenManager.getOrCreateTraccarPermanentToken(username, password);
+          const token = sessionStore.createSession(username, traccarToken);
+
+          return Response.json({
+            success: true,
+            token,
+            username
+          });
+        } catch (e) {
+          console.error("Login route error:", e);
+          return new Response("Login failed", { status: 500 });
+        }
       },
       "/api/devices/:id/share": async (request: Request) => {
         const userInfo = await verifyTraccarSession(request);
         if (!userInfo) return new Response("Unauthorized", { status: 401 });
-        
+
         try {
-          const params = (request as any).params as { id: string };
+          const params = (request as unknown as { params: { id: string } }).params;
           const deviceId = parseInt(params.id);
           const { username } = await request.json() as { username: string };
 
@@ -247,9 +235,9 @@ if (isProduction) {
       "/api/devices/:id/share/:username": async (request: Request) => {
         const userInfo = await verifyTraccarSession(request);
         if (!userInfo) return new Response("Unauthorized", { status: 401 });
-        
+
         try {
-          const params = (request as any).params as { id: string; username: string };
+          const params = (request as unknown as { params: { id: string; username: string } }).params;
           const deviceId = parseInt(params.id);
           const targetUsername = params.username;
 
@@ -271,9 +259,9 @@ if (isProduction) {
       },
       "/api/ws": (request: Request, server: import("bun").Server<WSData>) => {
         const upgraded = server.upgrade(request, {
-          data: { username: null, allowedDeviceIds: new Set(), ownedDeviceIds: new Set() }
+          data: { username: null, traccarToken: null, allowedDeviceIds: new Set(), ownedDeviceIds: new Set() }
         });
-        if (upgraded) return new Response();
+        if (upgraded) return undefined;
         return new Response("Upgrade failed", { status: 400 });
       },
       "/assets/**": Bun.file("src/assets"),
@@ -285,55 +273,182 @@ if (isProduction) {
         try {
           const data = JSON.parse(message as string);
           if (data.type === "authenticate" && data.token) {
-            console.log(`[WS] Authenticating client with token: ${data.token.substring(0, 10)}...`);
-            // Ensure token is formatted as a proper Authorization header
-            const authHeader = data.token.startsWith("Basic ") || data.token.startsWith("Bearer ") ? data.token : `Basic ${data.token}`;
-            const userInfo = await verifyTraccarSession(new Request("http://localhost", { headers: { "Authorization": authHeader } }));
-            
-            if (userInfo) {
-              console.log(`[WS] Authentication successful for ${userInfo.username}`);
-              ws.data.username = userInfo.username;
-              ws.data.ownedDeviceIds = new Set(userInfo.ownedDeviceIds);
-              
-              // Add shared devices
-              const shared = db.query("SELECT device_id FROM device_shares WHERE shared_with_username = ?").all(userInfo.username) as { device_id: number }[];
-              ws.data.allowedDeviceIds = new Set([...userInfo.ownedDeviceIds, ...shared.map(s => s.device_id)]);
-              console.log(`[WS] User ${userInfo.username} allowed device count: ${ws.data.allowedDeviceIds.size}`);
+            console.log(`[WS] Authenticating client with session token: ${data.token.substring(0, 10)}...`);
 
-              // Subscribe to individual topics
-              for (const id of ws.data.allowedDeviceIds) {
-                ws.subscribe(`device-${id}`);
+            const session = sessionStore.getSession(data.token);
+            if (!session) {
+              ws.send(JSON.stringify({ type: "error", message: "Invalid session" }));
+              return;
+            }
+
+            const { username, traccarToken } = session;
+
+            const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
+            const devicesUrl = `${apiBase}/devices`;
+
+            const devicesRes = await fetch(devicesUrl, {
+              headers: { "Authorization": `Bearer ${traccarToken}`, "Accept": "application/json" }
+            });
+
+            if (!devicesRes.ok) {
+              ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
+              sessionStore.deleteSession(data.token);
+              return;
+            }
+
+            const devices = await devicesRes.json() as { id: number }[];
+            const ownedDeviceIds = new Set(devices.map(d => d.id));
+
+            // Add shared devices
+            const shared = db.query("SELECT device_id FROM device_shares WHERE shared_with_username = ?").all(username) as { device_id: number }[];
+            const allowedDeviceIds = new Set([...ownedDeviceIds, ...shared.map(s => s.device_id)]);
+
+            ws.data.username = username;
+            ws.data.traccarToken = traccarToken;
+            ws.data.ownedDeviceIds = ownedDeviceIds;
+            ws.data.allowedDeviceIds = allowedDeviceIds;
+
+            console.log(`[WS] Authentication successful for ${username}. Devices: ${allowedDeviceIds.size}`);
+
+            for (const id of allowedDeviceIds) {
+              ws.subscribe(`device-${id}`);
+            }
+
+            const filteredDevices: Record<number, import("./types/index").AppDevice> = {};
+            const filteredSnapshots: Record<number, import("./types/index").DevicePoint[]> = {};
+            const filteredEvents: Record<number, import("./types/index").EngineEvent[]> = {};
+
+            for (const id of allowedDeviceIds) {
+              if (serverState.devices[id]) {
+                filteredDevices[id] = {
+                  ...serverState.devices[id],
+                  isOwner: ownedDeviceIds.has(id)
+                };
               }
-
-              // Send initial state filtered
-              const filteredDevices: Record<number, any> = {};
-              const filteredSnapshots: Record<number, any> = {};
-              const filteredEvents: Record<number, any> = {};
-              
-              for (const id of ws.data.allowedDeviceIds) {
-                if (serverState.devices[id]) {
-                  filteredDevices[id] = { 
-                    ...serverState.devices[id], 
-                    isOwner: ws.data.ownedDeviceIds.has(id) 
-                  };
-                }
-                if (serverState.engineSnapshotsByDevice[id]) {
-                  filteredSnapshots[id] = serverState.engineSnapshotsByDevice[id];
-                }
-                if (serverState.eventsByDevice[id]) {
-                  filteredEvents[id] = serverState.eventsByDevice[id];
-                }
+              if (serverState.engineSnapshotsByDevice[id]) {
+                filteredSnapshots[id] = serverState.engineSnapshotsByDevice[id];
               }
+              if (serverState.eventsByDevice[id]) {
+                filteredEvents[id] = serverState.eventsByDevice[id];
+              }
+            }
 
-              ws.send(JSON.stringify({
-                type: "initial_state",
-                payload: {
-                  devices: filteredDevices,
-                  groups: serverState.groups.filter(g => ws.data.allowedDeviceIds.has(g.id) || g.memberDeviceIds.some(mid => ws.data.allowedDeviceIds.has(mid))),
-                  engineSnapshotsByDevice: filteredSnapshots,
-                  eventsByDevice: filteredEvents
+            const payloadObj = {
+              type: "initial_state",
+              payload: {
+                devices: filteredDevices,
+                groups: serverState.groups.filter(g => allowedDeviceIds.has(g.id) || g.memberDeviceIds.some(mid => allowedDeviceIds.has(mid))),
+                engineSnapshotsByDevice: filteredSnapshots,
+                eventsByDevice: filteredEvents,
+                maptilerApiKey: config.maptilerApiKey
+              }
+            };
+
+            const payloadStr = JSON.stringify(payloadObj);
+            console.log(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
+            ws.send(payloadStr);
+          } else if (data.requestId && ws.data.username && ws.data.traccarToken) {
+            // RPC handlers
+            const { type, payload, requestId } = data;
+
+            const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
+
+            const reqHeaders = {
+              "Authorization": `Bearer ${ws.data.traccarToken}`,
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            };
+
+            try {
+              if (type === "create_group") {
+                const { name, emoji, memberDeviceIds } = payload;
+                if (!memberDeviceIds.every((id: number) => ws.data.allowedDeviceIds.has(id))) {
+                  ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
+                  return;
                 }
-              }));
+                const res = await fetch(`${apiBase}/devices`, {
+                  method: "POST",
+                  headers: reqHeaders,
+                  body: JSON.stringify({
+                    name,
+                    uniqueId: "group-" + Date.now(),
+                    attributes: { emoji, memberDeviceIds: JSON.stringify(memberDeviceIds) }
+                  })
+                });
+                if (!res.ok) throw new Error(await res.text());
+                const device = await res.json();
+                serverState.handleDevices([device]);
+                ws.send(JSON.stringify({ type: "create_success", device, requestId }));
+              }
+              else if (type === "update_device") {
+                const { deviceId, updates } = payload;
+                if (!ws.data.allowedDeviceIds.has(deviceId)) {
+                  ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
+                  return;
+                }
+                const getRes = await fetch(`${apiBase}/devices/${deviceId}`, { headers: reqHeaders });
+                if (!getRes.ok) throw new Error("Device not found");
+                const current = await getRes.json();
+
+                const attributes = { ...current.attributes };
+                if (updates.emoji !== undefined) attributes.emoji = updates.emoji;
+                if (updates.color !== undefined) attributes.color = updates.color;
+                if (updates.motionProfile !== undefined) attributes.motionProfile = updates.motionProfile;
+                if (updates.memberDeviceIds !== undefined) attributes.memberDeviceIds = JSON.stringify(updates.memberDeviceIds);
+
+                const putRes = await fetch(`${apiBase}/devices/${deviceId}`, {
+                  method: "PUT",
+                  headers: reqHeaders,
+                  body: JSON.stringify({ ...current, name: updates.name || current.name, attributes })
+                });
+                if (!putRes.ok) throw new Error(await putRes.text());
+                const updated = await putRes.json();
+                serverState.handleDevices([updated]);
+                ws.send(JSON.stringify({ type: "update_success", deviceId, requestId }));
+              }
+              else if (type === "delete_group") {
+                const { groupId } = payload;
+                if (!ws.data.allowedDeviceIds.has(groupId)) {
+                  ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
+                  return;
+                }
+                const res = await fetch(`${apiBase}/devices/${groupId}`, { method: "DELETE", headers: reqHeaders });
+                if (!res.ok) throw new Error(await res.text());
+                ws.send(JSON.stringify({ type: "delete_success", groupId, requestId }));
+              }
+              else if (type === "add_device_to_group" || type === "remove_device_from_group") {
+                const { groupId, deviceId } = payload;
+                if (!ws.data.allowedDeviceIds.has(groupId) || !ws.data.allowedDeviceIds.has(deviceId)) {
+                  ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
+                  return;
+                }
+                const getRes = await fetch(`${apiBase}/devices/${groupId}`, { headers: reqHeaders });
+                if (!getRes.ok) throw new Error("Group not found");
+                const current = await getRes.json();
+
+                let memberDeviceIds: number[] = current.attributes?.memberDeviceIds ? JSON.parse(current.attributes.memberDeviceIds) : [];
+                if (type === "add_device_to_group") {
+                  if (!memberDeviceIds.includes(deviceId)) memberDeviceIds.push(deviceId);
+                } else {
+                  memberDeviceIds = memberDeviceIds.filter(id => id !== deviceId);
+                }
+
+                const putRes = await fetch(`${apiBase}/devices/${groupId}`, {
+                  method: "PUT",
+                  headers: reqHeaders,
+                  body: JSON.stringify({ ...current, attributes: { ...current.attributes, memberDeviceIds: JSON.stringify(memberDeviceIds) } })
+                });
+                if (!putRes.ok) throw new Error(await putRes.text());
+                const updated = await putRes.json();
+                serverState.handleDevices([updated]);
+                ws.send(JSON.stringify({ type: "update_success", deviceId: groupId, requestId }));
+              } else {
+                ws.send(JSON.stringify({ type: "error", message: "Unknown RPC type", requestId }));
+              }
+            } catch (err: unknown) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              console.error(`[WS RPC Error] ${type}:`, errorMessage);
+              ws.send(JSON.stringify({ type: "error", message: errorMessage, requestId }));
             }
           }
         } catch (e) {

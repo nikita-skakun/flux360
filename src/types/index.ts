@@ -1,3 +1,18 @@
+export type TraccarDevice = {
+  id: number;
+  name: string;
+  lastUpdate: string | null;
+  attributes: Record<string, unknown>;
+};
+
+export interface Session {
+  token: string;
+  username: string;
+  traccarToken: string;
+  createdAt: number;
+  lastActive: number;
+}
+
 export type Timestamp = number & { readonly __u?: 'timestamp' };
 
 export type Vec2 = [number, number];
@@ -116,6 +131,7 @@ export type EngineDraft = StationaryDraft | MotionDraft;
 // --- WebSocket Protocol ---
 
 export interface BaseAppDevice {
+  id: number;
   name: string;
   emoji: string;
   lastSeen: Timestamp | null;
@@ -133,12 +149,22 @@ export type InitialStatePayload = {
   groups: GroupDevice[];
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
   eventsByDevice: Record<number, EngineEvent[]>;
+  maptilerApiKey: string;
 };
 
-export type ServerMessage = 
-  | { type: "initial_state"; payload: InitialStatePayload }
-  | { type: "positions_update"; payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> } }
-  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: GroupDevice[] | null } };
+export type ServerMessage =
+  | { type: "initial_state"; payload: InitialStatePayload; requestId?: never }
+  | { type: "positions_update"; payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }; requestId?: never }
+  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: GroupDevice[] | null }; requestId?: never }
+  | { type: "update_success"; deviceId: number; requestId?: string }
+  | { type: "create_success"; device: TraccarDevice; requestId?: string }
+  | { type: "delete_success"; groupId: number; requestId?: string }
+  | { type: "error"; message: string; requestId?: string };
 
-export type ClientMessage = 
-  | { type: "authenticate"; token: string }; // Client sends its Traccar session token
+export type ClientMessage =
+  | { type: "authenticate"; token: string }
+  | { type: "update_device"; payload: { deviceId: number; updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: string | null } }; requestId?: string }
+  | { type: "create_group"; payload: { name: string; emoji: string; memberDeviceIds: number[] }; requestId?: string }
+  | { type: "delete_group"; payload: { groupId: number }; requestId?: string }
+  | { type: "add_device_to_group"; payload: { groupId: number; deviceId: number }; requestId?: string }
+  | { type: "remove_device_from_group"; payload: { groupId: number; deviceId: number }; requestId?: string };

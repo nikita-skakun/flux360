@@ -85,16 +85,7 @@ export function App() {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [theme]);
 
-  const fetchConfig = useStore((state) => state.fetchConfig);
-  const fetchMaptilerKey = useStore((state) => state.fetchMaptilerKey);
   const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
-
-  useEffect(() => {
-    fetchConfig();
-    if (isAuthenticated) {
-      fetchMaptilerKey();
-    }
-  }, [fetchConfig, fetchMaptilerKey, isAuthenticated]);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
@@ -118,7 +109,6 @@ export function App() {
   const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
   const eventsByDevice = useStore(state => state.eventsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
-
 
   const visibleComponents = useMemo(() => {
     const allComps = Object.values(engineSnapshotsByDevice).flat();
@@ -206,7 +196,6 @@ export function App() {
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
   const deviceList = useMemo(() => {
-    const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
     const result: UiDevice[] = [];
 
     // Track seen IDs to prevent duplicates
@@ -222,7 +211,6 @@ export function App() {
       if (groupIds.has(numId) || seenIds.has(numId)) continue;
 
       const lastSeen = deviceLastSeen[numId] ?? null;
-      if (!lastSeen || lastSeen <= cutoff) continue; // Skip old devices
 
       const color = deviceColors[numId];
       result.push({

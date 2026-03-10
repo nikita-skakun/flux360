@@ -1,6 +1,5 @@
-import { extractPositionsFromMessage } from "@/api/realtime";
-import { fetchDevices, type TraccarDevice } from "@/api/devices";
-import type { NormalizedPosition } from "@/types";
+import { extractPositionsFromMessage } from "./traccarAdminUtils";
+import type { NormalizedPosition, TraccarDevice } from "@/types";
 
 type ServerStateDeps = {
   // Dependencies injected from server logic so this client can push data to it
@@ -80,14 +79,16 @@ export class TraccarAdminClient {
 
   private async fetchInitialDevices() {
     try {
-      const devices = await fetchDevices({
-        baseUrl: this.baseUrl,
-        secure: this.secure,
-        auth: {
-          type: 'token',
-          token: this.token
+      const protocol = this.secure ? "https" : "http";
+      const res = await fetch(`${protocol}://${this.baseUrl}/api/devices`, {
+        headers: {
+          "Authorization": `Bearer ${this.token}`,
+          "Accept": "application/json"
         }
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const devices = (await res.json()) as TraccarDevice[];
+
       console.log(`[TraccarAdminClient] Successfully fetched ${devices.length} initial devices via REST`);
       this.deps.onDevicesReceived(devices);
     } catch (err) {

@@ -4,8 +4,7 @@ import { Engine, type EngineState } from "@/engine/engine";
 import { fromWebMercator, toWebMercator } from "@/util/webMercator";
 import { MOTION_PROFILES, CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { rgbToHex, colorForDevice } from "@/util/color";
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp, BaseAppDevice } from "@/types";
-import type { TraccarDevice } from "@/api/devices";
+import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp, BaseAppDevice, TraccarDevice } from "@/types";
 
 export class ServerState {
   devices: Record<number, BaseAppDevice> = {};
@@ -62,52 +61,70 @@ export class ServerState {
 
     console.log(`[ServerState] Restored ${this.engines.size} engines and ${this.positionsAll.length} trailing positions.`);
 
-    // After restoring checkpoints, engines are already in their final state.
-    // Extract current snapshots and events without reprocessing positions.
     for (const [deviceId, engine] of this.engines) {
       const snapshot = engine.getCurrentSnapshot();
-      if (!snapshot?.draft) {
-        this.engineSnapshotsByDevice[deviceId] = [];
-        this.eventsByDevice[deviceId] = [];
-        continue;
-      }
 
-      const { draft, timestamp } = snapshot;
-      const stats = engine.computeStats(draft.recent);
-      this.engineSnapshotsByDevice[deviceId] = [{
-        mean: stats.mean,
-        timestamp: (timestamp ?? Date.now()) as Timestamp,
-        device: deviceId,
-        geo: fromWebMercator(stats.mean),
-        accuracy: 5,
-        anchorStartTimestamp: draft.start,
-        confidence: snapshot.activeConfidence,
-        sourceDeviceId: null
-      }];
-
+      // Always include closed historical events
       const events = [...engine.closed];
-      if (draft.type === 'stationary') {
-        events.push({
-          type: 'stationary',
-          start: draft.start,
-          end: (timestamp ?? Date.now()) as Timestamp,
+
+      // Add current draft if there is one
+      if (snapshot?.draft) {
+        const { draft, timestamp } = snapshot;
+        const stats = engine.computeStats(draft.recent);
+        this.engineSnapshotsByDevice[deviceId] = [{
           mean: stats.mean,
-          variance: stats.variance,
-          isDraft: true
-        });
+          timestamp: (timestamp ?? Date.now()) as Timestamp,
+          device: deviceId,
+          geo: fromWebMercator(stats.mean),
+          accuracy: 5,
+          anchorStartTimestamp: draft.start,
+          confidence: snapshot.activeConfidence,
+          sourceDeviceId: null
+        }];
+
+        if (draft.type === 'stationary') {
+          events.push({
+            type: 'stationary',
+            start: draft.start,
+            end: (timestamp ?? Date.now()) as Timestamp,
+            mean: stats.mean,
+            variance: stats.variance,
+            isDraft: true
+          });
+        } else {
+          events.push({
+            type: 'motion',
+            start: draft.start,
+            end: (timestamp ?? Date.now()) as Timestamp,
+            startAnchor: draft.startAnchor,
+            endAnchor: draft.path[draft.path.length - 1]!.mean,
+            path: draft.path.map(p => p.mean),
+            distance: engine.computePathLength(draft.path),
+            isDraft: true
+          });
+        }
       } else {
-        events.push({
-          type: 'motion',
-          start: draft.start,
-          end: (timestamp ?? Date.now()) as Timestamp,
-          startAnchor: draft.startAnchor,
-          endAnchor: draft.path[draft.path.length - 1]!.mean,
-          path: draft.path.map(p => p.mean),
-          distance: engine.computePathLength(draft.path),
-          isDraft: true
-        });
+        this.engineSnapshotsByDevice[deviceId] = [];
       }
+
       this.eventsByDevice[deviceId] = events;
+
+      // If no active draft, still provide the last known position for map markers
+      if (!this.engineSnapshotsByDevice[deviceId] || this.engineSnapshotsByDevice[deviceId].length === 0) {
+        const lastPos = this.positionsAll.filter(p => p.device === deviceId).pop();
+        if (lastPos) {
+          this.engineSnapshotsByDevice[deviceId] = [{
+            device: deviceId,
+            timestamp: lastPos.timestamp,
+            geo: lastPos.geo,
+            mean: toWebMercator(lastPos.geo),
+            accuracy: lastPos.accuracy,
+            confidence: 1.0,
+            anchorStartTimestamp: lastPos.timestamp,
+            sourceDeviceId: null
+          }];
+        }
+      }
     }
   }
 
@@ -118,58 +135,52 @@ export class ServerState {
       this.rawTraccarDevices.set(d.id, d);
     }
 
-    const nameMap: Record<number, string> = {};
-    const iconMap: Record<number, string> = {};
-    const lastSeenMap: Record<number, Timestamp | null> = {};
-    const motionProfileMap: Record<number, MotionProfileName> = {};
-    const motionProfileAttributeMap: Record<number, MotionProfileName | null> = {};
-    const colorAttributeMap: Record<number, string | null> = {};
+    const nextDevices: Record<number, BaseAppDevice> = {};
     const groupDevicesMap = new Map<number, GroupDevice>();
 
     // 2. Rebuild derived state from FULL master map
     for (const device of this.rawTraccarDevices.values()) {
-      nameMap[device.id] = device.name;
-      iconMap[device.id] = device.emoji;
-      lastSeenMap[device.id] = device.lastSeen;
+      const attributes = device.attributes;
+      const id = device.id;
 
-      let profile: MotionProfileName = "person";
-      const profileAttr = device.attributes["motionProfile"];
+      const emoji = (attributes["emoji"] as string) ?? "";
+      const lastSeen = device.lastUpdate ? (Date.parse(device.lastUpdate) as Timestamp) : null;
+
+      let motionProfile: MotionProfileName = "person";
+      const profileAttr = attributes["motionProfile"];
       if (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) {
-        profile = profileAttr;
+        motionProfile = profileAttr;
       }
-      motionProfileMap[device.id] = profile;
-      motionProfileAttributeMap[device.id] = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
+      const motionProfileActual = (typeof profileAttr === "string" && (profileAttr === "person" || profileAttr === "car")) ? profileAttr : null;
 
-      colorAttributeMap[device.id] = typeof device.attributes["color"] === "string" ? device.attributes["color"] : rgbToHex(...colorForDevice(device.id));
+      const color = typeof attributes["color"] === "string" ? attributes["color"] : rgbToHex(...colorForDevice(id));
 
-      const memberDeviceIdsAttr = device.attributes["memberDeviceIds"];
+      nextDevices[id] = {
+        id,
+        name: device.name,
+        emoji,
+        lastSeen,
+        effectiveMotionProfile: motionProfile,
+        motionProfile: motionProfileActual,
+        color,
+      };
+
+      const memberDeviceIdsAttr = attributes["memberDeviceIds"];
       if (typeof memberDeviceIdsAttr === "string") {
         try {
           const memberDeviceIds = JSON.parse(memberDeviceIdsAttr) as unknown;
-          if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((id: unknown): id is number => typeof id === "number")) {
-            let color = rgbToHex(...colorForDevice(device.id));
-            const colorAttr = device.attributes["color"];
-            if (typeof colorAttr === "string") {
-              color = colorAttr;
-            }
-
-            let groupMotionProfile: MotionProfileName | null = null;
-            const mpAttr = device.attributes["motionProfile"];
-            if (typeof mpAttr === "string" && (mpAttr === "person" || mpAttr === "car")) {
-              groupMotionProfile = mpAttr;
-            }
-
-            groupDevicesMap.set(device.id, {
-              id: device.id,
+          if (Array.isArray(memberDeviceIds) && memberDeviceIds.every((mId: unknown): mId is number => typeof mId === "number")) {
+            groupDevicesMap.set(id, {
+              id,
               name: device.name,
-              emoji: device.emoji ?? 'group',
+              emoji: (attributes["emoji"] as string) ?? 'group',
               color: color ?? '#3b82f6',
               lastSeen: null,
               isGroup: true,
               memberDeviceIds,
-              motionProfile: groupMotionProfile ?? null,
-              effectiveMotionProfile: groupMotionProfile ?? 'person',
-              isOwner: false, // Default, will be set per-user in server.tsx
+              motionProfile: motionProfileActual,
+              effectiveMotionProfile: motionProfile,
+              isOwner: false,
             });
           }
         } catch { /* Ignore invalid JSON */ }
@@ -190,22 +201,9 @@ export class ServerState {
     this.deviceToGroupsMap = deviceToGroupsMap;
     this.groupIds = groupIds;
     this.groups = Array.from(groupDevicesMap.values());
-    this.devices = Object.fromEntries(
-      Object.entries(nameMap).map(([id, name]) => {
-        const numId = Number(id);
-        return [
-          numId,
-          {
-            name,
-            emoji: iconMap[numId] ?? '',
-            lastSeen: lastSeenMap[numId] ?? null,
-            effectiveMotionProfile: motionProfileMap[numId] ?? 'person',
-            motionProfile: motionProfileAttributeMap[numId] ?? null,
-            color: colorAttributeMap[numId] ?? null,
-          }
-        ];
-      })
-    );
+    this.devices = nextDevices;
+
+    console.log(`[ServerState] Handled ${devices.length} updates. Total devices in state: ${Object.keys(this.devices).length}`);
     console.log(`[ServerState] Handled ${devices.length} updates. Total devices in state: ${Object.keys(this.devices).length}`);
   }
 

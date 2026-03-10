@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store';
+import { setWebSocket } from '@/wsClient';
 import type { ServerMessage, ClientMessage } from '@/types';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
+
+import { handleResponse } from '@/wsRPC';
 
 export function useServerConnection() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
@@ -11,7 +14,6 @@ export function useServerConnection() {
 
   const {
     auth,
-    settings,
     setInitialState,
     updatePositions,
     updateConfig,
@@ -40,20 +42,34 @@ export function useServerConnection() {
 
       ws.onopen = () => {
         setStatus('connected');
-        
-        // Let the server know who this is, and prove they have traccar session
+        setWebSocket(ws);
+
+        const currentToken = useStore.getState().settings.sessionToken;
+        if (!currentToken) {
+          console.error("No session token found");
+          return;
+        }
         const authMessage: ClientMessage = {
           type: 'authenticate',
-          // Build a basic auth token from current credentials to verify session on backend
-          token: btoa(`${settings.email}:${settings.password}`)
+          token: currentToken
         };
         ws.send(JSON.stringify(authMessage));
       };
 
       ws.onmessage = (event) => {
         try {
-          const message = JSON.parse(String(event.data)) as ServerMessage;
+          const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
 
+          if (parsed && typeof parsed === 'object' && 'requestId' in parsed && parsed['requestId']) {
+            handleResponse(parsed as { requestId: string;[key: string]: unknown }); // Let handleResponse deal with casting
+            const msgType = String(parsed['type']);
+            if (msgType === 'error' || msgType.endsWith('_success')) {
+              return;
+            }
+          }
+
+          // Handle regular broadcast messages
+          const message = parsed as ServerMessage;
           switch (message.type) {
             case 'initial_state':
               setInitialState(message.payload);
@@ -73,6 +89,7 @@ export function useServerConnection() {
       };
 
       ws.onclose = () => {
+        setWebSocket(null);
         setStatus('disconnected');
         // Auto-reconnect if we are still authenticated
         if (useStore.getState().auth.isAuthenticated) {

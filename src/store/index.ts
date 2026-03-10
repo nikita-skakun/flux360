@@ -8,12 +8,9 @@ const initialState: StoreState = {
   devices: {},
   groups: [],
   settings: {
-    baseUrl: '',
-    secure: false,
-    email: '',
-    password: '',
     maptilerApiKey: '',
     theme: 'system',
+    sessionToken: null,
   },
   auth: {
     isAuthenticated: false,
@@ -38,11 +35,15 @@ export const useStore = create<Store>()(
 
       // Data Handlers from WebSocket
       setInitialState: (payload) => {
-        set(() => ({
+        set((state) => ({
           devices: payload.devices,
           groups: payload.groups,
           engineSnapshotsByDevice: payload.engineSnapshotsByDevice,
           eventsByDevice: payload.eventsByDevice,
+          settings: {
+            ...state.settings,
+            maptilerApiKey: payload.maptilerApiKey,
+          },
         }));
       },
 
@@ -55,25 +56,21 @@ export const useStore = create<Store>()(
 
       updateConfig: (payload) => {
         set(state => {
-          // 1. Merge devices, preserving 'isOwner' status if already known
           const newDevices = { ...state.devices };
           if (payload.devices) {
             for (const [idStr, newDev] of Object.entries(payload.devices)) {
               const id = parseInt(idStr);
-        newDevices[id] = {
-          ...newDev,
-          isOwner: state.devices[id]?.isOwner ?? newDev.isOwner ?? false,
-        };
+              newDevices[id] = {
+                ...newDev,
+                isOwner: state.devices[id]?.isOwner ?? newDev.isOwner ?? false,
+              };
             }
           }
 
-          // 2. Merge groups by ID
           let newGroups = [...state.groups];
           if (payload.groups) {
             const groupIdsIncoming = new Set(payload.groups.map(g => g.id));
-            // Remove existing ones that are being replaced
             newGroups = newGroups.filter(g => !groupIdsIncoming.has(g.id));
-            // Add new ones
             newGroups.push(...payload.groups);
           }
 
@@ -86,11 +83,10 @@ export const useStore = create<Store>()(
 
       // Device/Group Management
       createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
-        const { createGroupDevice } = await import("@/api/devices");
+        const { sendRPC } = await import("@/wsRPC");
         const { colorForDevice } = await import("@/util/color");
 
-        // Optimistic update
-        const tempId = Date.now(); // Temporary ID until API response
+        const tempId = Date.now();
         const color = rgbToHex(...colorForDevice(tempId));
         const newGroup: GroupDevice = {
           id: tempId,
@@ -111,6 +107,7 @@ export const useStore = create<Store>()(
           devices: {
             ...state.devices,
             [tempId]: {
+              id: tempId,
               name,
               emoji,
               lastSeen: Math.max(...memberDeviceIds.map(id => state.devices[id]?.lastSeen ?? 0), 0) || null,
@@ -123,12 +120,9 @@ export const useStore = create<Store>()(
         }));
 
         try {
-          const { baseUrl, secure, email, password } = get().settings;
-          const created = await createGroupDevice({
-            baseUrl, secure, auth: { type: "basic", username: email, password }
-          }, name, emoji, memberDeviceIds);
+          const resp = await sendRPC<{ device: { id: number } }>('create_group', { name, emoji, memberDeviceIds });
+          const created = resp.device;
 
-          // Replace temp with real
           set(state => {
             const newDevices = { ...state.devices };
             const newColor = rgbToHex(...colorForDevice(created.id));
@@ -144,7 +138,6 @@ export const useStore = create<Store>()(
             };
           });
         } catch (error) {
-          // Rollback
           set(state => {
             const newDevices = { ...state.devices };
             delete newDevices[tempId];
@@ -159,15 +152,13 @@ export const useStore = create<Store>()(
       },
 
       deleteGroup: async (groupId: number) => {
-        const { deleteGroupDevice } = await import("@/api/devices");
+        const { sendRPC } = await import("@/wsRPC");
         const state = get();
 
-        // Optimistic update
         const groupToDelete = state.groups.find(g => g.id === groupId);
         set(state => {
           const newDevices = { ...state.devices };
           delete newDevices[groupId];
-
           return {
             ui: state.ui.selectedDeviceId === groupId ? { ...state.ui, selectedDeviceId: null } : state.ui,
             groups: state.groups.filter(g => g.id !== groupId),
@@ -178,18 +169,15 @@ export const useStore = create<Store>()(
         if (groupId < 0) return;
 
         try {
-          const { baseUrl, secure, email, password } = get().settings;
-          await deleteGroupDevice({
-            baseUrl, secure, auth: { type: "basic", username: email, password }
-          }, groupId);
+          await sendRPC('delete_group', { groupId });
         } catch (error) {
-          // Rollback
           if (groupToDelete) {
             set(state => ({
               groups: [...state.groups, groupToDelete],
               devices: {
                 ...state.devices,
                 [groupId]: {
+                  id: groupId,
                   name: groupToDelete.name,
                   emoji: groupToDelete.emoji,
                   lastSeen: null,
@@ -206,28 +194,21 @@ export const useStore = create<Store>()(
       },
 
       addDeviceToGroup: async (groupId: number, deviceId: number) => {
-        const { updateGroupDevice } = await import("@/api/devices");
+        const { sendRPC } = await import("@/wsRPC");
         const group = get().groups.find(g => g.id === groupId);
         if (!group || group.memberDeviceIds.includes(deviceId)) return;
 
-        // Optimistic update
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = [...originalMembers, deviceId];
-        set(state => {
-          return {
-            groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
-          };
-        });
+        set(state => ({
+          groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
+        }));
 
         if (groupId < 0 || deviceId < 0) return;
 
         try {
-          const { baseUrl, secure, email, password } = get().settings;
-          await updateGroupDevice({
-            baseUrl, secure, auth: { type: "basic", username: email, password }
-          }, groupId, { memberDeviceIds: newMembers });
+          await sendRPC('add_device_to_group', { groupId, deviceId });
         } catch (error) {
-          // Rollback
           set(state => ({
             groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: originalMembers } : g),
           }));
@@ -236,28 +217,21 @@ export const useStore = create<Store>()(
       },
 
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
-        const { updateGroupDevice } = await import("@/api/devices");
+        const { sendRPC } = await import("@/wsRPC");
         const group = get().groups.find(g => g.id === groupId);
         if (!group?.memberDeviceIds.includes(deviceId)) return;
 
-        // Optimistic update
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = originalMembers.filter(id => id !== deviceId);
-        set(state => {
-          return {
-            groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
-          };
-        });
+        set(state => ({
+          groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
+        }));
 
         if (groupId < 0 || deviceId < 0) return;
 
         try {
-          const { baseUrl, secure, email, password } = get().settings;
-          await updateGroupDevice({
-            baseUrl, secure, auth: { type: "basic", username: email, password }
-          }, groupId, { memberDeviceIds: newMembers });
+          await sendRPC('remove_device_from_group', { groupId, deviceId });
         } catch (error) {
-          // Rollback
           set(state => ({
             groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: originalMembers } : g),
           }));
@@ -266,7 +240,7 @@ export const useStore = create<Store>()(
       },
 
       updateGroup: async (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
-        const { updateGroupDevice } = await import("@/api/devices");
+        const { sendRPC } = await import("@/wsRPC");
 
         let defaultColor: string | null = null;
         if (updates.color === null) {
@@ -278,7 +252,6 @@ export const useStore = create<Store>()(
         const group = state.groups?.find(g => g.id === groupId);
         if (!group) return;
 
-        // Optimistic update
         const original = { ...group };
         const newGroup = {
           ...group,
@@ -306,12 +279,8 @@ export const useStore = create<Store>()(
         if (groupId < 0) return;
 
         try {
-          const { baseUrl, secure, email, password } = get().settings;
-          await updateGroupDevice({
-            baseUrl, secure, auth: { type: "basic", username: email, password }
-          }, groupId, updates);
+          await sendRPC('update_device', { deviceId: groupId, updates });
         } catch (error) {
-          // Rollback
           set(state => ({
             groups: state.groups.map(g => g.id === groupId ? original : g),
           }));
@@ -320,14 +289,13 @@ export const useStore = create<Store>()(
       },
 
       updateDevice: async (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
-        const { updateDevice } = await import("@/api/devices");
+        const { sendRPC } = await import("@/wsRPC");
         const existing = get().devices[deviceId];
         if (!existing) return;
 
-        // Optimistic update
         const original = { ...existing };
         const newProfileAttribute = updates.motionProfile !== undefined ? updates.motionProfile : existing.motionProfile;
-        const newEffectiveProfile = newProfileAttribute ?? "person"; // Default for devices
+        const newEffectiveProfile = newProfileAttribute ?? "person";
 
         set(state => ({
           devices: {
@@ -347,12 +315,8 @@ export const useStore = create<Store>()(
         if (deviceId < 0) return;
 
         try {
-          const { baseUrl, secure, email, password } = get().settings;
-          await updateDevice({
-            baseUrl, secure, auth: { type: "basic", username: email, password }
-          }, deviceId, updates);
+          await sendRPC('update_device', { deviceId, updates });
         } catch (error) {
-          // Rollback
           set(state => ({
             devices: { ...state.devices, [deviceId]: original },
           }));
@@ -361,7 +325,6 @@ export const useStore = create<Store>()(
       },
 
       updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => {
-        // Wrapper for updateDevice just for motion profile (fire-and-forget)
         void get().updateDevice(deviceId, { motionProfile: profile });
       },
 
@@ -375,31 +338,28 @@ export const useStore = create<Store>()(
       },
 
       login: async (email, password) => {
-        const { fetchSession } = await import("@/api/devices");
-        const { settings } = get();
-
         set(state => ({
           auth: { ...state.auth, isLoggingIn: true, loginError: null }
         }));
 
         try {
-          const baseUrl = settings.baseUrl;
-          const secure = settings.secure;
-
-          if (!baseUrl) throw new Error("Base URL is missing in server config");
-
-          await fetchSession({
-            baseUrl,
-            secure,
-            auth: { type: "basic", username: email, password }
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
           });
 
-          // If fetchSession succeeds, we're authenticated
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(errorText || 'Login failed');
+          }
+
+          // Wait for response normally
+          const { token } = (await response.json()) as { token: string };
           set(state => ({
             settings: {
               ...state.settings,
-              email,
-              password,
+              sessionToken: token,
             },
             auth: {
               isAuthenticated: true,
@@ -407,9 +367,6 @@ export const useStore = create<Store>()(
               loginError: null,
             }
           }));
-
-          // Fetch protected configuration after login
-          await get().fetchMaptilerKey();
         } catch (error) {
           set(state => ({
             auth: {
@@ -430,8 +387,7 @@ export const useStore = create<Store>()(
           },
           settings: {
             ...state.settings,
-            email: '',
-            password: '',
+            sessionToken: null,
           }
         }));
       },
@@ -481,62 +437,12 @@ export const useStore = create<Store>()(
         }));
       },
 
-      // External Config
-      fetchConfig: async () => {
-        try {
-          const response = await fetch('/api/config');
-          const config = await response.json() as { traccarBaseUrl?: string; traccarSecure?: boolean; mockMode?: boolean };
-
-          set(state => ({
-            settings: {
-              ...state.settings,
-              baseUrl: config.traccarBaseUrl ?? state.settings.baseUrl,
-              secure: config.traccarSecure ?? state.settings.secure,
-            }
-          }));
-        } catch (error) {
-          console.error('Failed to fetch config:', error);
-        }
-      },
-
-      fetchMaptilerKey: async () => {
-        try {
-          const { buildAuthHeader } = await import("@/api/httpUtils");
-          const { settings } = get();
-
-          const authHeader = buildAuthHeader({
-            type: "basic",
-            username: settings.email,
-            password: settings.password,
-          });
-
-          const response = await fetch('/api/config/maptiler', {
-            headers: authHeader ? { "Authorization": authHeader } : {},
-          });
-
-          if (!response.ok) {
-            throw new Error(`Failed to fetch MapTiler key: ${response.status}`);
-          }
-
-          const config = await response.json() as { maptilerApiKey?: string };
-
-          set(state => ({
-            settings: {
-              ...state.settings,
-              maptilerApiKey: config.maptilerApiKey ?? state.settings.maptilerApiKey,
-            }
-          }));
-        } catch (error) {
-          console.error('Failed to fetch MapTiler key:', error);
-        }
-      },
-
     }),
     {
       name: 'flux360-store',
       partialize: (state) => ({
         settings: state.settings,
-        auth: { isAuthenticated: state.auth.isAuthenticated, isLoggingIn: false, loginError: null } // Persist only auth status
+        auth: { isAuthenticated: state.auth.isAuthenticated, isLoggingIn: false, loginError: null }
       }),
     }
   )

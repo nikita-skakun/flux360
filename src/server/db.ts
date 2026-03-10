@@ -32,4 +32,14 @@ db.run(`
   );
   
   CREATE INDEX IF NOT EXISTS idx_device_shares_user ON device_shares(shared_with_username);
+
+  CREATE TABLE IF NOT EXISTS user_tokens (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    traccar_token TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_active INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_user_tokens_username ON user_tokens(username);
 `);
