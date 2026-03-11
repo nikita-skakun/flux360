@@ -9,46 +9,16 @@ import { useStore } from "./store";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import type { Timestamp, DebugAnchor, DebugFrame } from "./types";
+import type { DebugAnchor, DebugFrame } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
   const createGroup = useStore(state => state.createGroup);
   const deleteGroup = useStore(state => state.deleteGroup);
   const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
-  const groupDevices = useStore(state => state.groups);
 
-  const devices = useStore(state => state.devices);
-  const { deviceNames, deviceColors, deviceIcons, deviceLastSeen } = useMemo(() => {
-    const base = Object.entries(devices).reduce((acc, [id, d]) => {
-      const numId = Number(id);
-      acc.names[numId] = d.name;
-      acc.colors[numId] = d.color ?? "";
-      acc.icons[numId] = d.emoji;
-      acc.lastSeen[numId] = d.lastSeen;
-      return acc;
-    }, {
-      names: {} as Record<number, string>,
-      colors: {} as Record<number, string>,
-      icons: {} as Record<number, string>,
-      lastSeen: {} as Record<number, Timestamp | null>
-    });
-
-    // Add groups to deviceLastSeen
-    groupDevices.forEach(group => {
-      base.lastSeen[group.id] = group.memberDeviceIds?.reduce((max, memberId) => {
-        const ts = base.lastSeen[memberId];
-        return (ts && (max == null || ts > max)) ? ts : max;
-      }, null as Timestamp | null) ?? null;
-    });
-
-    return {
-      deviceNames: base.names,
-      deviceColors: base.colors,
-      deviceIcons: base.icons,
-      deviceLastSeen: base.lastSeen
-    };
-  }, [devices, groupDevices]);
+  const entities = useStore(state => state.entities);
+  const metadata = useStore(state => state.metadata);
 
   const RECENT_DEVICE_CUTOFF_MS = 48 * 60 * 60 * 1000; // 48 hours
 
@@ -114,28 +84,16 @@ export function App() {
   const mapViewRef = useRef<MapViewHandle>(null);
 
   const visibleComponents = useMemo(() => {
-    const allComps = Object.values(engineSnapshotsByDevice).flat();
-
-    // Filter devices not seen in the last cutoff using deviceLastSeen
     const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
 
-    // Create a set of group member IDs to hide them if they should be shown via group
-    const groupMemberIds = new Set<number>();
-    for (const group of groupDevices) {
-      if (group.memberDeviceIds) {
-        for (const memberId of group.memberDeviceIds) {
-          groupMemberIds.add(memberId);
-        }
-      }
-    }
-
-    return allComps.filter((comp) => {
-      const lastSeen = deviceLastSeen[comp.device];
-      const isRecent = lastSeen != null && lastSeen > cutoff;
-      const isIndividual = !groupMemberIds.has(comp.device);
-      return isRecent && isIndividual;
-    });
-  }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
+    return Object.values(engineSnapshotsByDevice)
+      .flat()
+      .filter((comp) => {
+        if (!metadata.rootIds.includes(comp.device)) return false;
+        const entity = entities[comp.device];
+        return entity && entity.lastSeen != null && entity.lastSeen > cutoff;
+      });
+  }, [engineSnapshotsByDevice, entities, metadata.rootIds]);
 
   const debugAnchors = useMemo((): DebugAnchor[] => {
     if (!debugMode || selectedDeviceId == null) return [];
@@ -200,42 +158,16 @@ export function App() {
     } as unknown as DebugFrame;
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
-  const deviceList = useMemo(() => {
-    const groupIds = new Set(groupDevices.map(g => g.id));
-
-    const individualDevices = Object.entries(deviceNames)
-      .map(([id, name]) => ({ id: Number(id), name }))
-      .filter(({ id }) => !groupIds.has(id))
-      .map(({ id, name }) => ({
-        id,
-        name,
-        emoji: deviceIcons[id] ?? "device_unknown",
-        lastSeen: deviceLastSeen[id] ?? null,
-        memberDeviceIds: null,
-        color: deviceColors[id] || null,
-        isOwner: devices[id]?.isOwner ?? false,
-        effectiveMotionProfile: devices[id]?.effectiveMotionProfile ?? "person",
-        motionProfile: devices[id]?.motionProfile ?? null
-      }));
-
-    const groups = groupDevices.map(g => ({
-      ...g,
-      lastSeen: deviceLastSeen[g.id] ?? null,
-      isOwner: devices[g.id]?.isOwner ?? true,
-    }));
-
-    return [...individualDevices, ...groups].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-  }, [groupDevices, deviceNames, deviceLastSeen, devices]);
 
   const allDevicesForSelection = useMemo(() => {
-    return Object.entries(deviceNames)
-      .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
-      .map(([id, name]) => ({
-        id: Number(id),
-        name,
-        emoji: deviceIcons[Number(id)] ?? name?.charAt(0).toUpperCase() ?? "?"
+    return Object.values(entities)
+      .filter(e => e.memberDeviceIds === null) // Only individual devices
+      .map(e => ({
+        id: e.id,
+        name: e.name,
+        emoji: e.emoji
       }));
-  }, [deviceNames, groupDevices, deviceIcons]);
+  }, [entities]);
 
   if (!isAuthenticated) {
     return <LoginPage />;
@@ -250,7 +182,8 @@ export function App() {
         />
       )}
       <DeviceListSidePanel
-        devices={deviceList}
+        entities={entities}
+        rootIds={metadata.rootIds}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           if (typeof id === "number") {
@@ -276,9 +209,7 @@ export function App() {
           mapViewRef.current?.flyToDevice(id);
           setSelectedDeviceId(id);
         }}
-        deviceNames={deviceNames}
-        deviceIcons={deviceIcons}
-        deviceColors={deviceColors}
+        entities={entities}
         maptilerApiKey={maptilerApiKey}
         darkMode={isDark}
         debugAnchors={debugAnchors}
@@ -299,12 +230,10 @@ export function App() {
               debugMode={debugMode}
               debugFrameIndex={debugFrameIndex}
               setDebugFrameIndex={setDebugFrameIndex}
-              deviceNames={deviceNames}
-              deviceLastSeen={deviceLastSeen}
-              groupDevices={groupDevices}
+              entities={entities}
               setSelectedDeviceId={setSelectedDeviceId}
               setEditingTarget={setEditingTarget}
-              isOwner={selectedDeviceId != null ? (devices[selectedDeviceId]?.isOwner ?? false) : false}
+              isOwner={selectedDeviceId != null ? (entities[selectedDeviceId]?.isOwner ?? false) : false}
             />
 
             <TimelinePanel

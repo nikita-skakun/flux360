@@ -81,6 +81,7 @@ export type StationaryEvent = {
   mean: Vec2;
   variance: number;
   isDraft: boolean;
+  bounds: WorldBounds;
 };
 
 export type MotionEvent = {
@@ -92,6 +93,7 @@ export type MotionEvent = {
   path: Vec2[];
   distance: number;
   isDraft: boolean;
+  bounds: WorldBounds;
 };
 
 export type EngineEvent = StationaryEvent | MotionEvent;
@@ -143,11 +145,13 @@ export interface RawTraccarPosition {
 // --- WebSocket Protocol ---
 
 export type InitialStatePayload = {
-  devices: Record<number, AppDevice>; // Will map to StoreState.devices
-  groups: AppDevice[];
+  entities: Record<number, AppDevice>;
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
   eventsByDevice: Record<number, EngineEvent[]>;
   maptilerApiKey: string;
+  metadata: {
+    rootIds: number[];
+  };
 };
 
 export type ServerMessage =

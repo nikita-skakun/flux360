@@ -1,6 +1,4 @@
-import { getColorForDevice } from "@/util/color";
-import React from "react";
-import type { DevicePoint } from "@/types";
+import type { AppDevice, DevicePoint } from "@/types";
 
 export type ClusterPopupProps = {
   x: number;
@@ -10,14 +8,15 @@ export type ClusterPopupProps = {
   onClose: () => void;
   onSelectDevice: (id: number) => void;
   darkMode: boolean;
-  deviceColors: Record<number, string>;
-  deviceIcons: Record<number, string>;
-  deviceNames: Record<number, string>;
+  entities: Record<number, AppDevice>;
 };
+
+import { getColorForDevice } from "@/util/color";
+import React from "react";
 
 export const ClusterPopup = React.memo(({
   x, y, items, animationState, onClose, onSelectDevice,
-  darkMode, deviceColors, deviceIcons, deviceNames
+  darkMode, entities
 }: ClusterPopupProps) => {
   const CLUSTER_ANIM_MS = 150;
 
@@ -68,7 +67,8 @@ export const ClusterPopup = React.memo(({
             const left = Math.round(radius * Math.cos(angle));
             const top = Math.round(radius * Math.sin(angle));
 
-            const col: [number, number, number] = getColorForDevice(it.device, deviceColors[it.device]);
+            const entity = entities[it.device];
+            const col: [number, number, number] = getColorForDevice(it.device, entity?.color ?? '#3b82f6');
             const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
             const borderColorStr = `rgba(${col[0]}, ${col[1]}, ${col[2]}, 0.7)`;
 
@@ -95,9 +95,9 @@ export const ClusterPopup = React.memo(({
                   className="rounded-full shadow flex items-center justify-center cursor-pointer hover:scale-110 border-2"
                   style={{ ...innerStyle, width: 28, height: 28, backgroundColor: darkMode ? 'rgb(40,40,40)' : 'rgb(255,255,255)', borderColor: borderColorStr }}
                   onClick={(e) => { e.stopPropagation(); onSelectDevice(it.device); onClose(); }}
-                  title={deviceNames[it.device] ?? String(it.device)}
+                  title={entity?.name ?? String(it.device)}
                 >
-                  <span className="material-symbols-outlined select-none" style={{ color: colorStr, fontSize: 14, lineHeight: 1, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{deviceIcons[it.device] ?? String(it.device).charAt(0).toUpperCase()}</span>
+                  <span className="material-symbols-outlined select-none" style={{ color: colorStr, fontSize: 14, lineHeight: 1, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{entity?.emoji ?? String(it.device).charAt(0).toUpperCase()}</span>
                 </div>
               </div>
             );

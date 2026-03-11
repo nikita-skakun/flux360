@@ -95,9 +95,18 @@ export function useServerConnection() {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setWebSocket(null);
         setStatus('disconnected');
+
+        // If the server closed the connection due to policy violation (e.g. auth failed),
+        // we should log the user out and not attempt to reconnect blindly.
+        if (event.code === 1008) {
+          console.error('WebSocket closed with policy violation (auth failed). Logging out...');
+          useStore.getState().logout();
+          return;
+        }
+
         // Auto-reconnect if we are still authenticated
         if (useStore.getState().auth.isAuthenticated) {
           reconnectTimeoutRef.current = setTimeout(connect, 5000);

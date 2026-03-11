@@ -200,17 +200,7 @@ describe("Engine Core Logic", () => {
         expect(engine.closed.length).toBeGreaterThan(2);
 
         // After refinement
-        engine.refineHistory({
-            stationaryMahalanobisThreshold: 2.0,
-            coherenceCosineThreshold: 0.7,
-            motionSettleWindowSize: 3,
-            motionSettleMahalanobisThreshold: 100,
-            minStationaryDuration: 60 * 1000,
-            maxStationaryRadius: 20,
-            minAverageVelocity: 0.8,
-            minEfficiency: 0.5,
-            maxMergeGapDuration: 5 * 60 * 1000 // 5 mins
-        });
+        engine.refineHistory();
 
         // Adjacent motions separated by a short stop should merge into one
         const motions = engine.closed.filter(e => e.type === 'motion');
@@ -259,10 +249,9 @@ describe("Engine Core Logic", () => {
         ));
         time += 50000;
 
-        // 2. Start moving (but not yet settled)
-        const P2: Vec2 = [P1[0] + 0.001, P1[1]]; // ~110m away
+        // 2. Start moving fast
         engine.processMeasurements(Array.from({ length: 10 }, (_, i) =>
-            createPoint(P2, time + i * 1000, 107)
+            createPoint([P1[0] + (i * 0.0001), P1[1]], time + i * 1000, 107)
         ));
 
         expect(engine.draft?.type).toBe("motion");

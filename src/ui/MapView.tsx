@@ -7,7 +7,7 @@ import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } fr
 import { getColorForDevice, type Color } from "@/util/color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2, DebugAnchor, DebugFrame, Timestamp, EngineEvent } from "@/types";
+import type { AppDevice, DevicePoint, Vec2, DebugAnchor, DebugFrame, Timestamp, EngineEvent } from "@/types";
 import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
 
 export type MapViewHandle = {
@@ -17,9 +17,7 @@ export type MapViewHandle = {
 
 type Props = {
   components: DevicePoint[];
-  deviceNames: Record<number, string>;
-  deviceIcons: Record<number, string>;
-  deviceColors: Record<number, string>;
+  entities: Record<number, AppDevice>;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
@@ -33,9 +31,7 @@ type Props = {
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
   components,
-  deviceNames,
-  deviceIcons,
-  deviceColors,
+  entities,
   overlay,
   selectedDeviceId,
   onSelectDevice,
@@ -116,7 +112,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     // Project components to screen coords
     const drawItems: (DrawItem & { colorHex: string })[] = components.map((c, idx) => {
       const pt = map.project(c.geo);
-      const colorHex = deviceColors[c.device] ?? '#3b82f6';
+      const entity = entities[c.device];
+      const colorHex = entity?.color ?? '#3b82f6';
       const colorRgb = getColorForDevice(c.device, colorHex);
       return {
         idx,
@@ -124,7 +121,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         x: pt.x,
         y: pt.y,
         r: 0,
-        iconText: deviceIcons[c.device] ?? String(c.device).charAt(0).toUpperCase(),
+        iconText: entity?.emoji ?? String(c.device).charAt(0).toUpperCase(),
         timestamp: c.timestamp,
         color: colorRgb,
         colorHex,
@@ -531,7 +528,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [components, deviceIcons, deviceColors, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds, selectedHistoryItem]);
+  }, [components, entities, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds, selectedHistoryItem]);
 
   const listenersAttached = useRef(false);
 
@@ -768,7 +765,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
     updateLayers();
-  }, [components, deviceNames, deviceIcons, deviceColors, darkMode, selectedDeviceId, updateLayers]);
+  }, [components, entities, darkMode, selectedDeviceId, updateLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -820,9 +817,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
               setClusterPopup(null);
             }}
             darkMode={darkMode}
-            deviceColors={deviceColors}
-            deviceIcons={deviceIcons}
-            deviceNames={deviceNames}
+            entities={entities}
           />
         </div>
       )}

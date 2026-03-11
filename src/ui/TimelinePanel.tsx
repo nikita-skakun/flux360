@@ -18,12 +18,7 @@ type Props = {
 const Sparkline = ({ event }: { event: MotionEvent }) => {
     if (event.path.length < 2) return null;
 
-    const bounds = event.path.reduce((acc, [x, y]) => ({
-        minX: Math.min(acc.minX, x),
-        maxX: Math.max(acc.maxX, x),
-        minY: Math.min(acc.minY, y),
-        maxY: Math.max(acc.maxY, y)
-    }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
+    const { bounds } = event;
 
     const dx = bounds.maxX - bounds.minX;
     const dy = bounds.maxY - bounds.minY;

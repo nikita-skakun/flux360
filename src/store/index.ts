@@ -1,12 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { rgbToHex } from '@/util/color';
-import type { AppDevice, MotionProfileName } from '@/types';
+import type { AppDevice, MotionProfileName, Timestamp } from '@/types';
 import type { Store, StoreState } from './types';
 
 const initialState: StoreState = {
-  devices: {},
-  groups: [],
+  entities: {},
   settings: {
     maptilerApiKey: '',
     theme: 'system',
@@ -26,6 +25,9 @@ const initialState: StoreState = {
   },
   engineSnapshotsByDevice: {},
   eventsByDevice: {},
+  metadata: {
+    rootIds: [],
+  },
 };
 
 export const useStore = create<Store>()(
@@ -36,10 +38,10 @@ export const useStore = create<Store>()(
       // Data Handlers from WebSocket
       setInitialState: (payload) => {
         set((state) => ({
-          devices: payload.devices,
-          groups: payload.groups,
+          entities: payload.entities,
           engineSnapshotsByDevice: payload.engineSnapshotsByDevice,
           eventsByDevice: payload.eventsByDevice,
+          metadata: payload.metadata,
           settings: {
             ...state.settings,
             maptilerApiKey: payload.maptilerApiKey,
@@ -48,35 +50,57 @@ export const useStore = create<Store>()(
       },
 
       updatePositions: (payload) => {
-        set(state => ({
-          engineSnapshotsByDevice: { ...state.engineSnapshotsByDevice, ...payload.snapshots },
-          eventsByDevice: { ...state.eventsByDevice, ...payload.events },
-        }));
+        set(state => {
+          const newEngineSnapshots = { ...state.engineSnapshotsByDevice, ...payload.snapshots };
+          const newEventsByDevice = { ...state.eventsByDevice, ...payload.events };
+
+          // Update lastSeen for device entities only (groups are updated via config_update)
+          const newEntities = { ...state.entities };
+          for (const [idStr, snapshots] of Object.entries(payload.snapshots)) {
+            const id = parseInt(idStr, 10);
+            const entity = newEntities[id];
+            // Only update if entity exists, is NOT a group (no memberDeviceIds), and has snapshots
+            if (entity && !entity.memberDeviceIds && Array.isArray(snapshots) && snapshots.length > 0) {
+              const maxTimestamp = Math.max(...snapshots.map(s => s.timestamp));
+              const currentLastSeen = entity.lastSeen;
+              if (!currentLastSeen || maxTimestamp > currentLastSeen) {
+                newEntities[id] = { ...entity, lastSeen: maxTimestamp as Timestamp };
+              }
+            }
+          }
+
+          return {
+            engineSnapshotsByDevice: newEngineSnapshots,
+            eventsByDevice: newEventsByDevice,
+            entities: newEntities,
+          };
+        });
       },
 
       updateConfig: (payload) => {
         set(state => {
-          const newDevices = { ...state.devices };
+          const newEntities = { ...state.entities };
           if (payload.devices !== null) {
             for (const [idStr, newDev] of Object.entries(payload.devices)) {
               const id = parseInt(idStr);
-              newDevices[id] = {
+              newEntities[id] = {
                 ...newDev,
-                isOwner: state.devices[id]?.isOwner ?? newDev.isOwner ?? false,
+                isOwner: state.entities[id]?.isOwner ?? newDev.isOwner ?? false,
               };
             }
           }
 
-          let newGroups = [...state.groups];
           if (payload.groups !== null) {
-            const groupIdsIncoming = new Set(payload.groups.map(g => g.id));
-            newGroups = newGroups.filter(g => !groupIdsIncoming.has(g.id));
-            newGroups.push(...payload.groups);
+            for (const group of payload.groups) {
+              newEntities[group.id] = {
+                ...group,
+                isOwner: true, // Groups created/edited are owned by self
+              };
+            }
           }
 
           return {
-            devices: newDevices,
-            groups: newGroups,
+            entities: newEntities,
           };
         });
       },
@@ -95,27 +119,16 @@ export const useStore = create<Store>()(
           color,
           memberDeviceIds,
           motionProfile: null,
-          lastSeen: null,
+          lastSeen: Math.max(...memberDeviceIds.map(id => get().entities[id]?.lastSeen ?? 0), 0) || null,
           effectiveMotionProfile: 'person',
           isOwner: true
         };
 
         set(state => ({
           ui: { ...state.ui, selectedDeviceId: tempId },
-          groups: [...state.groups, newGroup],
-          devices: {
-            ...state.devices,
-            [tempId]: {
-              id: tempId,
-              name,
-              emoji,
-              lastSeen: Math.max(...memberDeviceIds.map(id => state.devices[id]?.lastSeen ?? 0), 0) || null,
-              effectiveMotionProfile: 'person',
-              motionProfile: null,
-              color,
-              isOwner: true,
-              memberDeviceIds
-            }
+          entities: {
+            ...state.entities,
+            [tempId]: newGroup
           },
         }));
 
@@ -124,27 +137,25 @@ export const useStore = create<Store>()(
           const created = resp.device;
 
           set(state => {
-            const newDevices = { ...state.devices };
+            const newEntities = { ...state.entities };
             const newColor = rgbToHex(...colorForDevice(created.id));
-            if (newDevices[tempId]) {
-              newDevices[created.id] = { ...newDevices[tempId], color: newColor };
-              delete newDevices[tempId];
+            if (newEntities[tempId]) {
+              newEntities[created.id] = { ...newEntities[tempId], id: created.id, color: newColor };
+              delete newEntities[tempId];
             }
 
             return {
               ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: created.id } : state.ui,
-              groups: state.groups.map(g => g.id === tempId ? { ...g, id: created.id, color: newColor } : g),
-              devices: newDevices,
+              entities: newEntities,
             };
           });
         } catch (error) {
           set(state => {
-            const newDevices = { ...state.devices };
-            delete newDevices[tempId];
+            const newEntities = { ...state.entities };
+            delete newEntities[tempId];
             return {
               ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: null } : state.ui,
-              groups: state.groups.filter(g => g.id !== tempId),
-              devices: newDevices,
+              entities: newEntities,
             };
           });
           throw error;
@@ -155,14 +166,13 @@ export const useStore = create<Store>()(
         const { sendRPC } = await import("@/wsRPC");
         const state = get();
 
-        const groupToDelete = state.groups.find(g => g.id === groupId);
+        const groupToDelete = state.entities[groupId];
         set(state => {
-          const newDevices = { ...state.devices };
-          delete newDevices[groupId];
+          const newEntities = { ...state.entities };
+          delete newEntities[groupId];
           return {
             ui: state.ui.selectedDeviceId === groupId ? { ...state.ui, selectedDeviceId: null } : state.ui,
-            groups: state.groups.filter(g => g.id !== groupId),
-            devices: newDevices,
+            entities: newEntities,
           };
         });
 
@@ -173,20 +183,9 @@ export const useStore = create<Store>()(
         } catch (error) {
           if (groupToDelete) {
             set(state => ({
-              groups: [...state.groups, groupToDelete],
-              devices: {
-                ...state.devices,
-                [groupId]: {
-                  id: groupId,
-                  name: groupToDelete.name,
-                  emoji: groupToDelete.emoji,
-                  lastSeen: null,
-                  effectiveMotionProfile: 'person',
-                  motionProfile: null,
-                  color: null,
-                  isOwner: true,
-                  memberDeviceIds: groupToDelete.memberDeviceIds
-                }
+              entities: {
+                ...state.entities,
+                [groupId]: groupToDelete
               }
             }));
           }
@@ -196,13 +195,16 @@ export const useStore = create<Store>()(
 
       addDeviceToGroup: async (groupId: number, deviceId: number) => {
         const { sendRPC } = await import("@/wsRPC");
-        const group = get().groups.find(g => g.id === groupId);
-        if (!group || group.memberDeviceIds === null || group.memberDeviceIds.includes(deviceId)) return;
+        const group = get().entities[groupId];
+        if (!group?.memberDeviceIds || group.memberDeviceIds.includes(deviceId)) return;
 
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = [...originalMembers, deviceId];
         set(state => ({
-          groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
+          entities: {
+            ...state.entities,
+            [groupId]: { ...group, memberDeviceIds: newMembers }
+          }
         }));
 
         if (groupId < 0 || deviceId < 0) return;
@@ -211,7 +213,10 @@ export const useStore = create<Store>()(
           await sendRPC('add_device_to_group', { groupId, deviceId });
         } catch (error) {
           set(state => ({
-            groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: originalMembers } : g),
+            entities: {
+              ...state.entities,
+              [groupId]: { ...group, memberDeviceIds: originalMembers }
+            }
           }));
           throw error;
         }
@@ -219,13 +224,16 @@ export const useStore = create<Store>()(
 
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
         const { sendRPC } = await import("@/wsRPC");
-        const group = get().groups.find(g => g.id === groupId);
-        if (!group || group.memberDeviceIds === null || !group.memberDeviceIds.includes(deviceId)) return;
+        const group = get().entities[groupId];
+        if (!group?.memberDeviceIds?.includes(deviceId)) return;
 
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = originalMembers.filter(id => id !== deviceId);
         set(state => ({
-          groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: newMembers } : g),
+          entities: {
+            ...state.entities,
+            [groupId]: { ...group, memberDeviceIds: newMembers }
+          }
         }));
 
         if (groupId < 0 || deviceId < 0) return;
@@ -234,7 +242,10 @@ export const useStore = create<Store>()(
           await sendRPC('remove_device_from_group', { groupId, deviceId });
         } catch (error) {
           set(state => ({
-            groups: state.groups.map(g => g.id === groupId ? { ...g, memberDeviceIds: originalMembers } : g),
+            entities: {
+              ...state.entities,
+              [groupId]: { ...group, memberDeviceIds: originalMembers }
+            }
           }));
           throw error;
         }
@@ -250,7 +261,7 @@ export const useStore = create<Store>()(
         }
 
         const state = get();
-        const group = state.groups?.find(g => g.id === groupId);
+        const group = state.entities[groupId];
         if (!group) return;
 
         const original = { ...group };
@@ -263,18 +274,9 @@ export const useStore = create<Store>()(
         };
 
         set(state => ({
-          groups: state.groups.map(g => g.id === groupId ? newGroup : g),
-          devices: {
-            ...state.devices,
-            [groupId]: {
-              ...state.devices[groupId]!,
-              name: newGroup.name,
-              emoji: newGroup.emoji,
-              color: newGroup.color,
-              motionProfile: newGroup.motionProfile,
-              isOwner: true,
-              memberDeviceIds: newGroup.memberDeviceIds
-            }
+          entities: {
+            ...state.entities,
+            [groupId]: newGroup
           }
         }));
 
@@ -284,7 +286,10 @@ export const useStore = create<Store>()(
           await sendRPC('update_device', { deviceId: groupId, updates });
         } catch (error) {
           set(state => ({
-            groups: state.groups.map(g => g.id === groupId ? original : g),
+            entities: {
+              ...state.entities,
+              [groupId]: original
+            },
           }));
           throw error;
         }
@@ -292,7 +297,7 @@ export const useStore = create<Store>()(
 
       updateDevice: async (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
         const { sendRPC } = await import("@/wsRPC");
-        const existing = get().devices[deviceId];
+        const existing = get().entities[deviceId];
         if (!existing) return;
 
         const original = { ...existing };
@@ -300,8 +305,8 @@ export const useStore = create<Store>()(
         const newEffectiveProfile = newProfileAttribute ?? "person";
 
         set(state => ({
-          devices: {
-            ...state.devices,
+          entities: {
+            ...state.entities,
             [deviceId]: {
               ...existing,
               name: updates.name ?? existing.name,
@@ -310,7 +315,6 @@ export const useStore = create<Store>()(
               motionProfile: newProfileAttribute,
               color: updates.color !== undefined ? updates.color : existing.color,
               isOwner: true,
-              memberDeviceIds: existing.memberDeviceIds
             }
           }
         }));
@@ -321,7 +325,7 @@ export const useStore = create<Store>()(
           await sendRPC('update_device', { deviceId, updates });
         } catch (error) {
           set(state => ({
-            devices: { ...state.devices, [deviceId]: original },
+            entities: { ...state.entities, [deviceId]: original },
           }));
           throw error;
         }

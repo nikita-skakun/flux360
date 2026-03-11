@@ -2,7 +2,7 @@ import { db } from "./db";
 import { dedupeKey, buildEngineSnapshotsFromByDevice } from "@/util/appUtils";
 import { Engine } from "@/engine/engine";
 import { toWebMercator } from "@/util/webMercator";
-import { MOTION_PROFILES, CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
+import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { rgbToHex, colorForDevice } from "@/util/color";
 import type { NormalizedPosition, DevicePoint, MotionProfileName, EngineEvent, Timestamp, AppDevice, TraccarDevice, EngineState } from "@/types";
 
@@ -154,6 +154,18 @@ export class ServerState {
 
     this.devices = Object.fromEntries(processedDevices.map(d => [d.id, d.base]));
     this.groups = processedDevices.map(d => d.group).filter((g): g is AppDevice => g !== null);
+
+    // Compute group lastSeen from member devices (in-place)
+    for (const group of this.groups) {
+      if (group.memberDeviceIds) {
+        let max: Timestamp | null = null;
+        for (const mid of group.memberDeviceIds) {
+          const ts = this.devices[mid]?.lastSeen ?? null;
+          if (ts && (max === null || ts > max)) max = ts;
+        }
+        group.lastSeen = max;
+      }
+    }
 
     const deviceToGroupsMap = new Map<number, number[]>();
     const groupIds = new Set<number>();
@@ -402,7 +414,6 @@ export class ServerState {
       const engine = engines.get(id)!;
       if (engine.lastTimestamp) {
         // Prune
-        engine.refineHistory(MOTION_PROFILES[motionProfiles[id] ?? "person"]);
         engine.pruneHistory(eventsCutoff as Timestamp);
 
         // Checkpoint
@@ -430,6 +441,47 @@ export class ServerState {
     return {
       engineSnapshotsByDevice: result.positionsByDevice,
       eventsByDevice: result.eventsByDevice,
+    };
+  }
+
+  getMetadata(allowedDeviceIds: Set<number>) {
+    const entities: Record<number, AppDevice> = {};
+    const groupMemberIds = new Set<number>();
+
+    // 1. Collect all allowed devices as individual entities first
+    for (const [idStr, dev] of Object.entries(this.devices)) {
+      const id = Number(idStr);
+      if (!allowedDeviceIds.has(id)) continue;
+      entities[id] = { ...dev };
+    }
+
+    // 2. Process groups: calculate aggregate lastSeen and track hierarchy
+    for (const group of this.groups) {
+      if (!allowedDeviceIds.has(group.id)) continue;
+
+      let groupMaxLastSeen: Timestamp | null = null;
+      if (group.memberDeviceIds) {
+        for (const mId of group.memberDeviceIds) {
+          groupMemberIds.add(mId);
+          const mTs = entities[mId]?.lastSeen;
+          if (mTs && (groupMaxLastSeen === null || mTs > groupMaxLastSeen)) {
+            groupMaxLastSeen = mTs;
+          }
+        }
+      }
+
+      entities[group.id] = {
+        ...group,
+        lastSeen: groupMaxLastSeen,
+      };
+    }
+
+    // 3. Identify root entities (not inside any group)
+    const rootIds = Array.from(allowedDeviceIds).filter(id => !groupMemberIds.has(id));
+
+    return {
+      entities,
+      rootIds,
     };
   }
 }

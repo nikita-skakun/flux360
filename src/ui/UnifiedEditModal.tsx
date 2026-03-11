@@ -19,13 +19,10 @@ type Props = {
 };
 
 const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
-    const device = useStore((state) => state.devices[id]);
-    const group = useStore((state) => state.groups.find((g) => g.id === id));
+    const target = useStore((state) => state.entities[id]);
     const updateDevice = useStore((state) => state.updateDevice);
     const updateGroup = useStore((state) => state.updateGroup);
     const deleteGroup = useStore((state) => state.deleteGroup);
-
-    const target = type === "device" ? device : group;
 
     const [name, setName] = useState("");
     const [emoji, setEmoji] = useState("");

@@ -1,4 +1,4 @@
-import { haversineDistance } from "@/util/geo";
+import { haversineDistance, computeBounds } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, DEBUG_FRAME_CAP, type MotionProfileConfig } from "./motionDetector";
 import { fromWebMercator } from "@/util/webMercator";
 import { smoothPath } from "@/util/pathSmoothing";
@@ -88,8 +88,24 @@ export class Engine {
         const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
         const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > HARD_BREAKOUT_DISTANCE);
 
+        // In addition to coherence, the raw speed of the draft must be plausible.
         const firstPending = draft.pending[0];
-        if (firstPending && (isCoherent || anyPendingFar)) {
+        let isFastEnough = true;
+        if (firstPending && draft.pending.length > 1) {
+          const lastPending = draft.pending[draft.pending.length - 1]!;
+          const dist = haversineDistance(fromWebMercator(firstPending.mean), fromWebMercator(lastPending.mean));
+
+          // If they've moved less than HARD_BREAKOUT, we demand a minimum speed to prevent slow drift
+          if (dist < HARD_BREAKOUT_DISTANCE) {
+            const timeSecs = (lastPending.timestamp - firstPending.timestamp) / 1000;
+            if (timeSecs > 0) {
+              const speed = dist / timeSecs;
+              isFastEnough = speed > (profile.minAverageVelocity * 0.25);
+            }
+          }
+        }
+
+        if (firstPending && (anyPendingFar || (isCoherent && isFastEnough))) {
           // Transition to Motion
           const startTimestamp = firstPending.timestamp;
           this.draft = {
@@ -190,7 +206,8 @@ export class Engine {
         end: Math.max(draft.predecessor.start, draft.stationaryCutoff),
         mean: predStats.mean,
         variance: predStats.variance,
-        isDraft: false
+        isDraft: false,
+        bounds: computeBounds([predStats.mean])
       });
 
       this.closed.push({
@@ -201,7 +218,8 @@ export class Engine {
         endAnchor: settleStats.mean,
         path: stablePath,
         distance: totalDistance,
-        isDraft: false
+        isDraft: false,
+        bounds: computeBounds(stablePath)
       });
       console.log(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
 
@@ -346,7 +364,8 @@ export class Engine {
     this.closed = this.closed.filter(ev => ev.end > horizon);
   }
 
-  refineHistory(profile: MotionProfileConfig) {
+  refineHistory() {
+    const profile = this.getProfile();
     this.closed.sort((a, b) => a.start - b.start);
 
     let i = 0;
@@ -369,7 +388,8 @@ export class Engine {
           endAnchor: nextNext.endAnchor,
           path: [...current.path, ...nextNext.path],
           distance: 0,
-          isDraft: false
+          isDraft: false,
+          bounds: computeBounds([...current.path, ...nextNext.path])
         };
         merged.distance = this.computePathLength(merged.path);
         this.closed.splice(i, 3, merged);

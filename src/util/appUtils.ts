@@ -1,6 +1,7 @@
+import { computeBounds } from "@/util/geo";
 import { Engine } from "@/engine/engine";
-import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp, EngineSnapshot } from "@/types";
 import { fromWebMercator } from "@/util/webMercator";
+import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp, EngineSnapshot } from "@/types";
 
 export function formatDuration(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -37,6 +38,7 @@ export function buildEngineSnapshotsFromByDevice(
         : (deviceMotionProfiles[deviceId] ?? "person");
       engine.setMotionProfile(profile);
       engine.processMeasurements(arr);
+      engine.refineHistory();
     });
 
     const positionsByDevice: Record<number, DevicePoint[]> = {};
@@ -64,7 +66,8 @@ export function buildEngineSnapshotsFromByDevice(
                 end: endTs,
                 mean: stats.mean,
                 variance: stats.variance,
-                isDraft: true
+                isDraft: true,
+                bounds: computeBounds([stats.mean])
               });
               positionsByDevice[deviceId] = [{
                 mean: stats.mean,
@@ -86,7 +89,8 @@ export function buildEngineSnapshotsFromByDevice(
                 endAnchor: lastPt.mean,
                 path: draft.path.map(p => p.mean),
                 distance: engine.computePathLength(draft.path),
-                isDraft: true
+                isDraft: true,
+                bounds: computeBounds(draft.path.map(p => p.mean))
               });
               positionsByDevice[deviceId] = [{
                 mean: lastPt.mean,

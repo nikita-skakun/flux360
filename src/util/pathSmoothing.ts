@@ -6,7 +6,6 @@ type PathPoint = {
     timestamp: number;
 };
 
-
 export function smoothPath(points: PathPoint[], iterations = 3): Vec2[] {
     if (points.length <= 2) return points.map(p => p.point);
 

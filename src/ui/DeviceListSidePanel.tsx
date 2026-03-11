@@ -17,7 +17,8 @@ const LastSeenDisplay: React.FC<{ timestamp: Timestamp | null }> = ({ timestamp 
 };
 
 const DeviceListSidePanel: React.FC<{
-  devices: AppDevice[];
+  entities: Record<number, AppDevice>;
+  rootIds: number[];
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   isOpen: boolean;
@@ -29,7 +30,8 @@ const DeviceListSidePanel: React.FC<{
   onCreateGroupSelectionChange: (selectedIds: number[]) => void;
   allDevices: Array<{ id: number; name: string; emoji: string }>;
 }> = ({
-  devices,
+  entities,
+  rootIds,
   selectedDeviceId,
   onSelectDevice,
   isOpen,
@@ -77,10 +79,8 @@ const DeviceListSidePanel: React.FC<{
       };
     }, [contextMenu]);
 
-    const { topLevel, memberMap, sort } = useMemo(() => {
-      const map = new Map(devices.map(d => [d.id, d]));
-      const memberIds = new Set(devices.flatMap(d => d.memberDeviceIds ?? []));
-      const top = devices.filter(d => !memberIds.has(d.id));
+    const { topLevel, sort } = useMemo(() => {
+      const top = rootIds.map(id => entities[id]).filter((e): e is AppDevice => !!e);
 
       const sort = (list: AppDevice[]) => [...list].sort((a, b) => {
         const aOn = a.lastSeen ? Date.now() - a.lastSeen < 300000 : false;
@@ -89,8 +89,8 @@ const DeviceListSidePanel: React.FC<{
         return (a.name || `Device ${a.id}`).localeCompare(b.name || `Device ${b.id}`);
       });
 
-      return { topLevel: sort(top), memberMap: map, sort };
-    }, [devices]);
+      return { topLevel: sort(top), sort };
+    }, [rootIds, entities]);
 
     const toggle = (e: React.MouseEvent, id: number) => {
       e.stopPropagation();
@@ -130,8 +130,8 @@ const DeviceListSidePanel: React.FC<{
       const defaultColor = `rgb(${r}, ${g}, ${b})`;
       const colorStr = device.color ?? defaultColor;
       const displayName = device.name;
-      const children = (device.memberDeviceIds !== null ? device.memberDeviceIds : [])
-        .map(id => memberMap.get(id)).filter((d: AppDevice | undefined): d is AppDevice => !!d);
+      const children = (device.memberDeviceIds ?? [])
+        .map(id => entities[id]).filter((d: AppDevice | undefined): d is AppDevice => !!d);
 
       const sortedChildren = sort(children);
 
@@ -212,7 +212,7 @@ const DeviceListSidePanel: React.FC<{
           <div className="p-4 border-b border-border bg-muted/30 flex items-center justify-between pl-20 h-[73px]">
             {mode === "list" ? (
               <>
-                <div><h2 className="text-lg font-semibold text-foreground">Devices</h2><p className="text-sm text-muted-foreground">{devices.length} total</p></div>
+                <div><h2 className="text-lg font-semibold text-foreground">Devices</h2><p className="text-sm text-muted-foreground">{Object.keys(entities).length} total</p></div>
                 <Button
                   variant="outline"
                   size="icon"
@@ -234,7 +234,7 @@ const DeviceListSidePanel: React.FC<{
           <div className="h-[calc(100%-73px)]">
             {mode === "list" ? (
               <div className="overflow-y-auto h-full p-0">
-                {devices.length === 0 ? <div className="p-4 text-center text-muted-foreground text-sm">No devices found</div> : (
+                {topLevel.length === 0 ? <div className="p-4 text-center text-muted-foreground text-sm">No devices found</div> : (
                   <ul className="divide-y divide-border dark:divide-white/10 text-sm pb-20">
                     {topLevel.map(d => renderItem(d))}
                   </ul>
@@ -324,7 +324,7 @@ const DeviceListSidePanel: React.FC<{
                   <Button
                     className="w-full"
                     disabled={!newGroupName.trim() || selectedCreateDevices.length === 0 || isCreating}
-                    onClick={handleCreateSubmit}
+                    onClick={() => void handleCreateSubmit()}
                   >
                     {isCreating ? "Creating..." : "Create Group"}
                   </Button>
@@ -376,7 +376,7 @@ const DeviceListSidePanel: React.FC<{
                 {/* Submenu */}
                 <div className="absolute left-full top-0 ml-1 bg-background rounded-lg shadow-xl border border-border py-1 hidden group-hover/add:block min-w-[200px] max-h-[300px] overflow-y-auto">
                   {(() => {
-                    const groupDevice = devices.find(d => d.id === contextMenu.groupId);
+                    const groupDevice = entities[contextMenu.groupId];
                     const memberIds = new Set(groupDevice?.memberDeviceIds ?? []);
                     const availableDevices = allDevices.filter(d => !memberIds.has(d.id));
 
@@ -414,7 +414,7 @@ const DeviceListSidePanel: React.FC<{
                 variant="ghost"
                 className="w-full justify-start px-4 py-2 text-sm text-destructive hover:text-destructive hover:bg-destructive/10"
                 onClick={() => {
-                  const groupName = devices.find(d => d.id === contextMenu.groupId)?.name;
+                  const groupName = entities[contextMenu.groupId]?.name;
                   if (window.confirm(`Delete group "${groupName}"?`)) {
                     void onDeleteGroup(contextMenu.groupId).then(() => {
                       setContextMenu(null);

@@ -1,11 +1,8 @@
 import type { AppDevice, DevicePoint, EngineEvent, MotionProfileName } from '@/types';
 
 export type StoreState = {
-  // Devices slice
-  devices: Record<number, AppDevice>;
-
-  // Groups slice
-  groups: AppDevice[];
+  // Entities slice (unifies devices and groups)
+  entities: Record<number, AppDevice>;
 
   // Settings slice (persisted)
   settings: {
@@ -35,6 +32,9 @@ export type StoreState = {
 
   // Engine events (Stationary/Motion)
   eventsByDevice: Record<number, EngineEvent[]>;
+
+  // Pre-calculated metadata from server
+  metadata: import("@/types").InitialStatePayload['metadata'];
 };
 
 export type StoreActions = {

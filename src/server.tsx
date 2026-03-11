@@ -54,7 +54,21 @@ const serverState = new ServerState(config.historyDays);
 
 // Helper to broadcast state to specific device topics
 function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: number[]) {
-  const idsToSync = deviceIds ?? Object.keys(serverState.engineSnapshotsByDevice).map(Number);
+  let idsToSync: number[];
+  if (deviceIds === undefined) {
+    idsToSync = Object.keys(serverState.engineSnapshotsByDevice).map(Number);
+  } else {
+    // Include groups that contain any of the devices
+    const allIds = new Set(deviceIds);
+    for (const deviceId of deviceIds) {
+      const groups = serverState.deviceToGroupsMap.get(deviceId);
+      if (groups) {
+        for (const gid of groups) allIds.add(gid);
+      }
+    }
+    idsToSync = Array.from(allIds);
+  }
+
   for (const id of idsToSync) {
     if (serverState.engineSnapshotsByDevice[id]) {
       server.publish(`device-${id}`, JSON.stringify({
@@ -318,6 +332,7 @@ if (isProduction) {
             const session = sessionStore.getSession(data.token);
             if (!session) {
               ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
+              ws.close(1008, "Session expired");
               return;
             }
 
@@ -333,6 +348,7 @@ if (isProduction) {
             if (!devicesRes.ok) {
               ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
               sessionStore.deleteSession(data.token);
+              ws.close(1008, "Session expired");
               return;
             }
 
@@ -373,14 +389,16 @@ if (isProduction) {
               }
             }
 
+            const { entities: filteredEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
+
             const payloadObj = {
               type: "initial_state",
               payload: {
-                devices: filteredDevices,
-                groups: serverState.groups.filter(g => allowedDeviceIds.has(g.id) || (g.memberDeviceIds?.some(mid => allowedDeviceIds.has(mid)) ?? false)),
+                entities: filteredEntities,
                 engineSnapshotsByDevice: filteredSnapshots,
                 eventsByDevice: filteredEvents,
-                maptilerApiKey: config.maptilerApiKey
+                maptilerApiKey: config.maptilerApiKey,
+                metadata: { rootIds }
               }
             };
 
