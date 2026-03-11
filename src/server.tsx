@@ -391,8 +391,11 @@ if (isProduction) {
               return;
             }
 
-            const devices = await devicesRes.json() as { id: number }[];
+            const devices = await devicesRes.json() as TraccarDevice[];
             const ownedDeviceIds = new Set(devices.map(d => d.id));
+
+            // Update server state with device metadata so getMetadata() computes correct rootIds
+            serverState.handleDevices(devices);
 
             // Add shared devices
             const shared = db.query("SELECT device_id FROM device_shares WHERE shared_with_username = ?").all(username) as { device_id: number }[];

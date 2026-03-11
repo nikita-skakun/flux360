@@ -55,17 +55,17 @@ export function buildEngineSnapshotsFromByDevice(
           if (draft) {
             const isStationary = draft.type === 'stationary';
             const isMotion = draft.type === 'motion';
-            
+
             // Determine if we should treat as stationary (either actual stationary or zero-distance motion)
             let treatAsStationary = isStationary;
             let stats = null;
-            
+
             if (isMotion) {
               const distance = engine.computePathLength(draft.path);
               // If distance is 0 and has multiple points, treat as stationary
               treatAsStationary = distance === 0 && draft.path.length > 1;
             }
-            
+
             if (treatAsStationary) {
               stats = engine.computeStats(isStationary ? draft.recent : draft.path);
               events.push({
@@ -82,7 +82,7 @@ export function buildEngineSnapshotsFromByDevice(
                 timestamp: endTs,
                 device: deviceId,
                 geo: fromWebMercator(stats.mean),
-                accuracy: 5,
+                accuracy: Math.sqrt(stats.variance),
                 anchorStartTimestamp: draft.start,
                 confidence: snapshot.activeConfidence,
                 sourceDeviceId: null
@@ -90,7 +90,7 @@ export function buildEngineSnapshotsFromByDevice(
             } else if (isMotion) {
               const lastPt = draft.path[draft.path.length - 1]!;
               const distance = engine.computePathLength(draft.path);
-              
+
               events.push({
                 type: 'motion',
                 start: draft.start,
@@ -107,7 +107,7 @@ export function buildEngineSnapshotsFromByDevice(
                 timestamp: endTs,
                 device: deviceId,
                 geo: fromWebMercator(lastPt.mean),
-                accuracy: 5,
+                accuracy: Math.sqrt(engine.computeStats(draft.path).variance),
                 anchorStartTimestamp: draft.start,
                 confidence: snapshot.activeConfidence,
                 sourceDeviceId: null

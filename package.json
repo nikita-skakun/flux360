@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "bun --hot src/server.tsx",
     "lint": "eslint src/**/*.ts src/**/*.tsx",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@maptiler/sdk": "^3.11.1",
