@@ -110,7 +110,6 @@ export const TimelinePanel: React.FC<Props> = ({
 
         return rawEvents
             .filter(ev => ev.isDraft || ev.end >= cutoff)
-            .sort((a, b) => b.start - a.start)
             .map((ev, i, arr) => {
                 const startDate = new Date(ev.start);
                 const currDateStr = startDate.toDateString();

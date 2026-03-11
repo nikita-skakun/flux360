@@ -81,10 +81,11 @@ const DeviceListSidePanel: React.FC<{
 
     const { topLevel, sort } = useMemo(() => {
       const top = rootIds.map(id => entities[id]).filter((e): e is AppDevice => !!e);
+      const now = Date.now(); // capture once for deterministic sorting
 
       const sort = (list: AppDevice[]) => [...list].sort((a, b) => {
-        const aOn = a.lastSeen ? Date.now() - a.lastSeen < 300000 : false;
-        const bOn = b.lastSeen ? Date.now() - b.lastSeen < 300000 : false;
+        const aOn = a.lastSeen ? now - a.lastSeen < 300000 : false;
+        const bOn = b.lastSeen ? now - b.lastSeen < 300000 : false;
         if (aOn !== bOn) return aOn ? -1 : 1;
         return (a.name || `Device ${a.id}`).localeCompare(b.name || `Device ${b.id}`);
       });

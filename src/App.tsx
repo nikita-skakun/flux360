@@ -20,8 +20,6 @@ export function App() {
   const entities = useStore(state => state.entities);
   const metadata = useStore(state => state.metadata);
 
-  const RECENT_DEVICE_CUTOFF_MS = 48 * 60 * 60 * 1000; // 48 hours
-
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const theme = useStore(state => state.settings.theme);
 
@@ -84,16 +82,10 @@ export function App() {
   const mapViewRef = useRef<MapViewHandle>(null);
 
   const visibleComponents = useMemo(() => {
-    const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-
     return Object.values(engineSnapshotsByDevice)
       .flat()
-      .filter((comp) => {
-        if (!metadata.rootIds.includes(comp.device)) return false;
-        const entity = entities[comp.device];
-        return entity && entity.lastSeen != null && entity.lastSeen > cutoff;
-      });
-  }, [engineSnapshotsByDevice, entities, metadata.rootIds]);
+      .filter((comp) => entities[comp.device] != null);
+  }, [engineSnapshotsByDevice, entities]);
 
   const debugAnchors = useMemo((): DebugAnchor[] => {
     if (!debugMode || selectedDeviceId == null) return [];
@@ -257,20 +249,11 @@ export function App() {
                   mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
                 } else {
                   const s = event.item;
-                  if (s.path.length > 0) {
-                    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
-                    for (const p of s.path) {
-                      const geo = fromWebMercator(p);
-                      minLng = Math.min(minLng, geo[0]);
-                      maxLng = Math.max(maxLng, geo[0]);
-                      minLat = Math.min(minLat, geo[1]);
-                      maxLat = Math.max(maxLat, geo[1]);
-                    }
-                    if (minLng !== Infinity) {
-                      const padding = Math.max(0.001, (maxLng - minLng) * 0.1, (maxLat - minLat) * 0.1);
-                      mapViewRef.current?.flyToBounds([[minLng - padding, minLat - padding], [maxLng + padding, maxLat + padding]]);
-                    }
-                  }
+                  // Use server-computed bounds instead of iterating through path
+                  const sw = fromWebMercator([s.bounds.minX, s.bounds.minY]);
+                  const ne = fromWebMercator([s.bounds.maxX, s.bounds.maxY]);
+                  const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+                  mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
                 }
               }}
               selectedEventId={selectedTimelineEvent?.id ?? null}

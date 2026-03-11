@@ -281,6 +281,14 @@ export class ServerState {
       this.engineSnapshotsByDevice = { ...this.engineSnapshotsByDevice, ...result.engineSnapshotsByDevice };
       this.eventsByDevice = { ...this.eventsByDevice, ...result.eventsByDevice };
 
+      // Ensure events are sorted by start timestamp descending for consistent timeline
+      for (const id in this.eventsByDevice) {
+        const events = this.eventsByDevice[id];
+        if (events && events.length > 1) {
+          events.sort((a, b) => b.start - a.start);
+        }
+      }
+
       if (deviceId !== undefined) {
         const afterCount = this.eventsByDevice[deviceId]?.length ?? 0;
         const isMulti = new Set(newPosArr.map(p => p.device)).size > 1;

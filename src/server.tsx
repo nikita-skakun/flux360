@@ -54,11 +54,12 @@ const serverState = new ServerState(config.historyDays);
 
 // Helper to broadcast state to specific device topics
 function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: number[]) {
+  // Compute the set of root IDs that need to be sent (affected devices and their groups, but only roots)
   let idsToSync: number[];
   if (deviceIds === undefined) {
     idsToSync = Object.keys(serverState.engineSnapshotsByDevice).map(Number);
   } else {
-    // Include groups that contain any of the devices
+    // Include groups that contain any of the devices, then filter to root entities
     const allIds = new Set(deviceIds);
     for (const deviceId of deviceIds) {
       const groups = serverState.deviceToGroupsMap.get(deviceId);
@@ -66,16 +67,36 @@ function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: numbe
         for (const gid of groups) allIds.add(gid);
       }
     }
-    idsToSync = Array.from(allIds);
+    // Only root entities get snapshots (members are represented by groups)
+    const rootIdSet = new Set(serverState.getMetadata(allIds).rootIds);
+    idsToSync = Array.from(allIds).filter(id => rootIdSet.has(id));
   }
+
+  // Further filter: only send if there are snapshots for that root entity
+  const snapshotsPayload: Record<number, import("./types").DevicePoint[]> = {};
+  const eventsPayload: Record<number, import("./types").EngineEvent[]> = {};
 
   for (const id of idsToSync) {
     if (serverState.engineSnapshotsByDevice[id]) {
+      snapshotsPayload[id] = serverState.engineSnapshotsByDevice[id];
+    }
+    if (serverState.eventsByDevice[id]) {
+      eventsPayload[id] = serverState.eventsByDevice[id];
+    }
+  }
+
+  // Only send if there's actual data
+  if (Object.keys(snapshotsPayload).length === 0 && Object.keys(eventsPayload).length === 0) {
+    return;
+  }
+
+  for (const id of idsToSync) {
+    if (snapshotsPayload[id] || eventsPayload[id]) {
       server.publish(`device-${id}`, JSON.stringify({
         type: "positions_update",
         payload: {
-          snapshots: { [id]: serverState.engineSnapshotsByDevice[id] },
-          events: { [id]: serverState.eventsByDevice[id] ?? [] }
+          snapshots: { [id]: snapshotsPayload[id] },
+          events: { [id]: eventsPayload[id] ?? [] }
         }
       }));
     }
@@ -374,6 +395,11 @@ if (isProduction) {
             const filteredSnapshots: Record<number, import("./types/index").DevicePoint[]> = {};
             const filteredEvents: Record<number, import("./types/index").EngineEvent[]> = {};
 
+            // First, get metadata to know which IDs are root entities
+            const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
+            const rootIdSet = new Set(rootIds);
+            const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
+
             for (const id of allowedDeviceIds) {
               if (serverState.devices[id]) {
                 filteredDevices[id] = {
@@ -381,20 +407,24 @@ if (isProduction) {
                   isOwner: ownedDeviceIds.has(id)
                 };
               }
-              if (serverState.engineSnapshotsByDevice[id]) {
-                filteredSnapshots[id] = serverState.engineSnapshotsByDevice[id];
+              // Only include snapshots for root entities that have been seen within the last 48 hours
+              if (rootIdSet.has(id) && serverState.engineSnapshotsByDevice[id]) {
+                const entity = allEntities[id];
+                if (entity && entity.lastSeen != null && entity.lastSeen > cutoff) {
+                  filteredSnapshots[id] = serverState.engineSnapshotsByDevice[id];
+                }
               }
               if (serverState.eventsByDevice[id]) {
                 filteredEvents[id] = serverState.eventsByDevice[id];
               }
             }
 
-            const { entities: filteredEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
-
+            // For entities, we still need to send all entities (devices and groups) for the sidebar
+            // So we use allEntities from getMetadata
             const payloadObj = {
               type: "initial_state",
               payload: {
-                entities: filteredEntities,
+                entities: allEntities,
                 engineSnapshotsByDevice: filteredSnapshots,
                 eventsByDevice: filteredEvents,
                 maptilerApiKey: config.maptilerApiKey,
