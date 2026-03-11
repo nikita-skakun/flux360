@@ -1,19 +1,45 @@
 import { sendMessage } from "./wsClient";
 
-const pending = new Map<string, (resp: unknown) => void>();
+const RPC_TIMEOUT_MS = 30000;
+
+interface PendingRequest {
+  cb: (resp: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pending = new Map<string, PendingRequest>();
 
 export function registerCallback(requestId: string, cb: (resp: unknown) => void) {
-  pending.set(requestId, cb);
+  const timer = setTimeout(() => {
+    const entry = pending.get(requestId);
+    if (entry) {
+      pending.delete(requestId);
+      entry.cb({ type: 'error', message: 'Request timeout' });
+    }
+  }, RPC_TIMEOUT_MS);
+
+  pending.set(requestId, { cb, timer });
 }
 
 export function handleResponse(resp: unknown) {
   if (typeof resp !== 'object' || resp === null) return;
   const { requestId } = resp as { requestId?: string };
-  if (requestId) {
-    const cb = pending.get(requestId);
-    pending.delete(requestId);
-    if (cb) cb(resp);
+  if (typeof requestId === 'string' && requestId) {
+    const entry = pending.get(requestId);
+    if (entry) {
+      clearTimeout(entry.timer);
+      pending.delete(requestId);
+      entry.cb(resp);
+    }
   }
+}
+
+export function clearPendingRequests() {
+  for (const [_, entry] of pending.entries()) {
+    clearTimeout(entry.timer);
+    entry.cb({ type: 'error', message: 'Connection closed' });
+  }
+  pending.clear();
 }
 
 export function sendRPC<T = unknown>(type: string, payload?: unknown): Promise<T> {
@@ -31,7 +57,11 @@ export function sendRPC<T = unknown>(type: string, payload?: unknown): Promise<T
     try {
       sendMessage(type, payload, requestId);
     } catch (e) {
-      pending.delete(requestId);
+      const entry = pending.get(requestId);
+      if (entry) {
+        clearTimeout(entry.timer);
+        pending.delete(requestId);
+      }
       reject(e);
     }
   });

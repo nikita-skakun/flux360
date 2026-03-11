@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Pencil, UserPlus, X } from "lucide-react";
+import { useStore } from "@/store";
 import { useTimeAgo } from "@/util/time";
 import React, { useMemo } from "react";
 import type { AppDevice, DevicePoint, Timestamp } from "@/types";
@@ -30,6 +31,7 @@ function DeviceOverlayComponent({
   setEditingTarget,
   isOwner,
 }: Props) {
+  const sessionToken = useStore(state => state.settings.sessionToken);
   if (selectedDeviceId == null) return null;
 
   const points = activePointsByDevice[selectedDeviceId] ?? [];
@@ -90,7 +92,10 @@ function DeviceOverlayComponent({
                     void fetch(`/api/devices/${chosen.device}/share`, {
                       method: "POST",
                       body: JSON.stringify({ username }),
-                      headers: { "Content-Type": "application/json" }
+                      headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${sessionToken}`
+                      }
                     }).then(r => {
                       if (r.ok) window.alert("Shared successfully!");
                       else window.alert("Sharing failed.");

@@ -1,7 +1,12 @@
+import { clearPendingRequests } from "./wsRPC";
+
 let ws: WebSocket | null = null;
 
 export function setWebSocket(connection: WebSocket | null) {
   ws = connection;
+  if (connection === null) {
+    clearPendingRequests();
+  }
 }
 
 export function sendMessage(type: string, payload?: unknown, requestId?: string): void {

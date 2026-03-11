@@ -452,9 +452,13 @@ if (isProduction) {
 
             try {
               if (type === "create_group") {
-                const { name, emoji, memberDeviceIds } = payload;
-                if (!memberDeviceIds.every((id: number) => ws.data.allowedDeviceIds.has(id))) {
-                  ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
+                const { name, emoji, memberDeviceIds } = payload as { name?: string; emoji?: string; memberDeviceIds?: number[] };
+                if (typeof name !== 'string' || typeof emoji !== 'string' || !Array.isArray(memberDeviceIds)) {
+                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: name, emoji, and memberDeviceIds are required", requestId }));
+                  return;
+                }
+                if (!memberDeviceIds.every((id: number) => typeof id === 'number' && ws.data.allowedDeviceIds.has(id))) {
+                  ws.send(JSON.stringify({ type: "error", message: "Forbidden or invalid device IDs", requestId }));
                   return;
                 }
                 const res = await fetch(`${apiBase}/devices`, {
@@ -472,7 +476,11 @@ if (isProduction) {
                 ws.send(JSON.stringify({ type: "create_success", device, requestId }));
               }
               else if (type === "update_device") {
-                const { deviceId, updates } = payload;
+                const { deviceId, updates } = payload as { deviceId?: number; updates?: Record<string, any> };
+                if (typeof deviceId !== 'number' || typeof updates !== 'object' || updates === null) {
+                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: deviceId and updates object are required", requestId }));
+                  return;
+                }
                 if (!ws.data.allowedDeviceIds.has(deviceId)) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
                   return;
@@ -482,15 +490,15 @@ if (isProduction) {
                 const current = await getRes.json();
 
                 const attributes = { ...current.attributes };
-                if (updates.emoji !== undefined) attributes.emoji = updates.emoji;
-                if (updates.color !== undefined) attributes.color = updates.color;
-                if (updates.motionProfile !== undefined) attributes.motionProfile = updates.motionProfile;
-                if (updates.memberDeviceIds !== undefined) attributes.memberDeviceIds = JSON.stringify(updates.memberDeviceIds);
+                if (typeof updates['emoji'] === 'string') attributes['emoji'] = updates['emoji'];
+                if (typeof updates['color'] === 'string') attributes['color'] = updates['color'];
+                if (typeof updates['motionProfile'] === 'string') attributes['motionProfile'] = updates['motionProfile'];
+                if (Array.isArray(updates['memberDeviceIds'])) attributes['memberDeviceIds'] = JSON.stringify(updates['memberDeviceIds']);
 
                 const putRes = await fetch(`${apiBase}/devices/${deviceId}`, {
                   method: "PUT",
                   headers: reqHeaders,
-                  body: JSON.stringify({ ...current, name: updates.name || current.name, attributes })
+                  body: JSON.stringify({ ...current, name: updates['name'] || current.name, attributes })
                 });
                 if (!putRes.ok) throw new Error(await putRes.text());
                 const updated = await putRes.json();
@@ -498,7 +506,11 @@ if (isProduction) {
                 ws.send(JSON.stringify({ type: "update_success", deviceId, requestId }));
               }
               else if (type === "delete_group") {
-                const { groupId } = payload;
+                const { groupId } = payload as { groupId?: number };
+                if (typeof groupId !== 'number') {
+                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: groupId must be a number", requestId }));
+                  return;
+                }
                 if (!ws.data.allowedDeviceIds.has(groupId)) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
                   return;
@@ -508,7 +520,11 @@ if (isProduction) {
                 ws.send(JSON.stringify({ type: "delete_success", groupId, requestId }));
               }
               else if (type === "add_device_to_group" || type === "remove_device_from_group") {
-                const { groupId, deviceId } = payload;
+                const { groupId, deviceId } = payload as { groupId?: number; deviceId?: number };
+                if (typeof groupId !== 'number' || typeof deviceId !== 'number') {
+                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: groupId and deviceId must be numbers", requestId }));
+                  return;
+                }
                 if (!ws.data.allowedDeviceIds.has(groupId) || !ws.data.allowedDeviceIds.has(deviceId)) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
                   return;
