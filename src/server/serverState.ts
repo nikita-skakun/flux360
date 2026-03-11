@@ -460,28 +460,20 @@ export class ServerState {
     for (const [idStr, dev] of Object.entries(this.devices)) {
       const id = Number(idStr);
       if (!allowedDeviceIds.has(id)) continue;
-      entities[id] = { ...dev };
+      entities[id] = dev;
     }
 
-    // 2. Process groups: calculate aggregate lastSeen and track hierarchy
+    // 2. Process groups: track hierarchy
     for (const group of this.groups) {
       if (!allowedDeviceIds.has(group.id)) continue;
 
-      let groupMaxLastSeen: Timestamp | null = null;
       if (group.memberDeviceIds) {
         for (const mId of group.memberDeviceIds) {
           groupMemberIds.add(mId);
-          const mTs = entities[mId]?.lastSeen;
-          if (mTs && (groupMaxLastSeen === null || mTs > groupMaxLastSeen)) {
-            groupMaxLastSeen = mTs;
-          }
         }
       }
 
-      entities[group.id] = {
-        ...group,
-        lastSeen: groupMaxLastSeen,
-      };
+      entities[group.id] = group;
     }
 
     // 3. Identify root entities (not inside any group)

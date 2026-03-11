@@ -3,9 +3,9 @@ import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clus
 import { ClusterPopup } from "./map/ClusterPopup";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
+import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
 import { getColorForDevice, type Color } from "@/util/color";
-import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, DebugAnchor, DebugFrame, Timestamp, EngineEvent } from "@/types";
 import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
@@ -179,7 +179,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
       // Always draw accuracy circle for selected device regardless of cluster state
       if (c.device === selectedDeviceId && c.accuracy > 0) {
-        const [cx, cy] = toWebMercator(c.geo);
+        const [cx, cy] = c.mean;
         const pts = 64;
         const coords = Array.from({ length: pts + 1 }, (_, j) => {
           const angle = (j * 2 * Math.PI) / pts;
