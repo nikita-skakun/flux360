@@ -29,6 +29,7 @@ export class ServerState {
   }
 
   private restoreFromDb() {
+    console.log(`[ServerState] Restoring engine checkpoints...`);
     // 1. Restore Checkpoints
     (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string }[])
       .forEach(row => {
@@ -45,6 +46,7 @@ export class ServerState {
         }
       });
 
+    console.log(`[ServerState] Restoring recent positions...`);
     // 2. Restore recent raw positions so `positionsAll` is populated
     const cutoff = Date.now() - this.historyMs;
     const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff) as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number }[];
@@ -57,32 +59,35 @@ export class ServerState {
       };
       this.positionsAll.push(p);
 
+      let list = this.allPosById.get(p.device);
+      if (!list) this.allPosById.set(p.device, list = []);
+      list.push(p);
+
+      const engine = this.engines.get(p.device);
+      if (engine?.lastTimestamp && p.timestamp <= engine.lastTimestamp) {
+        this.processedKeys.add(dedupeKey(p));
+      }
+    }
+    console.log(`[ServerState] Restored ${posRows.length} trailing positions. ${this.engines.size} engines ready.`);
+  }
+
+  /** Initial catch-up of historical data after group mappings are established. */
+  public catchUpHistoricalData() {
+    console.log(`[ServerState] Triggering initial catch-up for ${this.positionsAll.length} trailing positions...`);
+
+    this.allPosById.clear();
+    for (const p of this.positionsAll) {
       const ids = [p.device, ...(this.deviceToGroupsMap.get(p.device) ?? [])];
       for (const id of ids) {
         let list = this.allPosById.get(id);
         if (!list) this.allPosById.set(id, list = []);
         list.push(p);
       }
-
-      const engine = this.engines.get(p.device);
-      // If we have a restored engine state, mark points covered by that state as already processed.
-      // This prevents the catch-up process from triggering a destructive "replay" of old data.
-      if (engine?.lastTimestamp && p.timestamp <= engine.lastTimestamp) {
-        this.processedKeys.add(dedupeKey(p));
-      }
     }
-    console.log(`[ServerState] Restored ${posRows.length} trailing positions from position_events table.`);
 
-    console.log(`[ServerState] Restored ${this.engines.size} engines. Initial events count:`,
-      Object.fromEntries(Array.from(this.engines.entries()).map(([id, eng]) => [id, eng.closed.length])));
-
-    console.log(`[ServerState] Triggering initial catch-up with ${this.positionsAll.length} trailing positions...`);
-
-    // 3. Trigger initial catch-up to process trailing positions into engines
     this.processPositions([], false);
 
-    // 4. Initialize the events and snapshots caches from the restored/caught-up engines
-    console.log(`[ServerState] Syncing caches for ${this.engines.size} engines...`);
+    // 3. Initialize the events and snapshots caches
     let counts = 0;
     for (const [id, engine] of this.engines) {
       this.eventsByDevice[id] = [...engine.closed];
@@ -92,7 +97,7 @@ export class ServerState {
       }
     }
 
-    console.log(`[ServerState] Catch-up complete. Devices with cached events: ${counts}. Total eventsByDevice keys: ${Object.keys(this.eventsByDevice).length}`);
+    console.log(`[ServerState] Catch-up complete. Devices with cached events: ${counts}.`);
   }
 
   getLastTimestamp(deviceId: number): Timestamp | null {
@@ -341,19 +346,22 @@ export class ServerState {
     }
 
     // 1.5 Bootstrap trailing points for all engines from historical buffer
-    // ONLY for devices that actually received points in this batch
-    for (const [id, points] of posById) {
+    // For devices touched in this batch OR when performing initial catch-up (empty newPosArr)
+    const idsToBootstrap = newPosArr.length > 0 ? Array.from(posById.keys()) : Array.from(engines.keys());
+
+    for (const id of idsToBootstrap) {
       const engine = engines.get(id);
       const lastTs = engine?.lastTimestamp ?? 0;
       const historical = allPosById.get(id) ?? [];
+      const batchPoints = posById.get(id) ?? [];
 
       const trailing = historical
-        .filter(p => p.timestamp > lastTs && !points.some(pp => dedupeKey(pp) === dedupeKey(p)))
+        .filter(p => p.timestamp > lastTs && !batchPoints.some(pp => dedupeKey(pp) === dedupeKey(p)))
         .sort((a, b) => a.timestamp - b.timestamp);
 
       if (trailing.length) {
         // Merge with points from current batch, ensuring sort
-        const combined = [...points, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
+        const combined = [...batchPoints, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
         posById.set(id, combined);
 
         // Ensure processedKeys is updated so we don't double-process 

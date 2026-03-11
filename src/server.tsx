@@ -128,7 +128,12 @@ function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string
 
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
     onDevicesReceived: (devices: TraccarDevice[]) => {
+      const isFirst = Object.keys(serverState.devices).length === 0;
       serverState.handleDevices(devices);
+
+      if (isFirst) {
+        serverState.catchUpHistoricalData();
+      }
 
       const historyMs = config.historyDays * 24 * 60 * 60 * 1000;
       const backfillCutoff = Date.now() - historyMs;

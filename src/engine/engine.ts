@@ -29,8 +29,8 @@ export class Engine {
 
   processMeasurements(points: DevicePoint[]) {
     for (const p of points) {
-      this.lastTimestamp = p.timestamp;
       this.step(p);
+      this.lastTimestamp = p.timestamp;
     }
   }
 
@@ -123,6 +123,15 @@ export class Engine {
           if (first) {
             draft.recent.push(first);
             if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
+
+            if (draft.recent.length >= 10) {
+              const newStats = this.computeStats(draft.recent);
+              const distToAnchor = haversineDistance(fromWebMercator(newStats.mean), fromWebMercator(draft.stationaryStartAnchor));
+              if (distToAnchor > profile.maxStationaryRadius) {
+                draft.stationaryStartAnchor = newStats.mean; // Update anchor to prevent drag
+              }
+            }
+
             this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
           }
         }
