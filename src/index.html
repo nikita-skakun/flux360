@@ -6,6 +6,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Flux360</title>
   <link rel="stylesheet" href="./index.css" />
+  <script>
+    try {
+      const s = JSON.parse(localStorage.getItem('flux360-store'))?.state?.settings;
+      if (s?.theme === 'dark' || (s?.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.style.background = 'oklch(0.145 0 0)';
+      }
+    } catch (e) { }
+  </script>
   <script type="module" src="./client.tsx" async></script>
 </head>
 
