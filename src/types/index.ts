@@ -81,7 +81,6 @@ export type StationaryEvent = {
   mean: Vec2;
   variance: number;
   isDraft: boolean;
-  bounds: WorldBounds;
 };
 
 export type MotionEvent = {

@@ -215,8 +215,7 @@ export class Engine {
         end: Math.max(draft.predecessor.start, draft.stationaryCutoff),
         mean: predStats.mean,
         variance: predStats.variance,
-        isDraft: false,
-        bounds: computeBounds([predStats.mean])
+        isDraft: false
       });
 
       this.closed.push({

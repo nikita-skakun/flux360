@@ -65,7 +65,6 @@ export function buildEngineSnapshotsFromByDevice(
                         mean: stats.mean,
                         variance: stats.variance,
                         isDraft: true,
-                        bounds: computeBounds([stats.mean])
                     });
                     positionsByDevice[deviceId] = [{
                         mean: stats.mean,
