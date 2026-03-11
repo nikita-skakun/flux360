@@ -11,7 +11,6 @@ export class TraccarAdminClient {
   private ws: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
-  private syncFlags = { rest: false, ws: false, logged: false };
 
   constructor(
     private readonly baseUrl: string,
@@ -19,13 +18,6 @@ export class TraccarAdminClient {
     private readonly token: string,
     private readonly deps: ServerStateDeps
   ) { }
-
-  private checkSync() {
-    if (this.syncFlags.rest && this.syncFlags.ws && !this.syncFlags.logged) {
-      console.log("✨ Caught up with Traccar server");
-      this.syncFlags.logged = true;
-    }
-  }
 
   connect() {
     if (this.destroyed || !this.baseUrl || !this.token) return;
@@ -41,8 +33,6 @@ export class TraccarAdminClient {
         console.log("✅ Traccar Admin WebSocket connected");
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
-        this.syncFlags.ws = true;
-        this.checkSync();
       };
 
       this.ws.onmessage = (ev) => {
@@ -66,9 +56,7 @@ export class TraccarAdminClient {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const devices = await res.json() as TraccarDevice[];
       console.log(`[TraccarAdminClient] Fetched ${devices.length} devices via REST`);
-      this.syncFlags.rest = true;
       this.deps.onDevicesReceived(devices);
-      this.checkSync();
     } catch (err) { console.error("Traccar REST error:", err); }
   }
 

@@ -128,28 +128,23 @@ function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string
 
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
     onDevicesReceived: (devices: TraccarDevice[]) => {
-      const isFirst = Object.keys(serverState.devices).length === 0;
       serverState.handleDevices(devices);
-
-      if (isFirst) {
-        serverState.catchUpHistoricalData();
-      }
 
       const historyMs = config.historyDays * 24 * 60 * 60 * 1000;
       const backfillCutoff = Date.now() - historyMs;
 
       const devicesToBackfill = devices
         .map(d => d.id)
-        .filter((id): id is number => id !== undefined && !serverState.backfilledDeviceIds.has(id));
+        .filter((id): id is number => id !== undefined && !serverState.backfilled.has(id));
 
       if (devicesToBackfill.length > 0) {
-        devicesToBackfill.forEach(id => serverState.backfilledDeviceIds.add(id));
+        devicesToBackfill.forEach(id => serverState.backfilled.add(id));
 
         (async () => {
           console.log(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
           for (const id of devicesToBackfill) {
-            const lastTs = serverState.getLastTimestamp(id);
-            const firstTs = serverState.getFirstTimestamp(id);
+            const lastTs = serverState.engines.get(id)?.lastTimestamp ?? null;
+            const firstTs = serverState.positionsAll.find(p => p.device === id)?.timestamp ?? null;
 
             // Fetch head delta if we have reliable data, otherwise full window
             const isDelta = lastTs && firstTs && firstTs < backfillCutoff + (10 * 60000);

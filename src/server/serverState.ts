@@ -14,7 +14,7 @@ export class ServerState {
   engines = new Map<number, Engine>();
   engineCheckpoints = new Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>();
   processedKeys = new Set<string>();
-  backfilledDeviceIds = new Set<number>();
+  backfilled = new Set<number>();
   private rawTraccarDevices = new Map<number, TraccarDevice>();
 
   engineSnapshotsByDevice: Record<number, DevicePoint[]> = {};
@@ -25,13 +25,10 @@ export class ServerState {
 
   constructor(public readonly historyDays: number) {
     this.historyMs = historyDays * 24 * 60 * 60 * 1000;
-    this.restoreFromDb();
-  }
-
-  private restoreFromDb() {
     console.log(`[ServerState] Restoring engine checkpoints...`);
+
     // 1. Restore Checkpoints
-    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string }[])
+    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string | object }[])
       .forEach(row => {
         if (!this.engineCheckpoints.has(row.device_id)) {
           this.engineCheckpoints.set(row.device_id, []);
@@ -71,54 +68,14 @@ export class ServerState {
     console.log(`[ServerState] Restored ${posRows.length} trailing positions. ${this.engines.size} engines ready.`);
   }
 
-  /** Initial catch-up of historical data after group mappings are established. */
-  public catchUpHistoricalData() {
-    console.log(`[ServerState] Triggering initial catch-up for ${this.positionsAll.length} trailing positions...`);
-
-    this.allPosById.clear();
-    for (const p of this.positionsAll) {
-      const ids = [p.device, ...(this.deviceToGroupsMap.get(p.device) ?? [])];
-      for (const id of ids) {
-        let list = this.allPosById.get(id);
-        if (!list) this.allPosById.set(id, list = []);
-        list.push(p);
-      }
-    }
-
-    this.processPositions([], false);
-
-    // 3. Initialize the events and snapshots caches
-    let counts = 0;
-    for (const [id, engine] of this.engines) {
-      this.eventsByDevice[id] = [...engine.closed];
-      if (engine.closed.length > 0) counts++;
-      if (engine.draft) {
-        this.engineSnapshotsByDevice[id] = [...engine.draft.recent];
-      }
-    }
-
-    console.log(`[ServerState] Catch-up complete. Devices with cached events: ${counts}.`);
-  }
-
-  getLastTimestamp(deviceId: number): Timestamp | null {
-    return this.engines.get(deviceId)?.lastTimestamp ?? null;
-  }
-
-  getFirstTimestamp(deviceId: number): Timestamp | null {
-    const positions = this.positionsAll.filter(p => p.device === deviceId);
-    const first = positions[0];
-    return first ? first.timestamp : null;
-  }
-
   handleDevices(devices: TraccarDevice[]) {
-    // 1. Merge updates into raw master map
+    const isFirst = this.rawTraccarDevices.size === 0;
+
     for (const d of devices) {
-      if (!d.id) continue;
-      this.rawTraccarDevices.set(d.id, d);
+      if (d.id) this.rawTraccarDevices.set(d.id, d);
     }
 
-    // 2. Rebuild derived state from FULL master map
-    const processedDevices = Array.from(this.rawTraccarDevices.values())
+    const processed = Array.from(this.rawTraccarDevices.values())
       .map(device => {
         const { attributes, id, name, lastUpdate } = device;
         const lastSeen = lastUpdate ? (Date.parse(lastUpdate) as Timestamp) : null;
@@ -127,40 +84,24 @@ export class ServerState {
         const profileAttr = attributes["motionProfile"];
         const profile = (profileAttr === "person" || profileAttr === "car") ? profileAttr : null;
         const color = (typeof attributes["color"] === "string") ? attributes["color"] : rgbToHex(...colorForDevice(id));
+        const emoji = typeof attributes["emoji"] === "string" ? attributes["emoji"] : "";
 
-        const base: AppDevice = {
-          id,
-          name,
-          emoji: typeof attributes["emoji"] === 'string' ? attributes["emoji"] : "",
-          lastSeen,
-          effectiveMotionProfile: profile ?? "person",
-          motionProfile: profile,
-          color,
-          isOwner: false,
-          memberDeviceIds: null,
-        };
+        const base: AppDevice = { id, name, emoji, lastSeen, effectiveMotionProfile: profile ?? "person", motionProfile: profile, color, isOwner: false, memberDeviceIds: null };
 
         const memberIdsAttr = attributes["memberDeviceIds"];
         let group: AppDevice | null = null;
         if (typeof memberIdsAttr === "string") {
           try {
-            group = {
-              ...base,
-              emoji: base.emoji || 'group',
-              lastSeen: null,
-              memberDeviceIds: JSON.parse(memberIdsAttr) as number[],
-            };
-          } catch { /* Ignore invalid JSON */ }
+            group = { ...base, emoji: base.emoji ? base.emoji : 'group', lastSeen: null, memberDeviceIds: JSON.parse(memberIdsAttr) as number[] };
+          } catch { /* ignore */ }
         }
-
         return { id, base, group };
       })
       .filter((d): d is NonNullable<typeof d> => d !== null);
 
-    this.devices = Object.fromEntries(processedDevices.map(d => [d.id, d.base]));
-    this.groups = processedDevices.map(d => d.group).filter((g): g is AppDevice => g !== null);
+    this.devices = Object.fromEntries(processed.map(d => [d.id, d.base]));
+    this.groups = processed.map(d => d.group).filter((g): g is AppDevice => g !== null);
 
-    // Compute group lastSeen from member devices (in-place)
     for (const group of this.groups) {
       if (group.memberDeviceIds) {
         let max: Timestamp | null = null;
@@ -172,234 +113,145 @@ export class ServerState {
       }
     }
 
-    const deviceToGroupsMap = new Map<number, number[]>();
-    const groupIds = new Set<number>();
-
+    this.deviceToGroupsMap.clear();
+    this.groupIds.clear();
     for (const group of this.groups) {
-      groupIds.add(group.id);
-      if (group.memberDeviceIds) {
-        for (const deviceId of group.memberDeviceIds) {
-          const groupList = deviceToGroupsMap.get(deviceId) ?? [];
-          groupList.push(group.id);
-          deviceToGroupsMap.set(deviceId, groupList);
-        }
-      }
-    }
-
-    this.deviceToGroupsMap = deviceToGroupsMap;
-    this.groupIds = groupIds;
-
-    console.log(`[ServerState] Handled ${devices.length} updates. Total devices in state: ${Object.keys(this.devices).length}`);
-  }
-
-  handlePositions(positions: NormalizedPosition[]) {
-    if (positions.length === 0) return null;
-    return this.processPositions(positions, true);
-  }
-
-  private processPositions(newPosArr: NormalizedPosition[], saveToDb: boolean) {
-    if (saveToDb) {
-      const stmt = db.prepare(`INSERT INTO position_events (device_id, geo_lng, geo_lat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
-      const insertMany = db.transaction((positions: NormalizedPosition[]) => {
-        for (const p of positions) {
-          stmt.run(p.device, p.geo[0], p.geo[1], p.accuracy, p.timestamp);
-        }
+      this.groupIds.add(group.id);
+      group.memberDeviceIds?.forEach(deviceId => {
+        const list = this.deviceToGroupsMap.get(deviceId) ?? [];
+        list.push(group.id);
+        this.deviceToGroupsMap.set(deviceId, list);
       });
-      insertMany(newPosArr);
     }
 
-    if (newPosArr.length > 0) {
-      this.positionsAll.push(...newPosArr);
-      this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
-
-      // Incrementally update our per-device/group index
-      for (const p of newPosArr) {
+    if (isFirst && this.positionsAll.length > 0) {
+      console.log(`[ServerState] Initial catch-up for ${this.positionsAll.length} positions...`);
+      this.allPosById.clear();
+      for (const p of this.positionsAll) {
         const ids = [p.device, ...(this.deviceToGroupsMap.get(p.device) ?? [])];
         for (const id of ids) {
           let list = this.allPosById.get(id);
           if (!list) this.allPosById.set(id, list = []);
           list.push(p);
-          list.sort((a, b) => a.timestamp - b.timestamp);
         }
+      }
+      this.handlePositions([]);
+    }
+
+    console.log(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
+  }
+
+  handlePositions(pts: NormalizedPosition[]) {
+    if (pts.length === 0) return null;
+
+    // 1. Save to Database
+    db.transaction(() => {
+      const stmt = db.prepare(`INSERT INTO position_events (device_id, geo_lng, geo_lat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
+      for (const p of pts) {
+        stmt.run(p.device, p.geo[0], p.geo[1], p.accuracy, p.timestamp);
+      }
+    })();
+
+    // 2. Update memory index
+    this.positionsAll.push(...pts);
+    this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
+
+    for (const p of pts) {
+      const ids = [p.device, ...(this.deviceToGroupsMap.get(p.device) ?? [])];
+      for (const id of ids) {
+        let list = this.allPosById.get(id);
+        if (!list) this.allPosById.set(id, list = []);
+        list.push(p);
+        list.sort((a, b) => a.timestamp - b.timestamp);
       }
     }
 
-    // Prune positions and processedKeys older than history window
+    // 3. Prune old data
     const cutoff = Date.now() - this.historyMs;
-
-    // Find points to prune
-    const toPrune = this.positionsAll.filter(p => p.timestamp <= cutoff);
-    if (toPrune.length > 0) {
-      for (const p of toPrune) {
-        this.processedKeys.delete(dedupeKey(p));
+    const splitIdx = this.positionsAll.findIndex(p => p.timestamp > cutoff);
+    if (splitIdx > 0) {
+      for (let i = 0; i < splitIdx; i++) {
+        const p = this.positionsAll[i];
+        if (p) this.processedKeys.delete(dedupeKey(p));
       }
-      this.positionsAll = this.positionsAll.filter(p => p.timestamp > cutoff);
+      this.positionsAll = this.positionsAll.slice(splitIdx);
+    }
 
-      // Also prune the per-device index
-      for (const [id, list] of this.allPosById) {
-        const filtered = list.filter(p => p.timestamp > cutoff);
-        if (filtered.length === 0) {
-          this.allPosById.delete(id);
-        } else {
-          this.allPosById.set(id, filtered);
-        }
+    for (const [id, list] of this.allPosById) {
+      const split = list.findIndex(p => p.timestamp > cutoff);
+      if (split === -1) {
+        this.allPosById.delete(id);
+      } else if (split > 0) {
+        this.allPosById.set(id, list.slice(split));
       }
     }
 
-    // Also periodically cleanup the db table of old data so it doesn't grow forever
-    if (saveToDb && Math.random() < 0.05) { // ~ 5% chance per batch
+    if (Math.random() < 0.05) {
       db.run('DELETE FROM position_events WHERE timestamp < ?', [cutoff]);
     }
 
-    const motionProfiles: Record<number, MotionProfileName> = Object.fromEntries(
-      Object.entries(this.devices).map(([id, d]) => [id, d.effectiveMotionProfile])
+    // 4. Compute Engine State
+    const profiles: Record<number, MotionProfileName> = Object.fromEntries(
+      Object.entries(this.devices).map(([id, d]) => [Number(id), d.effectiveMotionProfile])
     );
 
-    const result = this.computeProcessedPositionsInternal(
-      newPosArr,
-      this.allPosById,
-      this.processedKeys,
-      this.deviceToGroupsMap,
-      this.groups,
-      this.engines,
-      this.engineCheckpoints,
-      this.groupIds,
-      motionProfiles
-    );
-
-    if (result) {
-      const firstPos = newPosArr[0];
-      const deviceId = firstPos?.device;
-      const beforeCount = deviceId !== undefined ? (this.eventsByDevice[deviceId]?.length ?? 0) : 0;
-
-      let replayedCount = 0;
-      let newCount = 0;
-      for (const p of newPosArr) {
-        const eng = this.engines.get(p.device);
-        if (eng?.lastTimestamp && p.timestamp <= eng.lastTimestamp) {
-          replayedCount++;
-        } else {
-          newCount++;
-        }
-      }
-
-      this.engineSnapshotsByDevice = { ...this.engineSnapshotsByDevice, ...result.engineSnapshotsByDevice };
-      this.eventsByDevice = { ...this.eventsByDevice, ...result.eventsByDevice };
-
-      // Ensure events are sorted by start timestamp descending for consistent timeline
-      for (const id in this.eventsByDevice) {
-        const events = this.eventsByDevice[id];
-        if (events && events.length > 1) {
-          events.sort((a, b) => b.start - a.start);
-        }
-      }
-
-      if (deviceId !== undefined) {
-        const afterCount = this.eventsByDevice[deviceId]?.length ?? 0;
-        const isMulti = new Set(newPosArr.map(p => p.device)).size > 1;
-        console.log(`[ServerState] processPositions for ${isMulti ? 'multiple devices' : deviceId}: ${newPosArr.length} pts (${replayedCount} replayed, ${newCount} new). Events: ${beforeCount} -> ${afterCount}`);
-      }
-    } else {
-      console.log(`[ServerState] No processing needed for batch of ${newPosArr.length} pts`);
-    }
-
-    const totalEvents = Object.values(this.eventsByDevice).reduce((acc, evs) => acc + evs.length, 0);
-    console.log(`[ServerState] Total events in memory: ${totalEvents}`);
-
-    return result;
-  }
-
-  private computeProcessedPositionsInternal(
-    newPosArr: NormalizedPosition[],
-    allPosById: Map<number, NormalizedPosition[]>,
-    processedKeys: Set<string>,
-    deviceToGroupsMap: Map<number, number[]>,
-    groupDevices: AppDevice[],
-    engines: Map<number, Engine>,
-    engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>,
-    groupIds: Set<number>,
-    motionProfiles: Record<number, MotionProfileName>
-  ): { engineSnapshotsByDevice: Record<number, DevicePoint[]>, eventsByDevice: Record<number, EngineEvent[]> } | null {
-    if (newPosArr.length === 0 && Array.from(engines.values()).every(e => !e.draft)) {
-      return null;
-    }
-
-    // 1. Identify which IDs were touched by THIS batch
     const posById = new Map<number, NormalizedPosition[]>();
-    const groupIdsTouched = new Set<number>();
-
-    for (const p of newPosArr) {
-      const ids = [p.device, ...(deviceToGroupsMap.get(p.device) ?? [])];
+    for (const p of pts) {
       const key = dedupeKey(p);
-
-      // If we've already processed this point fully, we skip putting it in posById
-      // But we still need to know it touched these IDs for potential "mush" processing
-      if (!processedKeys.has(key)) {
-        processedKeys.add(key);
+      if (!this.processedKeys.has(key)) {
+        this.processedKeys.add(key);
+        const ids = [p.device, ...(this.deviceToGroupsMap.get(p.device) ?? [])];
         for (const id of ids) {
           let list = posById.get(id);
           if (!list) posById.set(id, list = []);
           list.push(p);
-          if (groupIds.has(id)) groupIdsTouched.add(id);
         }
       }
     }
 
-    // 1.5 Bootstrap trailing points for all engines from historical buffer
-    // For devices touched in this batch OR when performing initial catch-up (empty newPosArr)
-    const idsToBootstrap = newPosArr.length > 0 ? Array.from(posById.keys()) : Array.from(engines.keys());
-
-    for (const id of idsToBootstrap) {
-      const engine = engines.get(id);
+    // Bootstrap trailing points for touched IDs
+    for (const id of posById.keys()) {
+      const engine = this.engines.get(id);
       const lastTs = engine?.lastTimestamp ?? 0;
-      const historical = allPosById.get(id) ?? [];
-      const batchPoints = posById.get(id) ?? [];
+      const history = this.allPosById.get(id) ?? [];
+      const batch = posById.get(id) ?? [];
 
-      const trailing = historical
-        .filter(p => p.timestamp > lastTs && !batchPoints.some(pp => dedupeKey(pp) === dedupeKey(p)))
-        .sort((a, b) => a.timestamp - b.timestamp);
-
+      const trailing = history.filter(p => p.timestamp > lastTs && !batch.some(bp => dedupeKey(bp) === dedupeKey(p)));
       if (trailing.length) {
-        // Merge with points from current batch, ensuring sort
-        const combined = [...batchPoints, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
+        const combined = [...batch, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
         posById.set(id, combined);
-
-        // Ensure processedKeys is updated so we don't double-process 
-        for (const p of trailing) {
-          processedKeys.add(dedupeKey(p));
-        }
+        for (const p of trailing) this.processedKeys.add(dedupeKey(p));
       }
     }
 
     if (!posById.size) return null;
 
-    // 2. Handle out-of-order data and replay
+    // Replay for out-of-order data
     for (const [id, newPos] of posById) {
-      const engine = engines.get(id);
+      const engine = this.engines.get(id);
       if (!engine?.lastTimestamp || !newPos[0] || newPos[0].timestamp >= engine.lastTimestamp) continue;
 
       const minTs = newPos[0].timestamp;
-      const checkpoints = engineCheckpoints.get(id) ?? [];
+      const checkpoints = this.engineCheckpoints.get(id) ?? [];
       const cpIndex = checkpoints.findLastIndex(c => c.timestamp < minTs);
       const cp = cpIndex >= 0 ? checkpoints[cpIndex] : null;
 
       if (cp) {
         engine.restoreSnapshot(cp.snapshot);
-        engineCheckpoints.set(id, checkpoints.slice(0, cpIndex + 1));
+        this.engineCheckpoints.set(id, checkpoints.slice(0, cpIndex + 1));
         db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp > ?`, [id, cp.timestamp]);
       } else {
-        engines.set(id, new Engine());
-        engineCheckpoints.set(id, []);
+        this.engines.set(id, new Engine());
+        this.engineCheckpoints.set(id, []);
         db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [id]);
       }
 
       const replayFrom = cp?.timestamp ?? 0;
-      const relevantIds = groupIds.has(id) ? new Set(groupDevices.find(g => g.id === id)?.memberDeviceIds ?? []) : [id];
-      const historical = Array.from(relevantIds).flatMap(rId => allPosById.get(rId) ?? []).filter(p => p.timestamp > replayFrom).sort((a, b) => a.timestamp - b.timestamp);
+      const relevantIds = this.groupIds.has(id) ? new Set(this.groups.find(g => g.id === id)?.memberDeviceIds ?? []) : [id];
+      const historical = Array.from(relevantIds).flatMap(rId => this.allPosById.get(rId) ?? []).filter(p => p.timestamp > replayFrom).sort((a, b) => a.timestamp - b.timestamp);
       posById.set(id, historical);
     }
 
-    // 3. Convert to DevicePoint for engine processing
     const rawByDevice: Record<number, DevicePoint[]> = {};
     for (const [id, arr] of posById) {
       rawByDevice[id] = arr.map(p => ({
@@ -410,35 +262,30 @@ export class ServerState {
         timestamp: p.timestamp,
         anchorStartTimestamp: p.timestamp,
         confidence: 0,
-        sourceDeviceId: groupIds.has(id) ? p.device : null,
+        sourceDeviceId: this.groupIds.has(id) ? p.device : null,
       }));
     }
 
-    // 4. Determine motion profiles and build snapshots
-    const groupMotionProfiles = new Map(groupDevices.map(g => [
+    const groupProfiles = new Map(this.groups.map(g => [
       g.id,
-      g.motionProfile ?? ((g.memberDeviceIds?.some(mId => motionProfiles[mId] === "car")) ? "car" : "person")
+      g.motionProfile ?? ((g.memberDeviceIds?.some(mId => profiles[mId] === "car")) ? "car" : "person")
     ]));
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, this.engines, this.groupIds, groupProfiles, profiles);
 
-    // 5. Final pass: Prune and Checkpoint
-    const eventsCutoff = Date.now() - (this.historyMs * 2);
+    // Prune and Checkpoint
+    const cpCutoff = Date.now() - (this.historyMs * 2);
     const cpToDb: { id: number, cp: { timestamp: Timestamp, snapshot: EngineState } }[] = [];
 
-    for (const id of engines.keys()) {
-      const engine = engines.get(id)!;
+    for (const [id, engine] of this.engines) {
       if (engine.lastTimestamp) {
-        // Prune
-        engine.pruneHistory(eventsCutoff as Timestamp);
-
-        // Checkpoint
-        const checkpoints = engineCheckpoints.get(id) ?? [];
+        engine.pruneHistory(cpCutoff as Timestamp);
+        const checkpoints = this.engineCheckpoints.get(id) ?? [];
         const lastCp = checkpoints[checkpoints.length - 1];
         if (rawByDevice[id]?.length && (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS)) {
           const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
           checkpoints.push(cp);
-          engineCheckpoints.set(id, checkpoints);
+          this.engineCheckpoints.set(id, checkpoints);
           cpToDb.push({ id, cp });
 
           if (checkpoints.length > MAX_CHECKPOINTS) {
@@ -454,10 +301,20 @@ export class ServerState {
       db.transaction(() => cpToDb.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
     }
 
-    return {
-      engineSnapshotsByDevice: result.positionsByDevice,
-      eventsByDevice: result.eventsByDevice,
-    };
+    const beforeCount = pts[0]?.device !== undefined ? (this.eventsByDevice[pts[0].device]?.length ?? 0) : 0;
+    Object.assign(this.engineSnapshotsByDevice, result.positionsByDevice);
+    Object.assign(this.eventsByDevice, result.eventsByDevice);
+
+    for (const id in this.eventsByDevice) {
+      this.eventsByDevice[id]?.sort((a, b) => b.start - a.start);
+    }
+
+    if (pts[0]?.device !== undefined) {
+      const afterCount = this.eventsByDevice[pts[0].device]?.length ?? 0;
+      console.log(`[ServerState] handlePositions: ${pts.length} pts. Events: ${beforeCount} -> ${afterCount}`);
+    }
+
+    return result;
   }
 
   getMetadata(allowedDeviceIds: Set<number>) {
