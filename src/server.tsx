@@ -206,7 +206,7 @@ async function verifyTraccarSession(request: Request): Promise<{ username: strin
 
     const base = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
 
-    const devicesRes = await fetch(`${base}/api/devices`, {
+    const devicesRes = await fetch(`${base}/devices`, {
       headers: { "Authorization": `Bearer ${session.traccarToken}`, "Accept": "application/json" }
     });
 
