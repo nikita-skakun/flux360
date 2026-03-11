@@ -343,4 +343,28 @@ describe("Engine Core Logic", () => {
         const motions = engine.closed.filter(e => e.type === 'motion');
         expect(motions.length).toBe(0);
     });
+
+    test("Snapshot lastTimestamp persistence and safety", () => {
+        const engine = new Engine();
+        const p1 = createPoint(P1, START_TIME, 1);
+        const p2 = createPoint(P1, START_TIME + 1000, 1);
+        const p3 = createPoint(P1, START_TIME + 2000, 1);
+
+        engine.processMeasurements([p1, p2, p3]);
+        expect(engine.lastTimestamp).toBe(START_TIME + 2000);
+
+        const snapshot = engine.createSnapshot();
+        const engine2 = new Engine();
+        engine2.restoreSnapshot(snapshot);
+
+        // Verify lastTimestamp is restored
+        expect(engine2.lastTimestamp).toBe(START_TIME + 2000);
+
+        // Feed out-of-order point (ServerState would usually prevent this if lastTimestamp is correct)
+        const pOld = createPoint(P1, START_TIME + 500, 1);
+        engine2.processMeasurements([pOld]);
+
+        // Engine itself just updates lastTimestamp, but we want to ensure it doesn't break draft start
+        expect(engine2.draft?.start).toBe(START_TIME);
+    });
 });

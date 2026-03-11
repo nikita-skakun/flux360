@@ -7,7 +7,7 @@ import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } fr
 import { getColorForDevice, type Color } from "@/util/color";
 import { toWebMercator, fromWebMercator } from "@/util/webMercator";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { DevicePoint, Vec2, DebugAnchor, DebugFrameView, Timestamp, EngineEvent } from "@/types";
+import type { DevicePoint, Vec2, DebugAnchor, DebugFrame, Timestamp, EngineEvent } from "@/types";
 import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
 
 export type MapViewHandle = {
@@ -26,7 +26,7 @@ type Props = {
   maptilerApiKey: string | null;
   darkMode: boolean;
   debugAnchors: DebugAnchor[];
-  debugFrame: DebugFrameView | null;
+  debugFrame: DebugFrame | null;
   pulsingDeviceIds: number[];
   selectedHistoryItem?: EngineEvent | null;
 };

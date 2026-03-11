@@ -28,9 +28,10 @@ export type DebugAnchor = {
 };
 
 /** Snapshot of a single debug frame for map rendering. */
-export type DebugFrameView = {
+export type DebugDecision = 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
+export type DebugFrame = {
   timestamp: Timestamp;
-  decision: 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
+  decision: DebugDecision;
   point: Vec2 | null;
   mean: Vec2 | null;
   variance: number | null;
@@ -128,9 +129,33 @@ export type MotionDraft = {
 
 export type EngineDraft = StationaryDraft | MotionDraft;
 
+export type EngineSnapshot = {
+  draft: EngineDraft | null;
+  closed: EngineEvent[];
+  timestamp: Timestamp | null;
+  activeConfidence: number;
+};
+
+export type EngineState = {
+  draft: EngineDraft | null;
+  closed: EngineEvent[];
+  lastTimestamp: Timestamp | null;
+  debugFrames: DebugFrame[];
+  seenDebugKeys: string[];
+};
+
+export interface RawTraccarPosition {
+  deviceId: number;
+  fixTime: string | number;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  [key: string]: unknown;
+}
+
 // --- WebSocket Protocol ---
 
-export interface BaseAppDevice {
+export interface AppDevice {
   id: number;
   name: string;
   emoji: string;
@@ -138,9 +163,6 @@ export interface BaseAppDevice {
   effectiveMotionProfile: MotionProfileName;
   motionProfile: MotionProfileName | null;
   color: string | null;
-}
-
-export interface AppDevice extends BaseAppDevice {
   isOwner: boolean;
 }
 

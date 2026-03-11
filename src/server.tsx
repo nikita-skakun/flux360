@@ -1,5 +1,6 @@
 import { serve } from "bun";
 import indexHtml from "./index.html";
+import type { NormalizedPosition, TraccarDevice } from "@/types";
 
 const isProduction = process.env.NODE_ENV === "production";
 const port = Number(process.env["PORT"] || 3000);
@@ -52,16 +53,18 @@ if (missingFields.length > 0) {
 const serverState = new ServerState(config.historyDays);
 
 // Helper to broadcast state to specific device topics
-function broadcastUpdate(server: import("bun").Server<WSData>) {
-  for (const deviceId of Object.keys(serverState.engineSnapshotsByDevice)) {
-    const id = parseInt(deviceId);
-    server.publish(`device-${id}`, JSON.stringify({
-      type: "positions_update",
-      payload: {
-        snapshots: { [id]: serverState.engineSnapshotsByDevice[id] },
-        events: { [id]: serverState.eventsByDevice[id] ?? [] }
-      }
-    }));
+function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: number[]) {
+  const idsToSync = deviceIds ?? Object.keys(serverState.engineSnapshotsByDevice).map(Number);
+  for (const id of idsToSync) {
+    if (serverState.engineSnapshotsByDevice[id]) {
+      server.publish(`device-${id}`, JSON.stringify({
+        type: "positions_update",
+        payload: {
+          snapshots: { [id]: serverState.engineSnapshotsByDevice[id] },
+          events: { [id]: serverState.eventsByDevice[id] ?? [] }
+        }
+      }));
+    }
   }
 }
 
@@ -71,29 +74,64 @@ function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string
   if (traccarClient) traccarClient.close();
 
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
-    onDevicesReceived: (devices) => {
+    onDevicesReceived: (devices: TraccarDevice[]) => {
       serverState.handleDevices(devices);
 
-      // Broadcast global device changes to all relevant device topics.
-      // Individual clients only receive updates for devices they are subscribed to.
-      for (const deviceId of Object.keys(serverState.devices)) {
-        const id = parseInt(deviceId);
-        const device = serverState.devices[id];
+      const historyMs = config.historyDays * 24 * 60 * 60 * 1000;
+      const backfillCutoff = Date.now() - historyMs;
+
+      const devicesToBackfill = devices
+        .map(d => d.id)
+        .filter((id): id is number => id !== undefined && !serverState.backfilledDeviceIds.has(id));
+
+      if (devicesToBackfill.length > 0) {
+        devicesToBackfill.forEach(id => serverState.backfilledDeviceIds.add(id));
+
+        (async () => {
+          console.log(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
+          for (const id of devicesToBackfill) {
+            const lastTs = serverState.getLastTimestamp(id);
+            const firstTs = serverState.getFirstTimestamp(id);
+
+            // Fetch head delta if we have reliable data, otherwise full window
+            const isDelta = lastTs && firstTs && firstTs < backfillCutoff + (10 * 60000);
+            const from = isDelta ? (lastTs! + 1) : backfillCutoff;
+
+            if (Date.now() - from < 60000) continue;
+
+            try {
+              console.log(`[Server] Device ${id} backfill: type=${isDelta ? "DELTA" : "FULL"}, from=${new Date(from).toISOString()}`);
+              const history = await traccarClient!.fetchHistory(id, from, Date.now());
+              if (history.length > 0 && serverState.handlePositions(history)) {
+                broadcastUpdate(server, [id]);
+              }
+              await new Promise(r => setTimeout(r, 200)); // Gentle delay for Traccar API
+            } catch (err) {
+              console.error(`[Server] History backfill failed for device ${id}:`, err);
+            }
+          }
+          console.log(`[Server] Sequential backfill complete.`);
+        })();
+      }
+
+      // Broadcast global device changes to relevant topics
+      for (const [deviceId, device] of Object.entries(serverState.devices)) {
+        const id = Number(deviceId);
         server.publish(`device-${id}`, JSON.stringify({
           type: "config_update",
           payload: {
-            devices: { [id]: { ...device, isOwner: false } }, // logic for isOwner happens at subscription time
+            devices: { [id]: { ...device, isOwner: false } },
             groups: serverState.groups.filter(g => g.id === id || g.memberDeviceIds.includes(id))
           }
         }));
       }
     },
-    onPositionsReceived: (positions) => {
-      const result = serverState.handlePositions(positions);
-      if (result) broadcastUpdate(server);
+    onPositionsReceived: (positions: NormalizedPosition[]) => {
+      if (serverState.handlePositions(positions)) {
+        broadcastUpdate(server, Array.from(new Set(positions.map(p => p.device))));
+      }
     }
   });
-
   traccarClient.connect();
 }
 
@@ -279,7 +317,7 @@ if (isProduction) {
 
             const session = sessionStore.getSession(data.token);
             if (!session) {
-              ws.send(JSON.stringify({ type: "error", message: "Invalid session" }));
+              ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
               return;
             }
 

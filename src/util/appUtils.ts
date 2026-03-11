@@ -1,5 +1,5 @@
-import { Engine, type EngineSnapshot } from "@/engine/engine";
-import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp } from "@/types";
+import { Engine } from "@/engine/engine";
+import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp, EngineSnapshot } from "@/types";
 import { fromWebMercator } from "@/util/webMercator";
 
 export function formatDuration(ms: number): string {
@@ -46,12 +46,12 @@ export function buildEngineSnapshotsFromByDevice(
       try {
         const engine = enginesRef.get(deviceId);
         if (!engine) continue;
+        const events = [...engine.closed];
         const snapshot = engine.getCurrentSnapshot();
 
         if (snapshot) {
           snapshotsByDevice.set(deviceId, [snapshot]);
-          
-          const events = [...engine.closed];
+
           const draft = snapshot.draft;
           if (draft) {
             if (draft.type === 'stationary') {
@@ -104,10 +104,10 @@ export function buildEngineSnapshotsFromByDevice(
               }];
             }
           }
-          eventsByDevice[deviceId] = events;
         } else {
           currentSnapshots[deviceId] = [];
         }
+        eventsByDevice[deviceId] = events;
       } catch (innerError) {
         console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
       }

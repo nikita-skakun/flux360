@@ -70,6 +70,13 @@ export function useServerConnection() {
 
           // Handle regular broadcast messages
           const message = parsed as ServerMessage;
+
+          if (message.type === 'error' && message.message === 'Session expired') {
+            console.error('Session expired, logging out...');
+            useStore.getState().logout();
+            return;
+          }
+
           switch (message.type) {
             case 'initial_state':
               setInitialState(message.payload);
@@ -100,6 +107,7 @@ export function useServerConnection() {
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
         setStatus('error');
+        ws.close(); // Ensure onclose is called to trigger reconnection
       };
     };
 

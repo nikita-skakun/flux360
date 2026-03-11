@@ -9,7 +9,7 @@ import { useStore } from "./store";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import type { DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
+import type { DebugAnchor, DebugFrame, UiDevice, Timestamp } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -175,7 +175,7 @@ export function App() {
   }, [selectedDeviceId]);
 
   // Current debug frame for map rendering
-  const debugFrame = useMemo((): DebugFrameView | null => {
+  const debugFrame = useMemo((): DebugFrame | null => {
     if (!debugMode || selectedDeviceId == null) return null;
     const snapshots = engineSnapshotsByDevice[selectedDeviceId] ?? [];
     if (snapshots.length === 0) return null;
@@ -192,7 +192,7 @@ export function App() {
       isSignificant: false, // Don't have this on snapshot points
       distance: 0,
       classification: 'unknown', // Best effort
-    } as unknown as DebugFrameView;
+    } as unknown as DebugFrame;
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
   const deviceList = useMemo(() => {

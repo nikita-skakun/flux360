@@ -2,33 +2,7 @@ import { haversineDistance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, DEBUG_FRAME_CAP, type MotionProfileConfig } from "./motionDetector";
 import { fromWebMercator } from "@/util/webMercator";
 import { smoothPath } from "@/util/pathSmoothing";
-import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent } from "@/types";
-
-export type EngineSnapshot = {
-  draft: EngineDraft | null;
-  closed: EngineEvent[];
-  timestamp: Timestamp | null;
-  activeConfidence: number;
-};
-
-export type EngineState = {
-  draft: EngineDraft | null;
-  closed: EngineEvent[];
-  debugFrames: DebugFrame[];
-  seenDebugKeys: string[];
-};
-
-export type DebugDecision = 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
-export type DebugFrame = {
-  timestamp: Timestamp;
-  decision: DebugDecision;
-  point: Vec2 | null;
-  mean: Vec2 | null;
-  variance: number | null;
-  mahalanobis2: number | null;
-  pendingCount: number;
-  draftType: 'stationary' | 'motion' | 'none';
-};
+import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineSnapshot, EngineState, DebugDecision, DebugFrame } from "@/types";
 
 export class Engine {
   draft: EngineDraft | null = null;
@@ -114,9 +88,10 @@ export class Engine {
         const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
         const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > HARD_BREAKOUT_DISTANCE);
 
-        if (isCoherent || anyPendingFar) {
+        const firstPending = draft.pending[0];
+        if (firstPending && (isCoherent || anyPendingFar)) {
           // Transition to Motion
-          const startTimestamp = draft.pending[0]!.timestamp;
+          const startTimestamp = firstPending.timestamp;
           this.draft = {
             type: 'motion',
             start: startTimestamp,
@@ -124,14 +99,16 @@ export class Engine {
             predecessor: draft,
             startAnchor: stats.mean,
             path: [...draft.pending],
-            recent: [draft.pending[draft.pending.length - 1]!]
+            recent: [draft.pending[draft.pending.length - 1] ?? firstPending]
           };
         } else {
           // Mushy noise. Merge oldest pending into recent to prevent buffer bloat
-          const first = draft.pending.shift()!;
-          draft.recent.push(first);
-          if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
-          this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
+          const first = draft.pending.shift();
+          if (first) {
+            draft.recent.push(first);
+            if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
+            this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
+          }
         }
       }
     }
@@ -155,13 +132,19 @@ export class Engine {
     }
 
     // Settled! Decide if significant or noise
-    const settleStart = draft.recent[0]!.timestamp;
+    const firstRecent = draft.recent[0];
+    if (!firstRecent) {
+      this.recordDebug(p, 'motion');
+      return;
+    }
+    const settleStart = firstRecent.timestamp;
     const settleStats = this.computeStats(draft.recent);
     const totalDistance = this.computePathLength(draft.path);
     const startEndDist = haversineDistance(fromWebMercator(draft.startAnchor), fromWebMercator(settleStats.mean));
     const maxDev = this.maxDeviation(draft.path, draft.startAnchor);
 
-    const settleEnd = draft.recent[draft.recent.length - 1]!.timestamp;
+    const lastRecent = draft.recent[draft.recent.length - 1];
+    const settleEnd = lastRecent ? lastRecent.timestamp : p.timestamp;
     const settleDurationSeconds = (settleEnd - draft.start) / 1000;
     const avgRoadSpeed = settleDurationSeconds > 0 ? totalDistance / settleDurationSeconds : 0;
     const efficiency = totalDistance > 0 ? startEndDist / totalDistance : 0;
@@ -204,7 +187,7 @@ export class Engine {
       this.closed.push({
         type: 'stationary',
         start: draft.predecessor.start,
-        end: draft.stationaryCutoff,
+        end: Math.max(draft.predecessor.start, draft.stationaryCutoff),
         mean: predStats.mean,
         variance: predStats.variance,
         isDraft: false
@@ -213,13 +196,14 @@ export class Engine {
       this.closed.push({
         type: 'motion',
         start: draft.start,
-        end: settleStart,
+        end: Math.max(draft.start, settleStart),
         startAnchor: draft.startAnchor,
         endAnchor: settleStats.mean,
         path: stablePath,
         distance: totalDistance,
         isDraft: false
       });
+      console.log(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
 
       // Start new stationary
       this.draft = {
@@ -247,7 +231,11 @@ export class Engine {
   private checkSettled(draft: MotionDraft, profile: MotionProfileConfig): boolean {
     if (draft.recent.length < profile.motionSettleWindowSize) return false;
 
-    const duration = draft.recent[draft.recent.length - 1]!.timestamp - draft.recent[0]!.timestamp;
+    const first = draft.recent[0];
+    const last = draft.recent[draft.recent.length - 1];
+    if (!first || !last) return false;
+
+    const duration = last.timestamp - first.timestamp;
     if (duration < profile.minStationaryDuration) return false;
 
     const stats = this.computeStats(draft.recent);
@@ -315,8 +303,9 @@ export class Engine {
   public computePathLength(path: (Vec2 | DevicePoint)[]): number {
     let dist = 0;
     for (let i = 1; i < path.length; i++) {
-      const a = path[i - 1]!;
-      const b = path[i]!;
+      const a = path[i - 1];
+      const b = path[i];
+      if (!a || !b) continue;
       const p1 = 'mean' in a ? a.mean : a;
       const p2 = 'mean' in b ? b.mean : b;
       dist += haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
@@ -361,9 +350,11 @@ export class Engine {
   }
 
   createSnapshot(): EngineState {
+    console.log(`[Engine] Creating snapshot. History size: ${this.closed.length}`);
     return JSON.parse(JSON.stringify({
       draft: this.draft,
       closed: this.closed,
+      lastTimestamp: this.lastTimestamp,
       debugFrames: this.debugFrames,
       seenDebugKeys: [...this.seenDebugKeys]
     })) as EngineState;
@@ -372,9 +363,10 @@ export class Engine {
   restoreSnapshot(state: EngineState) {
     this.draft = state.draft;
     this.closed = (state.closed ?? []).map(ev => ({ ...ev, isDraft: ev.isDraft ?? false }));
+    this.lastTimestamp = state.lastTimestamp ?? this.draft?.start ?? null;
     this.debugFrames = state.debugFrames;
     this.seenDebugKeys = new Set(state.seenDebugKeys ?? []);
-    this.lastTimestamp = this.draft?.start ?? null;
+    console.log(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
   }
 
   pruneHistory(horizon: Timestamp) {
@@ -387,11 +379,12 @@ export class Engine {
 
     let i = 0;
     while (i < this.closed.length - 2) {
-      const current = this.closed[i]!;
-      const next = this.closed[i + 1]!;
-      const nextNext = this.closed[i + 2]!;
+      const current = this.closed[i];
+      const next = this.closed[i + 1];
+      const nextNext = this.closed[i + 2];
 
       if (
+        current && next && nextNext &&
         current.type === 'motion' &&
         next.type === 'stationary' &&
         nextNext.type === 'motion' &&
@@ -401,7 +394,7 @@ export class Engine {
         const merged: MotionEvent = {
           type: 'motion',
           start: current.start,
-          end: nextNext.end,
+          end: Math.max(current.start, nextNext.end),
           startAnchor: current.startAnchor,
           endAnchor: nextNext.endAnchor,
           path: [...current.path, ...nextNext.path],
