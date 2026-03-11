@@ -10,7 +10,6 @@ export const PENDING_THRESHOLD = 5; // minimum pending points to trigger motion 
 export const MIN_PATH_POINTS = 5; // minimum points in path for significance checks
 export const HARD_BREAKOUT_DISTANCE = 100; // meters from original anchor to force motion
 export const SETTLING_WINDOW_CAP = 20; // max points in motion settling window
-export const DEBUG_FRAME_CAP = 2000; // max debug frames to retain
 export const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 export const MAX_CHECKPOINTS = 50; // maximum number of checkpoints per engine
 

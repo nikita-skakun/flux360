@@ -7,8 +7,8 @@ import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
 import { getColorForDevice, type Color } from "@/util/color";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import type { AppDevice, DevicePoint, Vec2, DebugAnchor, DebugFrame, Timestamp, EngineEvent } from "@/types";
-import type { Feature, FeatureCollection, Point, Polygon, LineString } from "geojson";
+import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
+import type { Feature, Point, Polygon, LineString } from "geojson";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -16,48 +16,40 @@ export type MapViewHandle = {
 };
 
 type Props = {
-  components: DevicePoint[];
+  activePoints: DevicePoint[];
   entities: Record<number, AppDevice>;
   overlay: React.ReactNode;
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   maptilerApiKey: string | null;
   darkMode: boolean;
-  debugAnchors: DebugAnchor[];
-  debugFrame: DebugFrame | null;
   pulsingDeviceIds: number[];
   selectedHistoryItem?: EngineEvent | null;
 };
 
 const MapView = React.forwardRef<MapViewHandle, Props>(({
-  components,
+  activePoints,
   entities,
   overlay,
   selectedDeviceId,
   onSelectDevice,
   maptilerApiKey,
   darkMode,
-  debugAnchors = [],
-  debugFrame = null,
   pulsingDeviceIds = [],
   selectedHistoryItem = null,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
-  const componentsRef = useRef<DevicePoint[]>(components);
+  const activePointsRef = useRef<DevicePoint[]>(activePoints);
   const selectedDeviceIdRef = useRef(selectedDeviceId);
   const onSelectDeviceRef = useRef(onSelectDevice);
   const hasFittedInitially = useRef(false);
 
-  type AnchorTooltip = { x: number; y: number; anchor: DebugAnchor };
   const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
-  const [anchorTooltip, setAnchorTooltip] = useState<AnchorTooltip | null>(null);
-  const debugAnchorsRef = useRef<DebugAnchor[]>(debugAnchors);
-  useEffect(() => { debugAnchorsRef.current = debugAnchors; }, [debugAnchors]);
 
   useEffect(() => {
-    componentsRef.current = components;
-  }, [components]);
+    activePointsRef.current = activePoints;
+  }, [activePoints]);
 
   useEffect(() => {
     selectedDeviceIdRef.current = selectedDeviceId;
@@ -71,7 +63,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
 
-    const device = componentsRef.current.find(c => c.device === id);
+    const device = activePointsRef.current.find(c => c.device === id);
     if (!device) return;
 
     const center = map.getCenter();
@@ -109,8 +101,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       ? new Set(clusterPopup.items.map(item => item.device))
       : null;
 
-    // Project components to screen coords
-    const drawItems: (DrawItem & { colorHex: string })[] = components.map((c, idx) => {
+    // Project active points to screen coords
+    const drawItems: (DrawItem & { colorHex: string })[] = activePoints.map((c, idx) => {
       const pt = map.project(c.geo);
       const entity = entities[c.device];
       const colorHex = entity?.color ?? '#3b82f6';
@@ -151,7 +143,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const accuracyFeatures: Feature<Polygon>[] = [];
 
     drawItems.forEach((item, i) => {
-      const c = components[i]!;
+      const c = activePoints[i]!;
       const isClustered = clusteredIdxs.has(i);
 
       if (isClustered) {
@@ -193,54 +185,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       }
     });
 
-    // Debug frame circles (mean/variance at selected frame)
-    type FrameFeature = Feature<Polygon | Point>;
-    const debugFrameFeatures: FrameFeature[] = [];
-    if (debugFrame?.mean && debugFrame?.variance) {
-      const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
-        const pts = 64;
-        const coords = Array.from({ length: pts + 1 }, (_, j) => {
-          const angle = (j * 2 * Math.PI) / pts;
-          return fromWebMercator([center[0] + radiusM * Math.cos(angle), center[1] + radiusM * Math.sin(angle)]);
-        });
-        return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } } as Feature<Polygon>;
-      };
-      const radius = getRadiusFromVariance(debugFrame.variance);
-      debugFrameFeatures.push(makeCircle(debugFrame.mean, radius, 'anchor') as FrameFeature);
-
-      if (debugFrame.point) {
-        debugFrameFeatures.push({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: fromWebMercator(debugFrame.point) },
-          properties: { kind: 'measurement' }
-        } as FrameFeature);
-      }
-    }
-
-    // Debug anchor circles
-    const ANCHOR_COLORS: Record<DebugAnchor['type'], string> = {
-      active: '#00bcd4',   // teal
-      closed: '#9e9e9e',   // gray
-      candidate: '#ff9800', // orange
-      frame: '#2196f3',    // blue
-    };
-    const anchorCircleFeatures: Feature<Polygon>[] = debugAnchors.map(a => {
-      const radius = getRadiusFromVariance(a.variance);
-      const pts = 64;
-      const coords = Array.from({ length: pts + 1 }, (_, j) => {
-        const angle = (j * 2 * Math.PI) / pts;
-        return fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]);
-      });
-      return {
-        type: 'Feature',
-        geometry: { type: 'Polygon', coordinates: [coords] },
-        properties: {
-          color: ANCHOR_COLORS[a.type],
-          anchorIndex: debugAnchors.indexOf(a),
-        },
-      } as Feature<Polygon>;
-    });
-
     // Process clusters (separate pass after all devices are evaluated)
     clusters.filter(cl => cl.size > 1).forEach(cl => {
       if (hiddenClusterDeviceIds) {
@@ -257,9 +201,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (!rep) return;
 
       const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
-      const selComp = selItem ? components[selItem.idx] : null;
-      const markerLng = selComp ? selComp.geo[0] : cl.items.reduce((sum, it) => sum + (components[it.idx]?.geo[0] ?? 0), 0) / cl.size;
-      const markerLat = selComp ? selComp.geo[1] : cl.items.reduce((sum, it) => sum + (components[it.idx]?.geo[1] ?? 0), 0) / cl.size;
+      const selComp = selItem ? activePoints[selItem.idx] : null;
+      const markerLng = selComp ? selComp.geo[0] : cl.items.reduce((sum, it) => sum + (activePoints[it.idx]?.geo[0] ?? 0), 0) / cl.size;
+      const markerLat = selComp ? selComp.geo[1] : cl.items.reduce((sum, it) => sum + (activePoints[it.idx]?.geo[1] ?? 0), 0) / cl.size;
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
       if (!map.hasImage(clusterKey)) {
@@ -283,7 +227,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
 
     // Pulsing device points (drawn under pins)
     const pulsingPointFeatures: Feature<Point>[] = [];
-    for (const comp of components) {
+    for (const comp of activePoints) {
       if (pulsingDeviceIds.includes(comp.device)) {
         pulsingPointFeatures.push({
           type: 'Feature',
@@ -347,75 +291,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         (map.getSource('accuracy-source') as GeoJSONSource).setData(accData);
-      }
-
-      const anchorData = { type: 'FeatureCollection' as const, features: anchorCircleFeatures };
-      if (!map.getSource('debug-anchors-source')) {
-        map.addSource('debug-anchors-source', { type: 'geojson', data: anchorData });
-        // Invisible fill for interior hover hit-testing
-        map.addLayer({
-          id: 'debug-anchors-fill-layer',
-          type: 'fill',
-          source: 'debug-anchors-source',
-          paint: { 'fill-opacity': 0 },
-        });
-        // Solid outline — no dasharray so it stays visually consistent across zoom levels
-        map.addLayer({
-          id: 'debug-anchors-layer',
-          type: 'line',
-          source: 'debug-anchors-source',
-          paint: {
-            'line-color': ['get', 'color'],
-            'line-width': 1.5,
-            'line-opacity': 0.85,
-          },
-        });
-      } else {
-        (map.getSource('debug-anchors-source') as GeoJSONSource).setData(anchorData);
-      }
-
-      const frameData: FeatureCollection = { type: 'FeatureCollection', features: debugFrameFeatures };
-      if (!map.getSource('debug-frame-source')) {
-        map.addSource('debug-frame-source', { type: 'geojson', data: frameData });
-        // Light red fill for measurement circle (no outline)
-        map.addLayer({
-          id: 'debug-frame-fill-layer',
-          type: 'fill',
-          source: 'debug-frame-source',
-          filter: ['==', ['get', 'kind'], 'measurement'],
-          paint: { 'fill-color': '#f44336', 'fill-opacity': 0.25 },
-        });
-        // Blue outline for anchor-at-frame circle
-        map.addLayer({
-          id: 'debug-frame-anchor-layer',
-          type: 'line',
-          source: 'debug-frame-source',
-          filter: ['==', ['get', 'kind'], 'anchor'],
-          paint: { 'line-color': '#2196f3', 'line-width': 1.5, 'line-opacity': 0.9 },
-        });
-        // Red line linking measurement center to anchor center
-        map.addLayer({
-          id: 'debug-frame-link-layer',
-          type: 'line',
-          source: 'debug-frame-source',
-          filter: ['==', ['get', 'kind'], 'link'],
-          paint: { 'line-color': '#f44336', 'line-width': 1.5, 'line-opacity': 0.8 },
-        });
-        // Individual measurement point
-        map.addLayer({
-          id: 'debug-frame-point-layer',
-          type: 'circle',
-          source: 'debug-frame-source',
-          filter: ['==', ['get', 'kind'], 'measurement'],
-          paint: {
-            'circle-radius': 5,
-            'circle-color': '#f44336',
-            'circle-stroke-width': 2,
-            'circle-stroke-color': '#ffffff',
-          },
-        });
-      } else {
-        (map.getSource('debug-frame-source') as GeoJSONSource).setData(frameData);
       }
 
       const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
@@ -528,7 +403,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [components, entities, darkMode, selectedDeviceId, clusterPopup, debugAnchors, debugFrame, pulsingDeviceIds, selectedHistoryItem]);
+  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem]);
 
   const listenersAttached = useRef(false);
 
@@ -542,7 +417,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     let initialCenter: Vec2 = [0, 0];
     let initialZoom = 2;
 
-    const firstComp = componentsRef.current[0];
+    const firstComp = activePointsRef.current[0];
     if (firstComp) {
       initialCenter = firstComp.geo;
       initialZoom = 15;
@@ -695,7 +570,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (memberIds.length > 0 && geo?.type === 'Point') {
         const screen = map.project(geo.coordinates as Vec2);
         const items: DevicePoint[] = memberIds
-          .map(deviceId => componentsRef.current.find(c => c.device === deviceId))
+          .map(deviceId => activePointsRef.current.find(c => c.device === deviceId))
           .filter((c): c is DevicePoint => !!c);
         setClusterPopup({ x: screen.x, y: screen.y, items });
       }
@@ -723,26 +598,6 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       map.on("mouseenter", "clusters-layer", () => { map.getCanvas().style.cursor = "pointer"; });
       map.on("mouseleave", "clusters-layer", () => { map.getCanvas().style.cursor = ""; });
 
-      // Debug anchor hover — listen on fill layer so tooltip fires anywhere inside the circle
-      map.on("mousemove", "debug-anchors-fill-layer", (e: MapMouseEvent) => {
-        const features = map.queryRenderedFeatures(e.point, { layers: ['debug-anchors-fill-layer'] });
-        let best: DebugAnchor | null = null;
-        for (const f of features) {
-          const idx: unknown = f.properties?.['anchorIndex'];
-          if (typeof idx !== 'number') continue;
-          const anchor = debugAnchorsRef.current[idx];
-          if (anchor && (best === null || anchor.variance < best.variance)) best = anchor;
-        }
-        if (best) {
-          setAnchorTooltip({ x: e.point.x, y: e.point.y, anchor: best });
-          map.getCanvas().style.cursor = 'crosshair';
-        }
-      });
-      map.on("mouseleave", "debug-anchors-fill-layer", () => {
-        setAnchorTooltip(null);
-        map.getCanvas().style.cursor = '';
-      });
-
       listenersAttached.current = true;
     }
   }, [maptilerApiKey]);
@@ -765,13 +620,13 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
     updateLayers();
-  }, [components, entities, darkMode, selectedDeviceId, updateLayers]);
+  }, [activePoints, entities, darkMode, selectedDeviceId, updateLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || hasFittedInitially.current) return;
 
-    const c = componentsRef.current;
+    const c = activePointsRef.current;
     if (c.length === 0) return;
 
     let sw: Vec2, ne: Vec2;
@@ -820,36 +675,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
             entities={entities}
           />
         </div>
-      )}
-      {anchorTooltip && (() => {
-        const a = anchorTooltip.anchor;
-        const fmt = (ts: Timestamp) => { const d = new Date(ts); const t = new Date(); return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate() ? d.toLocaleTimeString() : d.toLocaleString(); };
-        const radius = Math.round(getRadiusFromVariance(a.variance));
-        return (
-          <div style={{
-            position: 'absolute',
-            left: anchorTooltip.x + 12,
-            top: anchorTooltip.y + 12,
-            zIndex: 30,
-            pointerEvents: 'none',
-            background: 'rgba(0,0,0,0.75)',
-            color: '#fff',
-            borderRadius: 6,
-            padding: '6px 10px',
-            fontSize: 12,
-            lineHeight: 1.6,
-            whiteSpace: 'nowrap',
-            borderLeft: `3px solid ${a.type === 'active' ? '#00bcd4' : '#9e9e9e'}`,
-          }}>
-            <div style={{ fontWeight: 600, marginBottom: 2 }}>{a.type === 'active' ? '● Active anchor' : '○ Closed anchor'}</div>
-            <div>Radius: {radius} m</div>
-            <div>Confidence: {(a.confidence * 100).toFixed(0)}%</div>
-            <div>Started: {fmt(a.startTimestamp)}</div>
-            {a.endTimestamp && <div>Ended: {fmt(a.endTimestamp)}</div>}
-          </div>
-        );
-      })()}
-    </div>
+      )}    </div>
   );
 });
 

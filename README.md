@@ -22,7 +22,6 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 - **Device Grouping**: Aggregate multiple devices into virtual groups for combined tracking (e.g., family or fleet views).
 - **Timeline Panel**: Visualizes the past 24 hours of stationary and moving events, allowing users to replay historical map paths.
 - **Interactive Mapping**: MapTiler SDK-based map with visual overlays for accuracy circles, device icons, history observation bounds, and clustering.
-- **Debug Mode**: Inspect background processing frames, settled position history, and motion decisions for troubleshooting.
 - **Settings UI**: In-app configuration for device metadata, motion profiles, and sharing permissions.
 
 ## Future Ideas

@@ -17,29 +17,6 @@ export type Timestamp = number & { readonly __u?: 'timestamp' };
 
 export type Vec2 = [number, number];
 
-export type DebugAnchor = {
-  mean: Vec2;        // Web Mercator [x, y]
-  variance: number;  // meters²
-  confidence: number;
-  type: "active" | "candidate" | "closed" | "frame";
-  startTimestamp: Timestamp;
-  endTimestamp: Timestamp | null;
-  lastUpdateTimestamp: Timestamp;
-};
-
-/** Snapshot of a single debug frame for map rendering. */
-export type DebugDecision = 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
-export type DebugFrame = {
-  timestamp: Timestamp;
-  decision: DebugDecision;
-  point: Vec2 | null;
-  mean: Vec2 | null;
-  variance: number | null;
-  mahalanobis2: number | null;
-  pendingCount: number;
-  draftType: 'stationary' | 'motion' | 'none';
-};
-
 export type DevicePoint = {
   device: number;
   sourceDeviceId: number | null;
@@ -117,19 +94,10 @@ export type MotionDraft = {
 
 export type EngineDraft = StationaryDraft | MotionDraft;
 
-export type EngineSnapshot = {
-  draft: EngineDraft | null;
-  closed: EngineEvent[];
-  timestamp: Timestamp | null;
-  activeConfidence: number;
-};
-
 export type EngineState = {
   draft: EngineDraft | null;
   closed: EngineEvent[];
   lastTimestamp: Timestamp | null;
-  debugFrames: DebugFrame[];
-  seenDebugKeys: string[];
 };
 
 export interface RawTraccarPosition {
@@ -145,7 +113,7 @@ export interface RawTraccarPosition {
 
 export type InitialStatePayload = {
   entities: Record<number, AppDevice>;
-  engineSnapshotsByDevice: Record<number, DevicePoint[]>;
+  activePointsByDevice: Record<number, DevicePoint[]>;
   eventsByDevice: Record<number, EngineEvent[]>;
   maptilerApiKey: string;
   metadata: {
@@ -155,7 +123,7 @@ export type InitialStatePayload = {
 
 export type ServerMessage =
   | { type: "initial_state"; payload: InitialStatePayload; requestId?: never }
-  | { type: "positions_update"; payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }; requestId?: never }
+  | { type: "positions_update"; payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }; requestId?: never }
   | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: AppDevice[] | null }; requestId?: never }
   | { type: "update_success"; deviceId: number; requestId?: string }
   | { type: "create_success"; device: TraccarDevice; requestId?: string }

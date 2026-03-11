@@ -1,6 +1,6 @@
-import { serve } from "bun";
+import { serve, type Server, type ServerWebSocket } from "bun";
 import indexHtml from "./index.html";
-import type { NormalizedPosition, TraccarDevice } from "@/types";
+import type { NormalizedPosition, TraccarDevice, AppDevice, DevicePoint, EngineEvent } from "@/types";
 
 const isProduction = process.env.NODE_ENV === "production";
 const port = Number(process.env["PORT"] || 3000);
@@ -58,20 +58,20 @@ function collectDeviceData(
   options: {
     applySnapshotCutoff?: boolean;
     snapshotCutoff?: number;
-    entities?: Record<number, import("./types").AppDevice>;
+    entities?: Record<number, AppDevice>;
   } = {}
-): { snapshots: Record<number, import("./types").DevicePoint[]>; events: Record<number, import("./types").EngineEvent[]> } {
+): { activePoints: Record<number, DevicePoint[]>; events: Record<number, EngineEvent[]> } {
   const { applySnapshotCutoff = false, snapshotCutoff = 0, entities } = options;
-  const snapshots: Record<number, import("./types").DevicePoint[]> = {};
-  const events: Record<number, import("./types").EngineEvent[]> = {};
+  const activePoints: Record<number, DevicePoint[]> = {};
+  const events: Record<number, EngineEvent[]> = {};
 
   for (const id of ids) {
-    if (serverState.engineSnapshotsByDevice[id]) {
+    if (serverState.activePointsByDevice[id]) {
       const include = applySnapshotCutoff
         ? entities?.[id]?.lastSeen != null && entities?.[id]!.lastSeen > snapshotCutoff
         : true;
       if (include) {
-        snapshots[id] = serverState.engineSnapshotsByDevice[id];
+        activePoints[id] = serverState.activePointsByDevice[id];
       }
     }
     if (serverState.eventsByDevice[id]) {
@@ -79,15 +79,15 @@ function collectDeviceData(
     }
   }
 
-  return { snapshots, events };
+  return { activePoints, events };
 }
 
 // Helper to broadcast state to specific device topics
-function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: number[]) {
+function broadcastUpdate(server: Server<WSData>, deviceIds?: number[]) {
   // Determine which IDs to sync (root entities only)
   let idsToSync: number[];
   if (deviceIds === undefined) {
-    idsToSync = Object.keys(serverState.engineSnapshotsByDevice).map(Number);
+    idsToSync = Object.keys(serverState.activePointsByDevice).map(Number);
   } else {
     // Include groups that contain any of the devices, then filter to root entities
     const allIds = new Set(deviceIds);
@@ -101,19 +101,19 @@ function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: numbe
     idsToSync = Array.from(allIds).filter(id => rootIds.includes(id));
   }
 
-  const { snapshots: snapshotsPayload, events: eventsPayload } = collectDeviceData(idsToSync);
+  const { activePoints: activePointsPayload, events: eventsPayload } = collectDeviceData(idsToSync);
 
   // Only send if there's actual data
-  if (Object.keys(snapshotsPayload).length === 0 && Object.keys(eventsPayload).length === 0) {
+  if (Object.keys(activePointsPayload).length === 0 && Object.keys(eventsPayload).length === 0) {
     return;
   }
 
   for (const id of idsToSync) {
-    if (snapshotsPayload[id] || eventsPayload[id]) {
+    if (activePointsPayload[id] || eventsPayload[id]) {
       server.publish(`device-${id}`, JSON.stringify({
         type: "positions_update",
         payload: {
-          snapshots: { [id]: snapshotsPayload[id] },
+          activePoints: { [id]: activePointsPayload[id] },
           events: { [id]: eventsPayload[id] ?? [] }
         }
       }));
@@ -123,7 +123,7 @@ function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: numbe
 
 // Helper to start/restart admin client
 let traccarClient: TraccarAdminClient | null = null;
-function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string, secure: boolean, token: string) {
+function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: boolean, token: string) {
   if (traccarClient) traccarClient.close();
 
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
@@ -350,7 +350,7 @@ if (isProduction) {
           return new Response("Invalid request", { status: 400 });
         }
       },
-      "/api/ws": (request: Request, server: import("bun").Server<WSData>) => {
+      "/api/ws": (request: Request, server: Server<WSData>) => {
         const upgraded = server.upgrade(request, {
           data: { username: null, traccarToken: null, allowedDeviceIds: new Set(), ownedDeviceIds: new Set() }
         });
@@ -362,7 +362,7 @@ if (isProduction) {
     },
 
     websocket: {
-      async message(ws: import("bun").ServerWebSocket<WSData>, message) {
+      async message(ws: ServerWebSocket<WSData>, message) {
         try {
           const data = JSON.parse(message as string);
           if (data.type === "authenticate" && data.token) {
@@ -419,27 +419,25 @@ if (isProduction) {
 
             // Only include snapshots for root entities that have been seen within the last 48 hours
             const rootIdsFiltered = Array.from(allowedDeviceIds).filter(id => rootIdSet.has(id));
-            const { snapshots: filteredSnapshots, events: filteredEvents } = collectDeviceData(
+            const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(
               rootIdsFiltered,
               { applySnapshotCutoff: true, snapshotCutoff: cutoff, entities: allEntities }
             );
 
             // For entities, we still need to send all entities (devices and groups) for the sidebar
             // So we use allEntities from getMetadata
-            const payloadObj = {
+            const payloadStr = JSON.stringify({
               type: "initial_state",
               payload: {
                 entities: allEntities,
-                engineSnapshotsByDevice: filteredSnapshots,
+                activePointsByDevice: filteredPoints,
                 eventsByDevice: filteredEvents,
+                metadata: { rootIds },
                 maptilerApiKey: config.maptilerApiKey,
-                metadata: { rootIds }
               }
-            };
-
-            const payloadStr = JSON.stringify(payloadObj);
-            console.log(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
+            });
             ws.send(payloadStr);
+            console.log(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
           } else if (data.requestId && ws.data.username && ws.data.traccarToken) {
             // RPC handlers
             const { type, payload, requestId } = data;
@@ -548,9 +546,9 @@ if (isProduction) {
           console.error("Invalid WS message", e);
         }
       },
-      open(_ws: import("bun").ServerWebSocket<WSData>) {
+      open(_ws: ServerWebSocket<WSData>) {
       },
-      close(ws: import("bun").ServerWebSocket<WSData>) {
+      close(ws: ServerWebSocket<WSData>) {
         if (ws.data.allowedDeviceIds) {
           for (const id of ws.data.allowedDeviceIds) {
             ws.unsubscribe(`device-${id}`);

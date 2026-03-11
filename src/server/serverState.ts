@@ -17,7 +17,7 @@ export class ServerState {
   backfilled = new Set<number>();
   private rawTraccarDevices = new Map<number, TraccarDevice>();
 
-  engineSnapshotsByDevice: Record<number, DevicePoint[]> = {};
+  activePointsByDevice: Record<number, DevicePoint[]> = {};
   eventsByDevice: Record<number, EngineEvent[]> = {};
   positionsAll: NormalizedPosition[] = [];
   private allPosById = new Map<number, NormalizedPosition[]>();
@@ -302,7 +302,7 @@ export class ServerState {
     }
 
     const beforeCount = pts[0]?.device !== undefined ? (this.eventsByDevice[pts[0].device]?.length ?? 0) : 0;
-    Object.assign(this.engineSnapshotsByDevice, result.positionsByDevice);
+    Object.assign(this.activePointsByDevice, result.positionsByDevice);
     Object.assign(this.eventsByDevice, result.eventsByDevice);
 
     for (const id in this.eventsByDevice) {
@@ -314,7 +314,7 @@ export class ServerState {
       console.log(`[ServerState] handlePositions: ${pts.length} pts. Events: ${beforeCount} -> ${afterCount}`);
     }
 
-    return result;
+    return { engineStates: result.engineStatesByDevice, events: result.eventsByDevice };
   }
 
   getMetadata(allowedDeviceIds: Set<number>) {

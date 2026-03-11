@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { rgbToHex } from '@/util/color';
+import { rgbToHex, colorForDevice } from '@/util/color';
+import { sendRPC } from '@/wsRPC';
 import type { AppDevice, MotionProfileName, Timestamp } from '@/types';
 import type { Store, StoreState } from './types';
 
@@ -19,11 +20,9 @@ const initialState: StoreState = {
   ui: {
     selectedDeviceId: null,
     isSidePanelOpen: true,
-    debugMode: false,
-    debugFrameIndex: 0,
     editingTarget: null,
   },
-  engineSnapshotsByDevice: {},
+  activePointsByDevice: {},
   eventsByDevice: {},
   metadata: {
     rootIds: [],
@@ -38,30 +37,28 @@ export const useStore = create<Store>()(
       // Data Handlers from WebSocket
       setInitialState: (payload) => {
         set((state) => ({
+          ...state,
           entities: payload.entities,
-          engineSnapshotsByDevice: payload.engineSnapshotsByDevice,
+          activePointsByDevice: payload.activePointsByDevice,
           eventsByDevice: payload.eventsByDevice,
           metadata: payload.metadata,
-          settings: {
-            ...state.settings,
-            maptilerApiKey: payload.maptilerApiKey,
-          },
+          settings: { ...state.settings, maptilerApiKey: payload.maptilerApiKey }
         }));
       },
 
-      updatePositions: (payload) => {
-        set(state => {
-          const newEngineSnapshots = { ...state.engineSnapshotsByDevice, ...payload.snapshots };
-          const newEventsByDevice = { ...state.eventsByDevice, ...payload.events };
+      updatePositions: ({ activePoints, events }) => {
+        set((state) => {
+          const nextActivePoints = { ...state.activePointsByDevice, ...activePoints };
+          const nextEvents = { ...state.eventsByDevice, ...events };
 
           // Update lastSeen for device entities only (groups are updated via config_update)
           const newEntities = { ...state.entities };
-          for (const [idStr, snapshots] of Object.entries(payload.snapshots)) {
+          for (const [idStr, points] of Object.entries(activePoints)) {
             const id = parseInt(idStr, 10);
             const entity = newEntities[id];
-            // Only update if entity exists, is NOT a group (no memberDeviceIds), and has snapshots
-            if (!entity || entity.memberDeviceIds || !Array.isArray(snapshots) || snapshots.length === 0) continue;
-            const maxTimestamp = Math.max(...snapshots.map(s => s.timestamp));
+            // Only update if entity exists, is NOT a group (no memberDeviceIds), and has points
+            if (!entity || entity.memberDeviceIds || !Array.isArray(points) || points.length === 0) continue;
+            const maxTimestamp = Math.max(...points.map(p => p.timestamp));
             const currentLastSeen = entity.lastSeen;
             if (!currentLastSeen || maxTimestamp > currentLastSeen) {
               newEntities[id] = { ...entity, lastSeen: maxTimestamp as Timestamp };
@@ -69,9 +66,10 @@ export const useStore = create<Store>()(
           }
 
           return {
-            engineSnapshotsByDevice: newEngineSnapshots,
-            eventsByDevice: newEventsByDevice,
+            ...state,
             entities: newEntities,
+            activePointsByDevice: nextActivePoints,
+            eventsByDevice: nextEvents
           };
         });
       },
@@ -81,7 +79,7 @@ export const useStore = create<Store>()(
           const newEntities = { ...state.entities };
           if (payload.devices !== null) {
             for (const [idStr, newDev] of Object.entries(payload.devices)) {
-              const id = parseInt(idStr);
+              const id = parseInt(idStr, 10);
               newEntities[id] = {
                 ...newDev,
                 isOwner: state.entities[id]?.isOwner ?? newDev.isOwner ?? false,
@@ -106,9 +104,6 @@ export const useStore = create<Store>()(
 
       // Device/Group Management
       createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
-        const { sendRPC } = await import("@/wsRPC");
-        const { colorForDevice } = await import("@/util/color");
-
         const tempId = Date.now();
         const color = rgbToHex(...colorForDevice(tempId));
         const newGroup: AppDevice = {
@@ -162,7 +157,6 @@ export const useStore = create<Store>()(
       },
 
       deleteGroup: async (groupId: number) => {
-        const { sendRPC } = await import("@/wsRPC");
         const state = get();
 
         const groupToDelete = state.entities[groupId];
@@ -192,7 +186,6 @@ export const useStore = create<Store>()(
       },
 
       addDeviceToGroup: async (groupId: number, deviceId: number) => {
-        const { sendRPC } = await import("@/wsRPC");
         const group = get().entities[groupId];
         if (!group?.memberDeviceIds || group.memberDeviceIds.includes(deviceId)) return;
 
@@ -221,7 +214,6 @@ export const useStore = create<Store>()(
       },
 
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
-        const { sendRPC } = await import("@/wsRPC");
         const group = get().entities[groupId];
         if (!group?.memberDeviceIds?.includes(deviceId)) return;
 
@@ -250,11 +242,8 @@ export const useStore = create<Store>()(
       },
 
       updateGroup: async (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
-        const { sendRPC } = await import("@/wsRPC");
-
         let defaultColor: string | null = null;
         if (updates.color === null) {
-          const { colorForDevice } = await import("@/util/color");
           defaultColor = rgbToHex(...colorForDevice(groupId));
         }
 
@@ -294,7 +283,6 @@ export const useStore = create<Store>()(
       },
 
       updateDevice: async (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
-        const { sendRPC } = await import("@/wsRPC");
         const existing = get().entities[deviceId];
         if (!existing) return;
 
@@ -411,24 +399,6 @@ export const useStore = create<Store>()(
           ui: {
             ...state.ui,
             isSidePanelOpen: open,
-          }
-        }));
-      },
-
-      setDebugMode: (value: boolean) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            debugMode: value,
-          }
-        }));
-      },
-
-      setDebugFrameIndex: (value: number) => {
-        set(state => ({
-          ui: {
-            ...state.ui,
-            debugFrameIndex: value,
           }
         }));
       },

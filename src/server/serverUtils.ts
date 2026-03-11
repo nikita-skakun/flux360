@@ -1,7 +1,7 @@
 import { computeBounds } from "@/util/geo";
 import { Engine } from "@/engine/engine";
 import { fromWebMercator } from "@/util/webMercator";
-import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp, EngineSnapshot } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp, EngineState } from "@/types";
 
 export function dedupeKey(p: { device: number; timestamp: Timestamp; geo: Vec2 }) {
     return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
@@ -13,7 +13,7 @@ export function buildEngineSnapshotsFromByDevice(
     groupIdsRef: Set<number>,
     groupMotionProfiles: Map<number, MotionProfileName>,
     deviceMotionProfiles: Record<number, MotionProfileName>
-): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; eventsByDevice: Record<number, EngineEvent[]> } {
+): { positionsByDevice: Record<number, DevicePoint[]>; engineStatesByDevice: Map<number, EngineState[]>; eventsByDevice: Record<number, EngineEvent[]> } {
     try {
         // 1. Process measurements for all devices in this batch
         Object.entries(byDevice).forEach(([deviceKey, arr]) => {
@@ -32,12 +32,12 @@ export function buildEngineSnapshotsFromByDevice(
 
         // 2. Build current state for all engines
         const positionsByDevice: Record<number, DevicePoint[]> = {};
-        const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
+        const engineStatesByDevice = new Map<number, EngineState[]>();
         const eventsByDevice: Record<number, EngineEvent[]> = {};
 
         for (const [deviceId, engine] of enginesRef.entries()) {
             try {
-                const snapshot = engine.getCurrentSnapshot();
+                const snapshot = engine.getState();
                 const events = [...engine.closed];
 
                 if (!snapshot?.draft) {
@@ -46,9 +46,9 @@ export function buildEngineSnapshotsFromByDevice(
                     continue;
                 }
 
-                snapshotsByDevice.set(deviceId, [snapshot]);
+                engineStatesByDevice.set(deviceId, [snapshot]);
                 const draft = snapshot.draft;
-                const endTs = snapshot.timestamp ?? (Date.now() as Timestamp);
+                const endTs = snapshot.lastTimestamp ?? (Date.now() as Timestamp);
 
                 const isStationary = draft.type === 'stationary';
                 const isMotion = draft.type === 'motion';
@@ -73,7 +73,7 @@ export function buildEngineSnapshotsFromByDevice(
                         geo: fromWebMercator(stats.mean),
                         accuracy: Math.sqrt(stats.variance),
                         anchorStartTimestamp: draft.start,
-                        confidence: snapshot.activeConfidence,
+                        confidence: 1.0,
                         sourceDeviceId: null
                     }];
                 } else if (isMotion) {
@@ -97,7 +97,7 @@ export function buildEngineSnapshotsFromByDevice(
                         geo: fromWebMercator(lastPt.mean),
                         accuracy: Math.sqrt(stats.variance),
                         anchorStartTimestamp: draft.start,
-                        confidence: snapshot.activeConfidence,
+                        confidence: 1.0,
                         sourceDeviceId: null
                     }];
                 } else {
@@ -110,13 +110,13 @@ export function buildEngineSnapshotsFromByDevice(
                 console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
                 positionsByDevice[deviceId] = [];
                 eventsByDevice[deviceId] = [];
-                snapshotsByDevice.set(deviceId, []);
+                engineStatesByDevice.set(deviceId, []);
             }
         }
 
-        return { positionsByDevice, snapshotsByDevice, eventsByDevice };
+        return { positionsByDevice, engineStatesByDevice, eventsByDevice };
     } catch (e) {
         console.error("Error building engine snapshots:", e);
-        return { positionsByDevice: {}, snapshotsByDevice: new Map(), eventsByDevice: {} };
+        return { positionsByDevice: {}, engineStatesByDevice: new Map(), eventsByDevice: {} };
     }
 }

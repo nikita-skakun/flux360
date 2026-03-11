@@ -1,23 +1,14 @@
-import { haversineDistance, computeBounds } from "@/util/geo";
-import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, DEBUG_FRAME_CAP, type MotionProfileConfig } from "./motionDetector";
 import { fromWebMercator } from "@/util/webMercator";
+import { haversineDistance, computeBounds } from "@/util/geo";
+import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, type MotionProfileConfig } from "./motionDetector";
 import { smoothPath } from "@/util/pathSmoothing";
-import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineSnapshot, EngineState, DebugDecision, DebugFrame } from "@/types";
+import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
 
 export class Engine {
   draft: EngineDraft | null = null;
   closed: EngineEvent[] = [];
   lastTimestamp: Timestamp | null = null;
   public motionProfile: MotionProfileName = "person";
-
-  private debugFrames: DebugFrame[] = [];
-  private seenDebugKeys = new Set<string>();
-
-  getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
-  clearDebugFrames(): void {
-    this.debugFrames = [];
-    this.seenDebugKeys.clear();
-  }
 
   setMotionProfile(profile: MotionProfileName) {
     this.motionProfile = profile;
@@ -46,7 +37,6 @@ export class Engine {
         recent: [p],
         pending: []
       };
-      this.recordDebug(p, 'stationary');
       return;
     }
 
@@ -70,11 +60,9 @@ export class Engine {
       draft.recent.push(p);
       if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
       draft.pending = []; // Reset hysteresis
-      this.recordDebug(p, 'stationary', stats.mean, stats.variance, m2);
     } else {
       // Potential motion
       draft.pending.push(p);
-      this.recordDebug(p, 'pending', stats.mean, stats.variance, m2);
 
       if (draft.pending.length >= PENDING_THRESHOLD) {
         // Alignment Gate: Transition only if points are coherent
@@ -131,8 +119,6 @@ export class Engine {
                 draft.stationaryStartAnchor = newStats.mean; // Update anchor to prevent drag
               }
             }
-
-            this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
           }
         }
       }
@@ -152,14 +138,12 @@ export class Engine {
     const isSettled = this.checkSettled(draft, profile);
 
     if (!isSettled) {
-      this.recordDebug(p, 'motion');
       return;
     }
 
     // Settled! Decide if significant or noise
     const firstRecent = draft.recent[0];
     if (!firstRecent) {
-      this.recordDebug(p, 'motion');
       return;
     }
     const settleStart = firstRecent.timestamp;
@@ -239,7 +223,6 @@ export class Engine {
         recent: [...draft.recent],
         pending: []
       };
-      this.recordDebug(p, 'settled-significant');
     } else {
       // ABSORB: Merge into predecessor
       const predecessor = draft.predecessor;
@@ -250,7 +233,6 @@ export class Engine {
       predecessor.stationaryStartAnchor = settleStats.mean; // Update anchor to prevent drag!
 
       this.draft = predecessor;
-      this.recordDebug(p, 'settled-absorbed');
     }
   }
 
@@ -323,28 +305,12 @@ export class Engine {
     return Math.sqrt(maxD2);
   }
 
-  private recordDebug(p: DevicePoint, decision: DebugDecision, mean: Vec2 | null = null, variance: number | null = null, m2: number | null = null) {
-    this.debugFrames.push({
-      timestamp: p.timestamp,
-      decision,
-      point: p.mean,
-      mean,
-      variance,
-      mahalanobis2: m2,
-      pendingCount: this.draft?.type === 'stationary' ? this.draft.pending.length : 0,
-      draftType: this.draft?.type ?? 'none'
-    });
-    // Cap debug frames
-    if (this.debugFrames.length > DEBUG_FRAME_CAP) this.debugFrames.shift();
-  }
-
-  getCurrentSnapshot(): EngineSnapshot | null {
+  getState(): EngineState | null {
     if (!this.draft) return null;
     return {
       draft: this.draft,
       closed: this.closed,
-      timestamp: this.lastTimestamp,
-      activeConfidence: 1.0 // Simple for now
+      lastTimestamp: this.lastTimestamp,
     };
   }
 
@@ -354,8 +320,6 @@ export class Engine {
       draft: this.draft,
       closed: this.closed,
       lastTimestamp: this.lastTimestamp,
-      debugFrames: this.debugFrames,
-      seenDebugKeys: [...this.seenDebugKeys]
     })) as EngineState;
   }
 
@@ -363,8 +327,6 @@ export class Engine {
     this.draft = state.draft;
     this.closed = (state.closed ?? []).map(ev => ({ ...ev, isDraft: ev.isDraft ?? false }));
     this.lastTimestamp = state.lastTimestamp ?? this.draft?.start ?? null;
-    this.debugFrames = state.debugFrames;
-    this.seenDebugKeys = new Set(state.seenDebugKeys ?? []);
     console.log(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
   }
 

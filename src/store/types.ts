@@ -22,13 +22,11 @@ export type StoreState = {
   ui: {
     selectedDeviceId: number | null;
     isSidePanelOpen: boolean;
-    debugMode: boolean;
-    debugFrameIndex: number;
     editingTarget: { type: 'device' | 'group', id: number } | null;
   };
 
-  // Engine snapshots and anchors
-  engineSnapshotsByDevice: Record<number, DevicePoint[]>;
+  // Map marker points and engine states
+  activePointsByDevice: Record<number, DevicePoint[]>;
 
   // Engine events (Stationary/Motion)
   eventsByDevice: Record<number, EngineEvent[]>;
@@ -48,7 +46,7 @@ export type StoreActions = {
 
   // Data Handlers from WebSocket
   setInitialState: (payload: import("@/types").InitialStatePayload) => void;
-  updatePositions: (payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
+  updatePositions: (payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
   updateConfig: (payload: { devices: Record<number, AppDevice> | null; groups: AppDevice[] | null }) => void;
 
   // Motion Profiles
@@ -62,8 +60,6 @@ export type StoreActions = {
   // UI
   setSelectedDeviceId: (id: number | null) => void;
   setIsSidePanelOpen: (open: boolean) => void;
-  setDebugMode: (value: boolean) => void;
-  setDebugFrameIndex: (value: number) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
 };
 

@@ -1,6 +1,5 @@
 import { Button } from "@/components/ui/button";
 import { Pencil, UserPlus, X } from "lucide-react";
-import { Slider } from "@/components/ui/slider";
 import { useTimeAgo } from "@/util/time";
 import React, { useMemo } from "react";
 import type { AppDevice, DevicePoint, Timestamp } from "@/types";
@@ -11,10 +10,7 @@ const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
 
 type Props = {
   selectedDeviceId: number | null;
-  engineSnapshotsByDevice: Record<number, DevicePoint[]>;
-  debugMode: boolean;
-  debugFrameIndex: number;
-  setDebugFrameIndex: (value: number) => void;
+  activePointsByDevice: Record<number, DevicePoint[]>;
   entities: Record<number, AppDevice>;
   setSelectedDeviceId: (id: number | null) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
@@ -28,10 +24,7 @@ const DurationDisplay: React.FC<{ timestamp: Timestamp, addSuffix?: boolean }> =
 
 function DeviceOverlayComponent({
   selectedDeviceId,
-  engineSnapshotsByDevice,
-  debugMode,
-  debugFrameIndex,
-  setDebugFrameIndex,
+  activePointsByDevice,
   entities,
   setSelectedDeviceId,
   setEditingTarget,
@@ -39,14 +32,9 @@ function DeviceOverlayComponent({
 }: Props) {
   if (selectedDeviceId == null) return null;
 
-  const engArr = engineSnapshotsByDevice[selectedDeviceId] ?? [];
-  const chosen = engArr.length > 0 ? engArr[engArr.length - 1] : null;
+  const points = activePointsByDevice[selectedDeviceId] ?? [];
+  const chosen = points.length > 0 ? points[points.length - 1] : null;
   if (!chosen) return null;
-
-  // debug frames for this device (if debug enabled)
-  const frames = debugMode ? engArr : [];
-  const frameIndex = Math.max(0, Math.min(frames.length - 1, debugFrameIndex));
-  const chosenFrame = frames.length > 0 ? frames[frameIndex] : null;
 
   // Derive group-related info
   const { group, contributors, mostRecentSourceName } = useMemo(() => {
@@ -138,30 +126,6 @@ function DeviceOverlayComponent({
       </div>
       <div className="text-xs text-muted-foreground">Last updated: <DurationDisplay timestamp={entities[chosen.device]?.lastSeen ?? chosen.timestamp} /></div>
 
-      {debugMode ? (
-        <div className="mt-2 text-xs">
-          <div className="mb-2">Debug frames: {frames.length}</div>
-          {frames.length > 0 ? (
-            <div className="flex gap-2 items-center">
-              <Slider
-                min={0}
-                max={Math.max(0, frames.length - 1)}
-                step={1}
-                value={[debugFrameIndex]}
-                onValueChange={(value) => setDebugFrameIndex(value[0] ?? 0)}
-                className="flex-1"
-              />
-              <div className="w-20 text-right">#{frameIndex ?? 0}</div>
-            </div>
-          ) : <div className="text-xs text-muted-foreground">No debug frames</div>}
-
-          {chosenFrame ? (
-            <div className="mt-2 text-xs bg-muted/50 p-2 rounded-lg">
-              <div>Device point at {new Date(chosenFrame.timestamp).toLocaleTimeString()}</div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
