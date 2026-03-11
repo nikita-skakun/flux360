@@ -18,26 +18,25 @@ type Props = {
 const Sparkline = ({ event }: { event: MotionEvent }) => {
     if (event.path.length < 2) return null;
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const p of event.path) {
-        if (p[0] < minX) minX = p[0];
-        if (p[0] > maxX) maxX = p[0];
-        if (p[1] < minY) minY = p[1];
-        if (p[1] > maxY) maxY = p[1];
-    }
+    const bounds = event.path.reduce((acc, [x, y]) => ({
+        minX: Math.min(acc.minX, x),
+        maxX: Math.max(acc.maxX, x),
+        minY: Math.min(acc.minY, y),
+        maxY: Math.max(acc.maxY, y)
+    }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
 
-    const dx = maxX - minX;
-    const dy = maxY - minY;
+    const dx = bounds.maxX - bounds.minX;
+    const dy = bounds.maxY - bounds.minY;
     const size = Math.max(dx, dy, 0.0001);
 
     // Add 10% padding
     const padding = size * 0.1;
-    const vbMinX = minX - padding;
-    const vbMinY = minY - padding;
+    const vbMinX = bounds.minX - padding;
+    const vbMinY = bounds.minY - padding;
     const vbW = size + padding * 2;
     const vbH = size + padding * 2;
 
-    const flipY = (y: number) => minY + maxY - y;
+    const flipY = (y: number) => bounds.minY + bounds.maxY - y;
     const pointsStr = event.path.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
 
     return (
@@ -77,15 +76,9 @@ export const TimelinePanel: React.FC<Props> = ({
             if (typeof val === 'number') return Math.round(val * 100) / 100;
             if (Array.isArray(val)) return val.map(round);
             if (val && typeof val === 'object') {
-                const res: Record<string, unknown> = {};
-                const obj = val as Record<string, unknown>;
-                for (const key in obj) {
-                    if (Object.prototype.hasOwnProperty.call(obj, key)) {
-                        const v = obj[key];
-                        if (v != null) res[key] = round(v);
-                    }
-                }
-                return res;
+                return Object.fromEntries(
+                    Object.entries(val).map(([k, v]) => [k, round(v)])
+                );
             }
             return val;
         };
@@ -111,24 +104,38 @@ export const TimelinePanel: React.FC<Props> = ({
     const events = useMemo(() => {
         if (selectedDeviceId == null) return [];
 
-        const closed = eventsByDevice[selectedDeviceId] ?? [];
-        const cutoff = now - 48 * 60 * 60 * 1000; // Sliding 48h window
+        const cutoff = now - 48 * 60 * 60 * 1000;
+        const nowObj = new Date(now);
+        const todayStr = nowObj.toDateString();
+        const yesterdayObj = new Date(now);
+        yesterdayObj.setDate(yesterdayObj.getDate() - 1);
+        const yesterdayStr = yesterdayObj.toDateString();
 
-        const items: TimelineEvent[] = [];
+        const rawEvents = eventsByDevice[selectedDeviceId] ?? [];
 
-        // Add closed events
-        for (const ev of closed) {
-            if (!ev.isDraft && ev.end < cutoff) continue;
-            items.push({
-                id: ev.isDraft ? `draft-${ev.type}-${ev.start}` : `${ev.type}-${ev.start}`,
-                item: ev,
+        return rawEvents
+            .filter(ev => ev.isDraft || ev.end >= cutoff)
+            .sort((a, b) => b.start - a.start)
+            .map((ev, i, arr) => {
+                const startDate = new Date(ev.start);
+                const currDateStr = startDate.toDateString();
+                const prevDateStr = i > 0 ? new Date(arr[i - 1]!.start).toDateString() : null;
+                const isNewDay = currDateStr !== prevDateStr;
+
+                let dayLabel = currDateStr;
+                if (isNewDay) {
+                    if (currDateStr === todayStr) dayLabel = 'Today';
+                    else if (currDateStr === yesterdayStr) dayLabel = 'Yesterday';
+                    else dayLabel = startDate.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+                }
+
+                return {
+                    id: ev.isDraft ? `draft-${ev.type}-${ev.start}` : `${ev.type}-${ev.start}`,
+                    item: ev,
+                    isNewDay,
+                    dayLabel
+                };
             });
-        }
-
-        // Sort newest first
-        items.sort((a, b) => b.item.start - a.item.start);
-
-        return items;
     }, [selectedDeviceId, eventsByDevice, now]);
 
     if (selectedDeviceId == null) return null;
@@ -141,35 +148,11 @@ export const TimelinePanel: React.FC<Props> = ({
                     <div className="text-xs text-muted-foreground p-4 text-center">
                         No events found in the last 48 hours.
                     </div>
-                ) : events.map((ev, i) => {
+                ) : events.map((ev) => {
                     const isSelected = selectedEventId === ev.id;
-                    const item = ev.item;
-                    const type = item.type;
-                    const startTime = item.start;
-                    const endTime = item.end;
-                    const duration = endTime - startTime;
+                    const { item, isNewDay, dayLabel } = ev;
+                    const duration = item.end - item.start;
                     const isCurrent = ev.id.startsWith('draft-');
-
-                    const currDate = new Date(startTime).toDateString();
-                    const prevDate = i > 0 ? new Date(events[i - 1]!.item.start).toDateString() : null;
-                    const isNewDay = currDate !== prevDate;
-
-                    let dayLabel = currDate;
-                    if (isNewDay) {
-                        const nowObj = new Date(now);
-                        const todayStr = nowObj.toDateString();
-                        const yesterdayObj = new Date(now);
-                        yesterdayObj.setDate(yesterdayObj.getDate() - 1);
-                        const yesterdayStr = yesterdayObj.toDateString();
-
-                        if (currDate === todayStr) {
-                            dayLabel = 'Today';
-                        } else if (currDate === yesterdayStr) {
-                            dayLabel = 'Yesterday';
-                        } else {
-                            dayLabel = new Date(startTime).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
-                        }
-                    }
 
                     return (
                         <React.Fragment key={ev.id}>
@@ -180,7 +163,7 @@ export const TimelinePanel: React.FC<Props> = ({
                                 </div>
                             )}
                             <div
-                                onClick={() => onSelectEvent(ev)}
+                                onClick={() => onSelectEvent({ id: ev.id, item })}
                                 className={`flex flex-col p-2 rounded-md border transition-all cursor-pointer ${isSelected
                                     ? 'bg-primary/2 border-primary shadow-sm'
                                     : 'bg-background/50 border-border/50 hover:bg-background/80 hover:border-border'
@@ -188,7 +171,7 @@ export const TimelinePanel: React.FC<Props> = ({
                             >
                                 <div className="flex items-center justify-between mb-1">
                                     <div className="flex items-center gap-1.5 font-medium text-sm">
-                                        {type === 'stationary' ? (
+                                        {item.type === 'stationary' ? (
                                             <><MapPin className="w-4 h-4 text-blue-500" /> Stationary</>
                                         ) : (
                                             <><Activity className="w-4 h-4 text-green-500" /> Moving</>
@@ -197,7 +180,7 @@ export const TimelinePanel: React.FC<Props> = ({
                                     <div className="text-xs text-muted-foreground font-medium flex items-center gap-2">
                                         {formatDuration(duration)}
                                         <button
-                                            onClick={(e) => handleCopy(e, ev)}
+                                            onClick={(e) => handleCopy(e, { id: ev.id, item })}
                                             className="p-1 hover:bg-primary/20 rounded-sm transition-colors"
                                             title="Copy event with internal state"
                                         >
@@ -211,13 +194,13 @@ export const TimelinePanel: React.FC<Props> = ({
                                 </div>
 
                                 <div className="text-xs text-muted-foreground flex justify-between items-center">
-                                    <span>{new Date(startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {isCurrent ? 'Present' : new Date(endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    {type === 'motion' && (
+                                    <span>{new Date(item.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {isCurrent ? 'Present' : new Date(item.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    {item.type === 'motion' && (
                                         <span className="font-medium text-foreground/80">{Math.round(item.distance)}m</span>
                                     )}
                                 </div>
 
-                                {type === 'motion' && (
+                                {item.type === 'motion' && (
                                     <Sparkline event={item} />
                                 )}
                             </div>

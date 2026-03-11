@@ -25,7 +25,8 @@ export function buildEngineSnapshotsFromByDevice(
   deviceMotionProfiles: Record<number, MotionProfileName>
 ): { positionsByDevice: Record<number, DevicePoint[]>; snapshotsByDevice: Map<number, EngineSnapshot[]>; eventsByDevice: Record<number, EngineEvent[]> } {
   try {
-    for (const [deviceKey, arr] of Object.entries(byDevice)) {
+    // 1. Process measurements for all devices in this batch
+    Object.entries(byDevice).forEach(([deviceKey, arr]) => {
       const deviceId = Number(deviceKey);
       if (!enginesRef.has(deviceId)) {
         enginesRef.set(deviceId, new Engine());
@@ -36,67 +37,62 @@ export function buildEngineSnapshotsFromByDevice(
         : (deviceMotionProfiles[deviceId] ?? "person");
       engine.setMotionProfile(profile);
       engine.processMeasurements(arr);
-    }
+    });
 
-    const currentSnapshots: Record<number, DevicePoint[]> = {};
+    const positionsByDevice: Record<number, DevicePoint[]> = {};
     const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
     const eventsByDevice: Record<number, EngineEvent[]> = {};
 
-    for (const deviceId of enginesRef.keys()) {
+    // 2. Build current state for all engines
+    Array.from(enginesRef.entries()).forEach(([deviceId, engine]) => {
       try {
-        const engine = enginesRef.get(deviceId);
-        if (!engine) continue;
-        const events = [...engine.closed];
         const snapshot = engine.getCurrentSnapshot();
+        const events = [...engine.closed];
 
         if (snapshot) {
           snapshotsByDevice.set(deviceId, [snapshot]);
-
           const draft = snapshot.draft;
           if (draft) {
-            if (draft.type === 'stationary') {
-              const stats = engine.computeStats(draft.recent);
+            const isStationary = draft.type === 'stationary';
+            const stats = isStationary ? engine.computeStats(draft.recent) : null;
+            const endTs = (snapshot.timestamp ?? Date.now()) as Timestamp;
+
+            if (isStationary && stats) {
               events.push({
                 type: 'stationary',
                 start: draft.start,
-                end: (snapshot.timestamp ?? Date.now()) as Timestamp,
+                end: endTs,
                 mean: stats.mean,
                 variance: stats.variance,
                 isDraft: true
               });
-
-              // Also use these stats for currentSnapshots
-              currentSnapshots[deviceId] = [{
+              positionsByDevice[deviceId] = [{
                 mean: stats.mean,
-                timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
+                timestamp: endTs,
                 device: deviceId,
                 geo: fromWebMercator(stats.mean),
-                accuracy: 5, // Default placeholder for UI
+                accuracy: 5,
                 anchorStartTimestamp: draft.start,
                 confidence: snapshot.activeConfidence,
                 sourceDeviceId: null
               }];
-            } else {
-              // Motion
+            } else if (draft.type === 'motion') {
+              const lastPt = draft.path[draft.path.length - 1]!;
               events.push({
                 type: 'motion',
                 start: draft.start,
-                end: (snapshot.timestamp ?? Date.now()) as Timestamp,
+                end: endTs,
                 startAnchor: draft.startAnchor,
-                endAnchor: draft.path[draft.path.length - 1]!.mean, // last known point
+                endAnchor: lastPt.mean,
                 path: draft.path.map(p => p.mean),
                 distance: engine.computePathLength(draft.path),
                 isDraft: true
               });
-
-              // Motion: use last path point for currentSnapshots
-              const lastPt = draft.path[draft.path.length - 1]!;
-              const lastMean = lastPt.mean;
-              currentSnapshots[deviceId] = [{
-                mean: lastMean,
-                timestamp: snapshot.timestamp ?? Date.now() as Timestamp,
+              positionsByDevice[deviceId] = [{
+                mean: lastPt.mean,
+                timestamp: endTs,
                 device: deviceId,
-                geo: fromWebMercator(lastMean),
+                geo: fromWebMercator(lastPt.mean),
                 accuracy: 5,
                 anchorStartTimestamp: draft.start,
                 confidence: 1.0,
@@ -105,14 +101,15 @@ export function buildEngineSnapshotsFromByDevice(
             }
           }
         } else {
-          currentSnapshots[deviceId] = [];
+          positionsByDevice[deviceId] = [];
         }
         eventsByDevice[deviceId] = events;
       } catch (innerError) {
         console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
       }
-    }
-    return { positionsByDevice: currentSnapshots, snapshotsByDevice, eventsByDevice };
+    });
+
+    return { positionsByDevice, snapshotsByDevice, eventsByDevice };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
     return { positionsByDevice: {}, snapshotsByDevice: new Map(), eventsByDevice: {} };

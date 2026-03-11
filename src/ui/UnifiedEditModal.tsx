@@ -52,9 +52,8 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
         }
     }, [showColorPicker]);
 
-    // Calculate default color
     const rgb = colorForDevice(id);
-    const defaultHex = `#${rgb[0].toString(16).padStart(2, '0')}${rgb[1].toString(16).padStart(2, '0')}${rgb[2].toString(16).padStart(2, '0')}`;
+    const defaultHex = `#${rgb.map(c => c.toString(16).padStart(2, '0')).join('')}`;
 
     useEffect(() => {
         if (isOpen && target) {

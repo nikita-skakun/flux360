@@ -30,28 +30,20 @@ export class ServerState {
 
   private restoreFromDb() {
     // 1. Restore Checkpoints
-    const cpRows = db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string }[];
-    for (const row of cpRows) {
-      if (!this.engineCheckpoints.has(row.device_id)) {
-        this.engineCheckpoints.set(row.device_id, []);
-        this.engines.set(row.device_id, new Engine());
-      }
-      try {
-        const snapshot = typeof row.snapshot_json === 'string' ? JSON.parse(row.snapshot_json) as EngineState : row.snapshot_json as EngineState;
-        const deviceCheckpoints = this.engineCheckpoints.get(row.device_id);
-        if (deviceCheckpoints) {
-          deviceCheckpoints.push({ timestamp: row.timestamp as Timestamp, snapshot });
+    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string }[])
+      .forEach(row => {
+        if (!this.engineCheckpoints.has(row.device_id)) {
+          this.engineCheckpoints.set(row.device_id, []);
+          this.engines.set(row.device_id, new Engine());
         }
-
-        const engine = this.engines.get(row.device_id);
-        if (engine) {
-          // The last checkpoint will leave the engine in its final state
-          engine.restoreSnapshot(snapshot);
+        try {
+          const snapshot = typeof row.snapshot_json === 'string' ? JSON.parse(row.snapshot_json) as EngineState : row.snapshot_json as EngineState;
+          this.engineCheckpoints.get(row.device_id)?.push({ timestamp: row.timestamp as Timestamp, snapshot });
+          this.engines.get(row.device_id)?.restoreSnapshot(snapshot);
+        } catch (err) {
+          console.error("Failed to parse snapshot for device", row.device_id, err);
         }
-      } catch (err) {
-        console.error("Failed to parse snapshot for device", row.device_id, err);
-      }
-    }
+      });
 
     // 2. Restore recent raw positions so `positionsAll` is populated
     const cutoff = Date.now() - this.historyMs;
@@ -120,70 +112,65 @@ export class ServerState {
       this.rawTraccarDevices.set(d.id, d);
     }
 
-    const nextDevices: Record<number, AppDevice> = {};
-    const groupDevicesMap = new Map<number, AppDevice>();
-
     // 2. Rebuild derived state from FULL master map
-    for (const device of this.rawTraccarDevices.values()) {
-      const { attributes, id, name, lastUpdate } = device;
-      const lastSeen = lastUpdate ? (Date.parse(lastUpdate) as Timestamp) : null;
+    const processedDevices = Array.from(this.rawTraccarDevices.values())
+      .map(device => {
+        const { attributes, id, name, lastUpdate } = device;
+        const lastSeen = lastUpdate ? (Date.parse(lastUpdate) as Timestamp) : null;
+        if (lastSeen && lastSeen < Date.now() - this.historyMs) return null;
 
-      // Filter devices not seen within the history window
-      if (lastSeen && lastSeen < Date.now() - this.historyMs) continue;
+        const profileAttr = attributes["motionProfile"];
+        const profile = (profileAttr === "person" || profileAttr === "car") ? profileAttr : null;
+        const color = (typeof attributes["color"] === "string") ? attributes["color"] : rgbToHex(...colorForDevice(id));
 
-      const profileAttr = attributes["motionProfile"];
-      const motionProfile: MotionProfileName = (profileAttr === "person" || profileAttr === "car") ? profileAttr : "person";
-      const motionProfileActual = (profileAttr === "person" || profileAttr === "car") ? profileAttr : null;
-      const color = (typeof attributes["color"] === "string") ? attributes["color"] : rgbToHex(...colorForDevice(id));
+        const base: AppDevice = {
+          id,
+          name,
+          emoji: typeof attributes["emoji"] === 'string' ? attributes["emoji"] : "",
+          lastSeen,
+          effectiveMotionProfile: profile ?? "person",
+          motionProfile: profile,
+          color,
+          isOwner: false,
+          memberDeviceIds: null,
+        };
 
-      nextDevices[id] = {
-        id,
-        name,
-        emoji: typeof attributes["emoji"] === 'string' ? attributes["emoji"] : "",
-        lastSeen,
-        effectiveMotionProfile: motionProfile,
-        motionProfile: motionProfileActual,
-        color,
-        isOwner: false,
-        memberDeviceIds: null,
-      };
+        const memberIdsAttr = attributes["memberDeviceIds"];
+        let group: AppDevice | null = null;
+        if (typeof memberIdsAttr === "string") {
+          try {
+            group = {
+              ...base,
+              emoji: base.emoji || 'group',
+              lastSeen: null,
+              memberDeviceIds: JSON.parse(memberIdsAttr) as number[],
+            };
+          } catch { /* Ignore invalid JSON */ }
+        }
 
-      const memberDeviceIdsAttr = attributes["memberDeviceIds"];
-      if (typeof memberDeviceIdsAttr === "string") {
-        try {
-          const memberDeviceIds = JSON.parse(memberDeviceIdsAttr) as number[];
-          groupDevicesMap.set(id, {
-            id,
-            name,
-            emoji: typeof attributes["emoji"] === 'string' ? attributes["emoji"] : 'group',
-            color: color,
-            lastSeen: null,
-            memberDeviceIds: memberDeviceIds,
-            motionProfile: motionProfileActual,
-            effectiveMotionProfile: motionProfile,
-            isOwner: false,
-          });
-        } catch { /* Ignore invalid JSON */ }
-      }
-    }
+        return { id, base, group };
+      })
+      .filter((d): d is NonNullable<typeof d> => d !== null);
+
+    this.devices = Object.fromEntries(processedDevices.map(d => [d.id, d.base]));
+    this.groups = processedDevices.map(d => d.group).filter((g): g is AppDevice => g !== null);
 
     const deviceToGroupsMap = new Map<number, number[]>();
     const groupIds = new Set<number>();
-    for (const group of groupDevicesMap.values()) {
+
+    for (const group of this.groups) {
       groupIds.add(group.id);
       if (group.memberDeviceIds) {
         for (const deviceId of group.memberDeviceIds) {
-          const groups = deviceToGroupsMap.get(deviceId) ?? [];
-          groups.push(group.id);
-          deviceToGroupsMap.set(deviceId, groups);
+          const groupList = deviceToGroupsMap.get(deviceId) ?? [];
+          groupList.push(group.id);
+          deviceToGroupsMap.set(deviceId, groupList);
         }
       }
     }
 
     this.deviceToGroupsMap = deviceToGroupsMap;
     this.groupIds = groupIds;
-    this.groups = Array.from(groupDevicesMap.values());
-    this.devices = nextDevices;
 
     console.log(`[ServerState] Handled ${devices.length} updates. Total devices in state: ${Object.keys(this.devices).length}`);
   }

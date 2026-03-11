@@ -233,65 +233,44 @@ export class Engine {
 
     const first = draft.recent[0];
     const last = draft.recent[draft.recent.length - 1];
-    if (!first || !last) return false;
-
-    const duration = last.timestamp - first.timestamp;
-    if (duration < profile.minStationaryDuration) return false;
+    if (!first || !last || (last.timestamp - first.timestamp) < profile.minStationaryDuration) return false;
 
     const stats = this.computeStats(draft.recent);
     const minVariance = Math.pow(profile.maxStationaryRadius / 3, 2); // 1-sigma floor
     const effectiveVariance = Math.max(stats.variance, minVariance);
 
-    for (const p of draft.recent) {
-      const m2 = this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance);
-      if (m2 > profile.motionSettleMahalanobisThreshold) return false;
-    }
-
-    return true;
+    return draft.recent.every(p => this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance) <= profile.motionSettleMahalanobisThreshold);
   }
 
   private checkCoherence(directions: Vec2[], threshold: number): boolean {
     if (directions.length < 2) return true;
-    let sx = 0, sy = 0;
-    for (const d of directions) {
-      sx += d[0];
-      sy += d[1];
-    }
-    const mag = Math.hypot(sx, sy);
+
+    const sum = directions.reduce((acc, d) => [acc[0] + d[0], acc[1] + d[1]], [0, 0]);
+    const mag = Math.hypot(sum[0], sum[1]);
     if (mag === 0) return false;
-    const avgX = sx / mag;
-    const avgY = sy / mag;
-    for (const d of directions) {
-      if (d[0] * avgX + d[1] * avgY < threshold) return false;
-    }
-    return true;
+
+    const avg: Vec2 = [sum[0] / mag, sum[1] / mag];
+    return directions.every(d => (d[0] * avg[0] + d[1] * avg[1]) >= threshold);
   }
 
   public computeStats(points: DevicePoint[]): { mean: Vec2; variance: number } {
     if (points.length === 0) return { mean: [0, 0], variance: 1 };
 
-    let sumX = 0, sumY = 0;
-    for (const p of points) {
-      sumX += p.mean[0];
-      sumY += p.mean[1];
-    }
-    const mean: Vec2 = [sumX / points.length, sumY / points.length];
+    const sum = points.reduce((acc, p) => [acc[0] + p.mean[0], acc[1] + p.mean[1]] as Vec2, [0, 0] as Vec2);
+    const mean: Vec2 = [sum[0] / points.length, sum[1] / points.length];
 
-    let sumDistSq = 0;
-    for (const p of points) {
+    const sumDistSq = points.reduce((acc, p) => {
       const dx = p.mean[0] - mean[0];
       const dy = p.mean[1] - mean[1];
-      sumDistSq += (dx * dx + dy * dy);
-    }
+      return acc + (dx * dx + dy * dy);
+    }, 0);
 
     const variance = sumDistSq / points.length;
 
     // Variance cap to prevent "mega-anchors" that swallow large jumps
     const MIN_VARIANCE = 2.0;
     const MAX_VARIANCE = 400.0;
-    const v = Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance));
-
-    return { mean, variance: v };
+    return { mean, variance: Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance)) };
   }
 
   private computeMahalanobis2(pos: Vec2, mean: Vec2, variance: number): number {
@@ -301,26 +280,20 @@ export class Engine {
   }
 
   public computePathLength(path: (Vec2 | DevicePoint)[]): number {
-    let dist = 0;
-    for (let i = 1; i < path.length; i++) {
-      const a = path[i - 1];
-      const b = path[i];
-      if (!a || !b) continue;
+    return path.slice(1).reduce((acc, b, i) => {
+      const a = path[i]!;
       const p1 = 'mean' in a ? a.mean : a;
       const p2 = 'mean' in b ? b.mean : b;
-      dist += haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
-    }
-    return dist;
+      return acc + haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
+    }, 0);
   }
 
   private maxDeviation(path: DevicePoint[], anchor: Vec2): number {
-    let maxD2 = 0;
-    for (const p of path) {
+    const maxD2 = path.reduce((max, p) => {
       const dx = p.mean[0] - anchor[0];
       const dy = p.mean[1] - anchor[1];
-      const d2 = dx * dx + dy * dy;
-      if (d2 > maxD2) maxD2 = d2;
-    }
+      return Math.max(max, dx * dx + dy * dy);
+    }, 0);
     return Math.sqrt(maxD2);
   }
 
@@ -374,7 +347,6 @@ export class Engine {
   }
 
   refineHistory(profile: MotionProfileConfig) {
-    // Safety: ensure chronological order before merging
     this.closed.sort((a, b) => a.start - b.start);
 
     let i = 0;
@@ -384,12 +356,10 @@ export class Engine {
       const nextNext = this.closed[i + 2];
 
       if (
-        current && next && nextNext &&
-        current.type === 'motion' &&
-        next.type === 'stationary' &&
-        nextNext.type === 'motion' &&
-        next.end > next.start && // Basic validity check
-        next.end - next.start < profile.maxMergeGapDuration
+        current?.type === 'motion' &&
+        next?.type === 'stationary' &&
+        nextNext?.type === 'motion' &&
+        (next.end - next.start) < profile.maxMergeGapDuration
       ) {
         const merged: MotionEvent = {
           type: 'motion',
@@ -402,7 +372,6 @@ export class Engine {
           isDraft: false
         };
         merged.distance = this.computePathLength(merged.path);
-
         this.closed.splice(i, 3, merged);
       } else {
         i++;
