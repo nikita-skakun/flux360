@@ -1,4 +1,4 @@
-import { formatDuration } from '@/util/appUtils';
+import { humanDurationSince } from '@/util/time';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
 import React, { useMemo } from 'react';
 import type { EngineEvent, MotionEvent } from '@/types';
@@ -92,7 +92,7 @@ export const TimelinePanel: React.FC<Props> = ({
     };
 
     React.useEffect(() => {
-        const interval = setInterval(() => setNow(Date.now()), 30000);
+        const interval = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(interval);
     }, []);
 
@@ -145,8 +145,8 @@ export const TimelinePanel: React.FC<Props> = ({
                 ) : events.map((ev) => {
                     const isSelected = selectedEventId === ev.id;
                     const { item, isNewDay, dayLabel } = ev;
-                    const duration = item.end - item.start;
                     const isCurrent = ev.id.startsWith('draft-');
+                    const durationStr = humanDurationSince(item.start, (isCurrent ? now : item.end) as import('@/types').Timestamp);
 
                     return (
                         <React.Fragment key={ev.id}>
@@ -172,7 +172,7 @@ export const TimelinePanel: React.FC<Props> = ({
                                         )}
                                     </div>
                                     <div className="text-xs text-muted-foreground font-medium flex items-center gap-2">
-                                        {formatDuration(duration)}
+                                        {durationStr}
                                         <button
                                             onClick={(e) => handleCopy(e, { id: ev.id, item })}
                                             className="p-1 hover:bg-primary/20 rounded-sm transition-colors"

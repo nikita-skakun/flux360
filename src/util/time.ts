@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import type { Timestamp } from "@/types";
 
-function humanDurationSince(ts: Timestamp, now: Timestamp = Date.now() as Timestamp): string {
-  const sec = Math.round((now - ts) / 1000);
+export function humanDurationSince(ts: Timestamp, end: Timestamp = Date.now()): string {
+  const sec = Math.round((end - ts) / 1000);
   if (sec < 60) return `${sec}s`;
   const min = Math.round(sec / 60);
   if (min < 60) return `${min}m`;

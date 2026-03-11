@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Pencil, UserPlus, X } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
-import { useTimeAgo } from "@/hooks/useTimeAgo";
+import { useTimeAgo } from "@/util/time";
 import React, { useMemo } from "react";
 import type { AppDevice, DevicePoint, Timestamp } from "@/types";
 

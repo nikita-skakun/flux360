@@ -6,7 +6,7 @@ import { EMOJI_OPTIONS } from "@/util/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useTimeAgo } from "@/hooks/useTimeAgo";
+import { useTimeAgo } from "@/util/time";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 
 import type { AppDevice, Timestamp } from "@/types";

@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { formatDuration } from '@/util/appUtils';
+import { humanDurationSince } from '@/util/time';
 import { X, Clock, MapPin, Activity } from 'lucide-react';
 import React, { useEffect } from 'react';
 import type { TimelineEvent } from './TimelinePanel';
@@ -20,7 +20,7 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
         };
         window.addEventListener('keydown', handleEsc);
 
-        const interval = setInterval(() => setNow(Date.now()), 10000);
+        const interval = setInterval(() => setNow(Date.now()), 1000);
 
         return () => {
             window.removeEventListener('keydown', handleEsc);
@@ -33,20 +33,20 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
     let detailsNode = null;
 
     const isDraft = event.id.startsWith('draft-');
-    const endTime = isDraft ? now : item.end;
+    const durationStr = humanDurationSince(item.start, (isDraft ? now : item.end) as import('@/types').Timestamp);
 
     if (item.type === 'stationary') {
         detailsNode = (
             <span className="flex items-center gap-1.5">
                 <MapPin className="w-4 h-4" />
-                Stationary for {formatDuration(endTime - item.start)}
+                Stationary for {durationStr}
             </span>
         );
     } else {
         detailsNode = (
             <span className="flex items-center gap-1.5">
                 <Activity className="w-4 h-4" />
-                Moved {Math.round(item.distance)}m ({formatDuration(endTime - item.start)})
+                Moved {Math.round(item.distance)}m ({durationStr})
             </span>
         );
     }
