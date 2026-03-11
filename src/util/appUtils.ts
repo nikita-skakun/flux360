@@ -41,25 +41,33 @@ export function buildEngineSnapshotsFromByDevice(
       engine.refineHistory();
     });
 
-    const positionsByDevice: Record<number, DevicePoint[]> = {};
-    const snapshotsByDevice = new Map<number, EngineSnapshot[]>();
-    const eventsByDevice: Record<number, EngineEvent[]> = {};
-
-    // 2. Build current state for all engines
-    Array.from(enginesRef.entries()).forEach(([deviceId, engine]) => {
+    // 2. Build current state for all engines using reduce
+    const result = Array.from(enginesRef.entries()).reduce((acc, [deviceId, engine]) => {
       try {
         const snapshot = engine.getCurrentSnapshot();
         const events = [...engine.closed];
 
         if (snapshot) {
-          snapshotsByDevice.set(deviceId, [snapshot]);
+          acc.snapshotsByDevice.set(deviceId, [snapshot]);
           const draft = snapshot.draft;
+          const endTs = (snapshot.timestamp ?? Date.now()) as Timestamp;
+
           if (draft) {
             const isStationary = draft.type === 'stationary';
-            const stats = isStationary ? engine.computeStats(draft.recent) : null;
-            const endTs = (snapshot.timestamp ?? Date.now()) as Timestamp;
-
-            if (isStationary && stats) {
+            const isMotion = draft.type === 'motion';
+            
+            // Determine if we should treat as stationary (either actual stationary or zero-distance motion)
+            let treatAsStationary = isStationary;
+            let stats = null;
+            
+            if (isMotion) {
+              const distance = engine.computePathLength(draft.path);
+              // If distance is 0 and has multiple points, treat as stationary
+              treatAsStationary = distance === 0 && draft.path.length > 1;
+            }
+            
+            if (treatAsStationary) {
+              stats = engine.computeStats(isStationary ? draft.recent : draft.path);
               events.push({
                 type: 'stationary',
                 start: draft.start,
@@ -69,7 +77,7 @@ export function buildEngineSnapshotsFromByDevice(
                 isDraft: true,
                 bounds: computeBounds([stats.mean])
               });
-              positionsByDevice[deviceId] = [{
+              acc.positionsByDevice[deviceId] = [{
                 mean: stats.mean,
                 timestamp: endTs,
                 device: deviceId,
@@ -79,8 +87,10 @@ export function buildEngineSnapshotsFromByDevice(
                 confidence: snapshot.activeConfidence,
                 sourceDeviceId: null
               }];
-            } else if (draft.type === 'motion') {
+            } else if (isMotion) {
               const lastPt = draft.path[draft.path.length - 1]!;
+              const distance = engine.computePathLength(draft.path);
+              
               events.push({
                 type: 'motion',
                 start: draft.start,
@@ -88,32 +98,48 @@ export function buildEngineSnapshotsFromByDevice(
                 startAnchor: draft.startAnchor,
                 endAnchor: lastPt.mean,
                 path: draft.path.map(p => p.mean),
-                distance: engine.computePathLength(draft.path),
+                distance: distance,
                 isDraft: true,
                 bounds: computeBounds(draft.path.map(p => p.mean))
               });
-              positionsByDevice[deviceId] = [{
+              acc.positionsByDevice[deviceId] = [{
                 mean: lastPt.mean,
                 timestamp: endTs,
                 device: deviceId,
                 geo: fromWebMercator(lastPt.mean),
                 accuracy: 5,
                 anchorStartTimestamp: draft.start,
-                confidence: 1.0,
+                confidence: snapshot.activeConfidence,
                 sourceDeviceId: null
               }];
+            } else {
+              // Unknown draft type - clear to prevent stale state
+              acc.positionsByDevice[deviceId] = [];
             }
+          } else {
+            // No draft - clear to prevent stale state
+            acc.positionsByDevice[deviceId] = [];
           }
         } else {
-          positionsByDevice[deviceId] = [];
+          // No snapshot - clear to prevent stale state
+          acc.positionsByDevice[deviceId] = [];
         }
-        eventsByDevice[deviceId] = events;
+        acc.eventsByDevice[deviceId] = events;
       } catch (innerError) {
         console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
+        // Clear state on error to prevent stale snapshots
+        acc.positionsByDevice[deviceId] = [];
+        acc.eventsByDevice[deviceId] = [];
+        acc.snapshotsByDevice.set(deviceId, []);
       }
+      return acc;
+    }, {
+      positionsByDevice: {} as Record<number, DevicePoint[]>,
+      snapshotsByDevice: new Map<number, EngineSnapshot[]>(),
+      eventsByDevice: {} as Record<number, EngineEvent[]>
     });
 
-    return { positionsByDevice, snapshotsByDevice, eventsByDevice };
+    return { positionsByDevice: result.positionsByDevice, snapshotsByDevice: result.snapshotsByDevice, eventsByDevice: result.eventsByDevice };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
     return { positionsByDevice: {}, snapshotsByDevice: new Map(), eventsByDevice: {} };

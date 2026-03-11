@@ -52,9 +52,39 @@ if (missingFields.length > 0) {
 
 const serverState = new ServerState(config.historyDays);
 
+// Helper to collect snapshots and events for a set of device IDs
+function collectDeviceData(
+  ids: Iterable<number>,
+  options: {
+    applySnapshotCutoff?: boolean;
+    snapshotCutoff?: number;
+    entities?: Record<number, import("./types").AppDevice>;
+  } = {}
+): { snapshots: Record<number, import("./types").DevicePoint[]>; events: Record<number, import("./types").EngineEvent[]> } {
+  const { applySnapshotCutoff = false, snapshotCutoff = 0, entities } = options;
+  const snapshots: Record<number, import("./types").DevicePoint[]> = {};
+  const events: Record<number, import("./types").EngineEvent[]> = {};
+
+  for (const id of ids) {
+    if (serverState.engineSnapshotsByDevice[id]) {
+      const include = applySnapshotCutoff
+        ? entities?.[id]?.lastSeen != null && entities?.[id]!.lastSeen > snapshotCutoff
+        : true;
+      if (include) {
+        snapshots[id] = serverState.engineSnapshotsByDevice[id];
+      }
+    }
+    if (serverState.eventsByDevice[id]) {
+      events[id] = serverState.eventsByDevice[id];
+    }
+  }
+
+  return { snapshots, events };
+}
+
 // Helper to broadcast state to specific device topics
 function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: number[]) {
-  // Compute the set of root IDs that need to be sent (affected devices and their groups, but only roots)
+  // Determine which IDs to sync (root entities only)
   let idsToSync: number[];
   if (deviceIds === undefined) {
     idsToSync = Object.keys(serverState.engineSnapshotsByDevice).map(Number);
@@ -67,23 +97,11 @@ function broadcastUpdate(server: import("bun").Server<WSData>, deviceIds?: numbe
         for (const gid of groups) allIds.add(gid);
       }
     }
-    // Only root entities get snapshots (members are represented by groups)
-    const rootIdSet = new Set(serverState.getMetadata(allIds).rootIds);
-    idsToSync = Array.from(allIds).filter(id => rootIdSet.has(id));
+    const { rootIds } = serverState.getMetadata(allIds);
+    idsToSync = Array.from(allIds).filter(id => rootIds.includes(id));
   }
 
-  // Further filter: only send if there are snapshots for that root entity
-  const snapshotsPayload: Record<number, import("./types").DevicePoint[]> = {};
-  const eventsPayload: Record<number, import("./types").EngineEvent[]> = {};
-
-  for (const id of idsToSync) {
-    if (serverState.engineSnapshotsByDevice[id]) {
-      snapshotsPayload[id] = serverState.engineSnapshotsByDevice[id];
-    }
-    if (serverState.eventsByDevice[id]) {
-      eventsPayload[id] = serverState.eventsByDevice[id];
-    }
-  }
+  const { snapshots: snapshotsPayload, events: eventsPayload } = collectDeviceData(idsToSync);
 
   // Only send if there's actual data
   if (Object.keys(snapshotsPayload).length === 0 && Object.keys(eventsPayload).length === 0) {
@@ -391,33 +409,17 @@ if (isProduction) {
               ws.subscribe(`device-${id}`);
             }
 
-            const filteredDevices: Record<number, import("./types/index").AppDevice> = {};
-            const filteredSnapshots: Record<number, import("./types/index").DevicePoint[]> = {};
-            const filteredEvents: Record<number, import("./types/index").EngineEvent[]> = {};
-
             // First, get metadata to know which IDs are root entities
             const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
             const rootIdSet = new Set(rootIds);
             const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
 
-            for (const id of allowedDeviceIds) {
-              if (serverState.devices[id]) {
-                filteredDevices[id] = {
-                  ...serverState.devices[id],
-                  isOwner: ownedDeviceIds.has(id)
-                };
-              }
-              // Only include snapshots for root entities that have been seen within the last 48 hours
-              if (rootIdSet.has(id) && serverState.engineSnapshotsByDevice[id]) {
-                const entity = allEntities[id];
-                if (entity && entity.lastSeen != null && entity.lastSeen > cutoff) {
-                  filteredSnapshots[id] = serverState.engineSnapshotsByDevice[id];
-                }
-              }
-              if (serverState.eventsByDevice[id]) {
-                filteredEvents[id] = serverState.eventsByDevice[id];
-              }
-            }
+            // Only include snapshots for root entities that have been seen within the last 48 hours
+            const rootIdsFiltered = Array.from(allowedDeviceIds).filter(id => rootIdSet.has(id));
+            const { snapshots: filteredSnapshots, events: filteredEvents } = collectDeviceData(
+              rootIdsFiltered,
+              { applySnapshotCutoff: true, snapshotCutoff: cutoff, entities: allEntities }
+            );
 
             // For entities, we still need to send all entities (devices and groups) for the sidebar
             // So we use allEntities from getMetadata
