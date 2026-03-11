@@ -143,10 +143,9 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     }
 
     // Build clustered indices set
-    const clusteredIdxs = new Set<number>();
-    clusters.forEach(cl => {
-      if (cl.size > 1) cl.items.forEach(it => clusteredIdxs.add(it.idx));
-    });
+    const clusteredIdxs = new Set(
+      clusters.filter(cl => cl.size > 1).flatMap(cl => cl.items.map(it => it.idx))
+    );
 
     // Build GeoJSON features
     const dotsFeatures: Feature<Point>[] = [];
@@ -154,10 +153,8 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     const clustersFeatures: Feature<Point>[] = [];
     const accuracyFeatures: Feature<Polygon>[] = [];
 
-    // Track clustered vs individual indices in one pass
-    for (let i = 0; i < drawItems.length; i++) {
+    drawItems.forEach((item, i) => {
       const c = components[i]!;
-      const item = drawItems[i]!;
       const isClustered = clusteredIdxs.has(i);
 
       if (isClustered) {
@@ -187,18 +184,17 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       if (c.device === selectedDeviceId && c.accuracy > 0) {
         const [cx, cy] = toWebMercator(c.geo);
         const pts = 64;
-        const coords: Vec2[] = [];
-        for (let j = 0; j <= pts; j++) {
+        const coords = Array.from({ length: pts + 1 }, (_, j) => {
           const angle = (j * 2 * Math.PI) / pts;
-          coords.push(fromWebMercator([cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle)]));
-        }
+          return fromWebMercator([cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle)]);
+        });
         accuracyFeatures.push({
           type: 'Feature',
           geometry: { type: 'Polygon', coordinates: [coords] },
           properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` }
         });
       }
-    } // end per-device for loop
+    });
 
     // Debug frame circles (mean/variance at selected frame)
     type FrameFeature = Feature<Polygon | Point>;
@@ -206,11 +202,10 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
     if (debugFrame?.mean && debugFrame?.variance) {
       const makeCircle = (center: Vec2, radiusM: number, kind: string): Feature<Polygon> => {
         const pts = 64;
-        const coords: Vec2[] = [];
-        for (let j = 0; j <= pts; j++) {
+        const coords = Array.from({ length: pts + 1 }, (_, j) => {
           const angle = (j * 2 * Math.PI) / pts;
-          coords.push(fromWebMercator([center[0] + radiusM * Math.cos(angle), center[1] + radiusM * Math.sin(angle)]));
-        }
+          return fromWebMercator([center[0] + radiusM * Math.cos(angle), center[1] + radiusM * Math.sin(angle)]);
+        });
         return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [coords] }, properties: { kind } } as Feature<Polygon>;
       };
       const radius = getRadiusFromVariance(debugFrame.variance);
@@ -232,42 +227,37 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
       candidate: '#ff9800', // orange
       frame: '#2196f3',    // blue
     };
-    const anchorCircleFeatures: Feature<Polygon>[] = [];
-    for (let ai = 0; ai < debugAnchors.length; ai++) {
-      const a = debugAnchors[ai]!;
+    const anchorCircleFeatures: Feature<Polygon>[] = debugAnchors.map(a => {
       const radius = getRadiusFromVariance(a.variance);
       const pts = 64;
-      const coords: Vec2[] = [];
-      for (let j = 0; j <= pts; j++) {
+      const coords = Array.from({ length: pts + 1 }, (_, j) => {
         const angle = (j * 2 * Math.PI) / pts;
-        coords.push(fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]));
-      }
-      anchorCircleFeatures.push({
+        return fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]);
+      });
+      return {
         type: 'Feature',
         geometry: { type: 'Polygon', coordinates: [coords] },
         properties: {
           color: ANCHOR_COLORS[a.type],
-          anchorIndex: ai,
+          anchorIndex: debugAnchors.indexOf(a),
         },
-      });
-    }
+      } as Feature<Polygon>;
+    });
 
     // Process clusters (separate pass after all devices are evaluated)
-    for (const cl of clusters) {
-      if (cl.size <= 1) continue;
-
+    clusters.filter(cl => cl.size > 1).forEach(cl => {
       if (hiddenClusterDeviceIds) {
         const thisClusterIds = new Set(cl.items.map(it => it.device));
         if (thisClusterIds.size === hiddenClusterDeviceIds.size &&
           [...thisClusterIds].every(id => hiddenClusterDeviceIds.has(id))) {
-          continue;
+          return;
         }
       }
 
       const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
         cl.items.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
       const rep = drawItems.find(di => di.device === repItem.device);
-      if (!rep) continue;
+      if (!rep) return;
 
       const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
       const selComp = selItem ? components[selItem.idx] : null;
@@ -292,7 +282,7 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
           members: cl.items.map(it => it.device),
         },
       });
-    }
+    });
 
     // Pulsing device points (drawn under pins)
     const pulsingPointFeatures: Feature<Point>[] = [];

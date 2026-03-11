@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { rgbToHex } from '@/util/color';
-import type { GroupDevice, MotionProfileName } from '@/types';
+import type { AppDevice, MotionProfileName } from '@/types';
 import type { Store, StoreState } from './types';
 
 const initialState: StoreState = {
@@ -57,7 +57,7 @@ export const useStore = create<Store>()(
       updateConfig: (payload) => {
         set(state => {
           const newDevices = { ...state.devices };
-          if (payload.devices) {
+          if (payload.devices !== null) {
             for (const [idStr, newDev] of Object.entries(payload.devices)) {
               const id = parseInt(idStr);
               newDevices[id] = {
@@ -68,7 +68,7 @@ export const useStore = create<Store>()(
           }
 
           let newGroups = [...state.groups];
-          if (payload.groups) {
+          if (payload.groups !== null) {
             const groupIdsIncoming = new Set(payload.groups.map(g => g.id));
             newGroups = newGroups.filter(g => !groupIdsIncoming.has(g.id));
             newGroups.push(...payload.groups);
@@ -88,7 +88,7 @@ export const useStore = create<Store>()(
 
         const tempId = Date.now();
         const color = rgbToHex(...colorForDevice(tempId));
-        const newGroup: GroupDevice = {
+        const newGroup: AppDevice = {
           id: tempId,
           name,
           emoji,
@@ -96,7 +96,6 @@ export const useStore = create<Store>()(
           memberDeviceIds,
           motionProfile: null,
           lastSeen: null,
-          isGroup: true,
           effectiveMotionProfile: 'person',
           isOwner: true
         };
@@ -114,7 +113,8 @@ export const useStore = create<Store>()(
               effectiveMotionProfile: 'person',
               motionProfile: null,
               color,
-              isOwner: true
+              isOwner: true,
+              memberDeviceIds
             }
           },
         }));
@@ -184,7 +184,8 @@ export const useStore = create<Store>()(
                   effectiveMotionProfile: 'person',
                   motionProfile: null,
                   color: null,
-                  isOwner: true
+                  isOwner: true,
+                  memberDeviceIds: groupToDelete.memberDeviceIds
                 }
               }
             }));
@@ -196,7 +197,7 @@ export const useStore = create<Store>()(
       addDeviceToGroup: async (groupId: number, deviceId: number) => {
         const { sendRPC } = await import("@/wsRPC");
         const group = get().groups.find(g => g.id === groupId);
-        if (!group || group.memberDeviceIds.includes(deviceId)) return;
+        if (!group || group.memberDeviceIds === null || group.memberDeviceIds.includes(deviceId)) return;
 
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = [...originalMembers, deviceId];
@@ -219,7 +220,7 @@ export const useStore = create<Store>()(
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
         const { sendRPC } = await import("@/wsRPC");
         const group = get().groups.find(g => g.id === groupId);
-        if (!group?.memberDeviceIds.includes(deviceId)) return;
+        if (!group || group.memberDeviceIds === null || !group.memberDeviceIds.includes(deviceId)) return;
 
         const originalMembers = [...group.memberDeviceIds];
         const newMembers = originalMembers.filter(id => id !== deviceId);
@@ -272,6 +273,7 @@ export const useStore = create<Store>()(
               color: newGroup.color,
               motionProfile: newGroup.motionProfile,
               isOwner: true,
+              memberDeviceIds: newGroup.memberDeviceIds
             }
           }
         }));
@@ -308,6 +310,7 @@ export const useStore = create<Store>()(
               motionProfile: newProfileAttribute,
               color: updates.color !== undefined ? updates.color : existing.color,
               isOwner: true,
+              memberDeviceIds: existing.memberDeviceIds
             }
           }
         }));

@@ -62,29 +62,16 @@ export type MotionProfileName = 'person' | 'car';
 
 export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
-export type GroupDevice = {
+export type AppDevice = {
   id: number;
   name: string;
   emoji: string;
   color: string | null;
   lastSeen: Timestamp | null;
-  isGroup: true;
-  memberDeviceIds: number[];
-  motionProfile: MotionProfileName | null;
   effectiveMotionProfile: MotionProfileName;
+  motionProfile: MotionProfileName | null;
   isOwner: boolean;
-};
-
-export type UiDevice = {
-  id: number;
-  isGroup: boolean;
-  name: string;
-  emoji: string;
-  lastSeen: Timestamp | null;
-  hasPosition: boolean;
-  memberDeviceIds: number[];
-  color: string | null;
-  isOwner: boolean;
+  memberDeviceIds: number[] | null;
 };
 
 export type StationaryEvent = {
@@ -155,20 +142,9 @@ export interface RawTraccarPosition {
 
 // --- WebSocket Protocol ---
 
-export interface AppDevice {
-  id: number;
-  name: string;
-  emoji: string;
-  lastSeen: Timestamp | null;
-  effectiveMotionProfile: MotionProfileName;
-  motionProfile: MotionProfileName | null;
-  color: string | null;
-  isOwner: boolean;
-}
-
 export type InitialStatePayload = {
   devices: Record<number, AppDevice>; // Will map to StoreState.devices
-  groups: GroupDevice[];
+  groups: AppDevice[];
   engineSnapshotsByDevice: Record<number, DevicePoint[]>;
   eventsByDevice: Record<number, EngineEvent[]>;
   maptilerApiKey: string;
@@ -177,7 +153,7 @@ export type InitialStatePayload = {
 export type ServerMessage =
   | { type: "initial_state"; payload: InitialStatePayload; requestId?: never }
   | { type: "positions_update"; payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }; requestId?: never }
-  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: GroupDevice[] | null }; requestId?: never }
+  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: AppDevice[] | null }; requestId?: never }
   | { type: "update_success"; deviceId: number; requestId?: string }
   | { type: "create_success"; device: TraccarDevice; requestId?: string }
   | { type: "delete_success"; groupId: number; requestId?: string }

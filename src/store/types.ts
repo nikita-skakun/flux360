@@ -1,11 +1,11 @@
-import type { DevicePoint, GroupDevice, MotionProfileName, EngineEvent, AppDevice } from '@/types';
+import type { AppDevice, DevicePoint, EngineEvent, MotionProfileName } from '@/types';
 
 export type StoreState = {
   // Devices slice
   devices: Record<number, AppDevice>;
 
   // Groups slice
-  groups: GroupDevice[];
+  groups: AppDevice[];
 
   // Settings slice (persisted)
   settings: {
@@ -49,7 +49,7 @@ export type StoreActions = {
   // Data Handlers from WebSocket
   setInitialState: (payload: import("@/types").InitialStatePayload) => void;
   updatePositions: (payload: { snapshots: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
-  updateConfig: (payload: { devices?: Record<number, AppDevice> | null; groups?: GroupDevice[] | null }) => void;
+  updateConfig: (payload: { devices: Record<number, AppDevice> | null; groups: AppDevice[] | null }) => void;
 
   // Motion Profiles
   updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => void;

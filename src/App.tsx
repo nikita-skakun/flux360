@@ -9,7 +9,7 @@ import { useStore } from "./store";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import type { DebugAnchor, DebugFrame, UiDevice, Timestamp } from "./types";
+import type { Timestamp, DebugAnchor, DebugFrame } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
@@ -20,31 +20,34 @@ export function App() {
 
   const devices = useStore(state => state.devices);
   const { deviceNames, deviceColors, deviceIcons, deviceLastSeen } = useMemo(() => {
-    const names: Record<number, string> = {};
-    const colors: Record<number, string> = {};
-    const icons: Record<number, string> = {};
-    const lastSeen: Record<number, Timestamp | null> = {};
-    for (const id of Object.keys(devices)) {
+    const base = Object.entries(devices).reduce((acc, [id, d]) => {
       const numId = Number(id);
-      const d = devices[numId];
-      if (!d) continue;
-      names[numId] = d.name;
-      colors[numId] = d.color ?? "";
-      icons[numId] = d.emoji;
-      lastSeen[numId] = d.lastSeen;
-    }
+      acc.names[numId] = d.name;
+      acc.colors[numId] = d.color ?? "";
+      acc.icons[numId] = d.emoji;
+      acc.lastSeen[numId] = d.lastSeen;
+      return acc;
+    }, {
+      names: {} as Record<number, string>,
+      colors: {} as Record<number, string>,
+      icons: {} as Record<number, string>,
+      lastSeen: {} as Record<number, Timestamp | null>
+    });
+
     // Add groups to deviceLastSeen
-    for (const group of groupDevices) {
-      let maxLastSeen: Timestamp | null = null;
-      for (const memberId of group.memberDeviceIds) {
-        const ts = lastSeen[memberId];
-        if (ts && (maxLastSeen == null || ts > maxLastSeen)) {
-          maxLastSeen = ts;
-        }
-      }
-      lastSeen[group.id] = maxLastSeen;
-    }
-    return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
+    groupDevices.forEach(group => {
+      base.lastSeen[group.id] = group.memberDeviceIds?.reduce((max, memberId) => {
+        const ts = base.lastSeen[memberId];
+        return (ts && (max == null || ts > max)) ? ts : max;
+      }, null as Timestamp | null) ?? null;
+    });
+
+    return {
+      deviceNames: base.names,
+      deviceColors: base.colors,
+      deviceIcons: base.icons,
+      deviceLastSeen: base.lastSeen
+    };
   }, [devices, groupDevices]);
 
   const RECENT_DEVICE_CUTOFF_MS = 48 * 60 * 60 * 1000; // 48 hours
@@ -119,8 +122,10 @@ export function App() {
     // Create a set of group member IDs to hide them if they should be shown via group
     const groupMemberIds = new Set<number>();
     for (const group of groupDevices) {
-      for (const memberId of group.memberDeviceIds) {
-        groupMemberIds.add(memberId);
+      if (group.memberDeviceIds) {
+        for (const memberId of group.memberDeviceIds) {
+          groupMemberIds.add(memberId);
+        }
       }
     }
 
@@ -196,65 +201,31 @@ export function App() {
   }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
 
   const deviceList = useMemo(() => {
-    const result: UiDevice[] = [];
-
-    // Track seen IDs to prevent duplicates
-    const seenIds = new Set<number>();
-
-    // Create a set of group IDs to skip when processing individual devices
     const groupIds = new Set(groupDevices.map(g => g.id));
 
-    // Add individual devices (skip if they're members of a group or if they're group devices themselves)
-    for (const [id, name] of Object.entries(deviceNames)) {
-      const numId = Number(id);
-
-      if (groupIds.has(numId) || seenIds.has(numId)) continue;
-
-      const lastSeen = deviceLastSeen[numId] ?? null;
-
-      const color = deviceColors[numId];
-      result.push({
-        id: numId,
-        isGroup: false,
+    const individualDevices = Object.entries(deviceNames)
+      .map(([id, name]) => ({ id: Number(id), name }))
+      .filter(({ id }) => !groupIds.has(id))
+      .map(({ id, name }) => ({
+        id,
         name,
-        emoji: deviceIcons[numId] ?? "device_unknown",
-        lastSeen,
-        hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
-        memberDeviceIds: [],
-        color: color && color !== "" ? color : null,
-        isOwner: devices[numId]?.isOwner ?? false,
-      });
-      seenIds.add(numId);
-    }
+        emoji: deviceIcons[id] ?? "device_unknown",
+        lastSeen: deviceLastSeen[id] ?? null,
+        memberDeviceIds: null,
+        color: deviceColors[id] || null,
+        isOwner: devices[id]?.isOwner ?? false,
+        effectiveMotionProfile: devices[id]?.effectiveMotionProfile ?? "person",
+        motionProfile: devices[id]?.motionProfile ?? null
+      }));
 
-    // Add group devices
-    for (const groupDevice of groupDevices) {
-      // Skip if already added (defensive against duplicate group IDs)
-      if (seenIds.has(groupDevice.id)) {
-        continue;
-      }
+    const groups = groupDevices.map(g => ({
+      ...g,
+      lastSeen: deviceLastSeen[g.id] ?? null,
+      isOwner: devices[g.id]?.isOwner ?? true,
+    }));
 
-      // Calculate lastSeen as max of all member devices
-      const groupLastSeen = deviceLastSeen[groupDevice.id] ?? null;
-
-      result.push({
-        id: groupDevice.id,
-        isGroup: true,
-        name: groupDevice.name,
-        emoji: groupDevice.emoji,
-        lastSeen: groupLastSeen,
-        hasPosition: (engineSnapshotsByDevice[groupDevice.id]?.length ?? 0) > 0,
-        memberDeviceIds: groupDevice.memberDeviceIds,
-        color: groupDevice.color,
-        isOwner: devices[groupDevice.id]?.isOwner ?? true, // Groups are generally owned by the creator
-      });
-      seenIds.add(groupDevice.id);
-    }
-
-    // Sort alphabetically
-    result.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    return result;
-  }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice, deviceColors]);
+    return [...individualDevices, ...groups].sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+  }, [groupDevices, deviceNames, deviceLastSeen, devices]);
 
   const allDevicesForSelection = useMemo(() => {
     return Object.entries(deviceNames)

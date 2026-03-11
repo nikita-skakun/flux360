@@ -4,11 +4,11 @@ import { Engine } from "@/engine/engine";
 import { toWebMercator } from "@/util/webMercator";
 import { MOTION_PROFILES, CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { rgbToHex, colorForDevice } from "@/util/color";
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp, AppDevice, TraccarDevice, EngineState } from "@/types";
+import type { NormalizedPosition, DevicePoint, MotionProfileName, EngineEvent, Timestamp, AppDevice, TraccarDevice, EngineState } from "@/types";
 
 export class ServerState {
   devices: Record<number, AppDevice> = {};
-  groups: GroupDevice[] = [];
+  groups: AppDevice[] = [];
   deviceToGroupsMap = new Map<number, number[]>();
   groupIds = new Set<number>();
   engines = new Map<number, Engine>();
@@ -121,7 +121,7 @@ export class ServerState {
     }
 
     const nextDevices: Record<number, AppDevice> = {};
-    const groupDevicesMap = new Map<number, GroupDevice>();
+    const groupDevicesMap = new Map<number, AppDevice>();
 
     // 2. Rebuild derived state from FULL master map
     for (const device of this.rawTraccarDevices.values()) {
@@ -145,6 +145,7 @@ export class ServerState {
         motionProfile: motionProfileActual,
         color,
         isOwner: false,
+        memberDeviceIds: null,
       };
 
       const memberDeviceIdsAttr = attributes["memberDeviceIds"];
@@ -157,7 +158,6 @@ export class ServerState {
             emoji: typeof attributes["emoji"] === 'string' ? attributes["emoji"] : 'group',
             color: color,
             lastSeen: null,
-            isGroup: true,
             memberDeviceIds: memberDeviceIds,
             motionProfile: motionProfileActual,
             effectiveMotionProfile: motionProfile,
@@ -171,10 +171,12 @@ export class ServerState {
     const groupIds = new Set<number>();
     for (const group of groupDevicesMap.values()) {
       groupIds.add(group.id);
-      for (const deviceId of group.memberDeviceIds) {
-        const groups = deviceToGroupsMap.get(deviceId) ?? [];
-        groups.push(group.id);
-        deviceToGroupsMap.set(deviceId, groups);
+      if (group.memberDeviceIds) {
+        for (const deviceId of group.memberDeviceIds) {
+          const groups = deviceToGroupsMap.get(deviceId) ?? [];
+          groups.push(group.id);
+          deviceToGroupsMap.set(deviceId, groups);
+        }
       }
     }
 
@@ -300,7 +302,7 @@ export class ServerState {
     allPosById: Map<number, NormalizedPosition[]>,
     processedKeys: Set<string>,
     deviceToGroupsMap: Map<number, number[]>,
-    groupDevices: GroupDevice[],
+    groupDevices: AppDevice[],
     engines: Map<number, Engine>,
     engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>,
     groupIds: Set<number>,
@@ -377,7 +379,7 @@ export class ServerState {
       }
 
       const replayFrom = cp?.timestamp ?? 0;
-      const relevantIds = groupIds.has(id) ? new Set(groupDevices.find(g => g.id === id)?.memberDeviceIds) : [id];
+      const relevantIds = groupIds.has(id) ? new Set(groupDevices.find(g => g.id === id)?.memberDeviceIds ?? []) : [id];
       const historical = Array.from(relevantIds).flatMap(rId => allPosById.get(rId) ?? []).filter(p => p.timestamp > replayFrom).sort((a, b) => a.timestamp - b.timestamp);
       posById.set(id, historical);
     }
@@ -400,7 +402,7 @@ export class ServerState {
     // 4. Determine motion profiles and build snapshots
     const groupMotionProfiles = new Map(groupDevices.map(g => [
       g.id,
-      g.motionProfile ?? (g.memberDeviceIds.some(mId => motionProfiles[mId] === "car") ? "car" : "person")
+      g.motionProfile ?? ((g.memberDeviceIds?.some(mId => motionProfiles[mId] === "car")) ? "car" : "person")
     ]));
 
     const result = buildEngineSnapshotsFromByDevice(rawByDevice, engines, groupIds, groupMotionProfiles, motionProfiles);

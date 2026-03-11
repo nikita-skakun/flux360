@@ -14,6 +14,7 @@
   - Adhere to the strict rules in `tsconfig.json` and `eslint.config.js`.
   - Fix types properly; do not use `as any` or non-null assertions (!).
   - **Do not** use `eslint-disable` comments. Fix the root cause.
+  - Do not extract functions that are only used once.
 - **Git Safety**:
   - **NEVER** commit without explicit user permission.
   - **NEVER** run destructive commands (reset, force push) without explicit request.

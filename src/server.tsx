@@ -121,7 +121,7 @@ function initTraccarClient(server: import("bun").Server<WSData>, baseUrl: string
           type: "config_update",
           payload: {
             devices: { [id]: { ...device, isOwner: false } },
-            groups: serverState.groups.filter(g => g.id === id || g.memberDeviceIds.includes(id))
+            groups: serverState.groups.filter(g => g.id === id || (g.memberDeviceIds?.includes(id) ?? false))
           }
         }));
       }
@@ -377,7 +377,7 @@ if (isProduction) {
               type: "initial_state",
               payload: {
                 devices: filteredDevices,
-                groups: serverState.groups.filter(g => allowedDeviceIds.has(g.id) || g.memberDeviceIds.some(mid => allowedDeviceIds.has(mid))),
+                groups: serverState.groups.filter(g => allowedDeviceIds.has(g.id) || (g.memberDeviceIds?.some(mid => allowedDeviceIds.has(mid)) ?? false)),
                 engineSnapshotsByDevice: filteredSnapshots,
                 eventsByDevice: filteredEvents,
                 maptilerApiKey: config.maptilerApiKey
