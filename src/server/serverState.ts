@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { dedupeKey, buildEngineSnapshotsFromByDevice } from "@/util/appUtils";
+import { dedupeKey, buildEngineSnapshotsFromByDevice } from "./serverUtils";
 import { Engine } from "@/engine/engine";
 import { toWebMercator } from "@/util/webMercator";
 import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
