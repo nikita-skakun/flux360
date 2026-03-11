@@ -60,12 +60,11 @@ export const useStore = create<Store>()(
             const id = parseInt(idStr, 10);
             const entity = newEntities[id];
             // Only update if entity exists, is NOT a group (no memberDeviceIds), and has snapshots
-            if (entity && !entity.memberDeviceIds && Array.isArray(snapshots) && snapshots.length > 0) {
-              const maxTimestamp = Math.max(...snapshots.map(s => s.timestamp));
-              const currentLastSeen = entity.lastSeen;
-              if (!currentLastSeen || maxTimestamp > currentLastSeen) {
-                newEntities[id] = { ...entity, lastSeen: maxTimestamp as Timestamp };
-              }
+            if (!entity || entity.memberDeviceIds || !Array.isArray(snapshots) || snapshots.length === 0) continue;
+            const maxTimestamp = Math.max(...snapshots.map(s => s.timestamp));
+            const currentLastSeen = entity.lastSeen;
+            if (!currentLastSeen || maxTimestamp > currentLastSeen) {
+              newEntities[id] = { ...entity, lastSeen: maxTimestamp as Timestamp };
             }
           }
 
@@ -181,14 +180,13 @@ export const useStore = create<Store>()(
         try {
           await sendRPC('delete_group', { groupId });
         } catch (error) {
-          if (groupToDelete) {
-            set(state => ({
-              entities: {
-                ...state.entities,
-                [groupId]: groupToDelete
-              }
-            }));
-          }
+          if (!groupToDelete) throw error;
+          set(state => ({
+            entities: {
+              ...state.entities,
+              [groupId]: groupToDelete
+            }
+          }));
           throw error;
         }
       },
