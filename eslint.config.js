@@ -20,6 +20,7 @@ export default [
         console: 'readonly',
         document: 'readonly',
         fetch: 'readonly',
+        crypto: 'readonly',
         navigator: 'readonly',
         process: 'readonly',
         setInterval: 'readonly',

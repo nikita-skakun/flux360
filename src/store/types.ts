@@ -1,39 +1,14 @@
-import type { Engine, EngineState } from '@/engine/engine';
-import type { NormalizedPosition, DevicePoint, GroupDevice, MotionProfileName, EngineEvent, Timestamp, Vec2 } from '@/types';
-import type { TraccarDevice } from '@/api/devices';
-
-export type Refs = {
-  deviceToGroupsMap: Map<number, number[]>;
-  groupIds: Set<number>;
-  engines: Map<number, Engine>;
-  processedKeys: Set<string>;
-  positionsAll: NormalizedPosition[];
-  engineCheckpoints: Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>;
-};
+import type { AppDevice, DevicePoint, EngineEvent, MotionProfileName } from '@/types';
 
 export type StoreState = {
-  // Devices slice
-  devices: Record<number, {
-    name: string;
-    emoji: string;
-    lastSeen: Timestamp | null;
-    effectiveMotionProfile: MotionProfileName;
-    motionProfile: MotionProfileName | null;
-    color: string | null;
-  }>;
-
-  // Groups slice
-  groups: GroupDevice[];
+  // Entities slice (unifies devices and groups)
+  entities: Record<number, AppDevice>;
 
   // Settings slice (persisted)
   settings: {
-    baseUrl: string;
-    secure: boolean;
-    email: string;
-    password: string;
     maptilerApiKey: string;
     theme: 'light' | 'dark' | 'system';
-    mockMode: boolean;
+    sessionToken: string | null;
   };
 
   // Auth State
@@ -47,25 +22,21 @@ export type StoreState = {
   ui: {
     selectedDeviceId: number | null;
     isSidePanelOpen: boolean;
-    debugMode: boolean;
-    debugFrameIndex: number;
     editingTarget: { type: 'device' | 'group', id: number } | null;
-    isMockUiVisible: boolean;
   };
 
-  // Refs slice (reactive)
-  refs: Refs;
-
-  // Engine snapshots and anchors
-  engineSnapshotsByDevice: Record<number, DevicePoint[]>;
+  // Map marker points and engine states
+  activePointsByDevice: Record<number, DevicePoint[]>;
 
   // Engine events (Stationary/Motion)
   eventsByDevice: Record<number, EngineEvent[]>;
+
+  // Pre-calculated metadata from server
+  metadata: import("@/types").InitialStatePayload['metadata'];
 };
 
 export type StoreActions = {
   // Device/Group Management
-  setDevicesFromApi: (devices: TraccarDevice[]) => Promise<void>;
   createGroup: (name: string, memberDeviceIds: number[], emoji: string) => Promise<void>;
   deleteGroup: (groupId: number) => Promise<void>;
   addDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
@@ -73,12 +44,13 @@ export type StoreActions = {
   updateGroup: (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
   updateDevice: (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
 
+  // Data Handlers from WebSocket
+  setInitialState: (payload: import("@/types").InitialStatePayload) => void;
+  updatePositions: (payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
+  updateConfig: (payload: { devices: Record<number, AppDevice> | null; groups: AppDevice[] | null }) => void;
+
   // Motion Profiles
   updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => void;
-
-  // Positions
-  addPositions: (positions: NormalizedPosition[]) => void;
-  processPositions: () => null;
 
   // Settings & Auth
   login: (email: string, password: string) => Promise<void>;
@@ -88,18 +60,7 @@ export type StoreActions = {
   // UI
   setSelectedDeviceId: (id: number | null) => void;
   setIsSidePanelOpen: (open: boolean) => void;
-  setDebugMode: (value: boolean) => void;
-  setDebugFrameIndex: (value: number) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
-
-  // Mock Mode
-  createMockDevice: (name: string, emoji: string, color: string) => number;
-  addMockPositions: (deviceId: number, positions: { geo: Vec2; timestamp?: Timestamp }[]) => void;
-  setMockUiVisible: (visible: boolean) => void;
-
-  // External Config
-  fetchConfig: () => Promise<void>;
-  fetchMaptilerKey: () => Promise<void>;
 };
 
 export type Store = StoreState & StoreActions;

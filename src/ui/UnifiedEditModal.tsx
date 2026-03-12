@@ -19,13 +19,10 @@ type Props = {
 };
 
 const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
-    const device = useStore((state) => state.devices[id]);
-    const group = useStore((state) => state.groups.find((g) => g.id === id));
+    const target = useStore((state) => state.entities[id]);
     const updateDevice = useStore((state) => state.updateDevice);
     const updateGroup = useStore((state) => state.updateGroup);
     const deleteGroup = useStore((state) => state.deleteGroup);
-
-    const target = type === "device" ? device : group;
 
     const [name, setName] = useState("");
     const [emoji, setEmoji] = useState("");
@@ -52,9 +49,8 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
         }
     }, [showColorPicker]);
 
-    // Calculate default color
     const rgb = colorForDevice(id);
-    const defaultHex = `#${rgb[0].toString(16).padStart(2, '0')}${rgb[1].toString(16).padStart(2, '0')}${rgb[2].toString(16).padStart(2, '0')}`;
+    const defaultHex = `#${rgb.map(c => c.toString(16).padStart(2, '0')).join('')}`;
 
     useEffect(() => {
         if (isOpen && target) {

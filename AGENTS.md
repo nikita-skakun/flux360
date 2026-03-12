@@ -7,13 +7,15 @@
   - Typecheck: `bun run tsc --noEmit`
 - **Restrictions**:
   - **NEVER** run `bun run dev` (locks terminal). Suggest the user run it.
-  - **NEVER** read `.env` directly. Ask the user to handle secrets.
+  - **NEVER** read `config.json` directly. Ask the user to handle secrets.
 
 ## 2. Coding Standards
 - **TypeScript**:
   - Adhere to the strict rules in `tsconfig.json` and `eslint.config.js`.
   - Fix types properly; do not use `as any` or non-null assertions (!).
   - **Do not** use `eslint-disable` comments. Fix the root cause.
+  - Do not extract functions that are only used once.
+  - Avoid using optional parameters.
 - **Git Safety**:
   - **NEVER** commit without explicit user permission.
   - **NEVER** run destructive commands (reset, force push) without explicit request.

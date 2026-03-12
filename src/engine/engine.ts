@@ -1,49 +1,15 @@
-import { haversineDistance } from "@/util/geo";
-import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, DEBUG_FRAME_CAP, type MotionProfileConfig } from "./motionDetector";
 import { fromWebMercator } from "@/util/webMercator";
+import { haversineDistance, computeBounds } from "@/util/geo";
+import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, type MotionProfileConfig } from "./motionDetector";
 import { smoothPath } from "@/util/pathSmoothing";
-import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent } from "@/types";
-
-export type EngineSnapshot = {
-  draft: EngineDraft | null;
-  closed: EngineEvent[];
-  timestamp: Timestamp | null;
-  activeConfidence: number;
-};
-
-export type EngineState = {
-  draft: EngineDraft | null;
-  closed: EngineEvent[];
-  debugFrames: DebugFrame[];
-  seenDebugKeys: Set<string>;
-};
-
-export type DebugDecision = 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
-export type DebugFrame = {
-  timestamp: Timestamp;
-  decision: DebugDecision;
-  point: Vec2 | null;
-  mean: Vec2 | null;
-  variance: number | null;
-  mahalanobis2: number | null;
-  pendingCount: number;
-  draftType: 'stationary' | 'motion' | 'none';
-};
+import { vlog } from "@/util/logger";
+import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
 
 export class Engine {
   draft: EngineDraft | null = null;
   closed: EngineEvent[] = [];
   lastTimestamp: Timestamp | null = null;
   public motionProfile: MotionProfileName = "person";
-
-  private debugFrames: DebugFrame[] = [];
-  private seenDebugKeys = new Set<string>();
-
-  getDebugFrames(): DebugFrame[] { return [...this.debugFrames]; }
-  clearDebugFrames(): void {
-    this.debugFrames = [];
-    this.seenDebugKeys.clear();
-  }
 
   setMotionProfile(profile: MotionProfileName) {
     this.motionProfile = profile;
@@ -55,8 +21,8 @@ export class Engine {
 
   processMeasurements(points: DevicePoint[]) {
     for (const p of points) {
-      this.lastTimestamp = p.timestamp;
       this.step(p);
+      this.lastTimestamp = p.timestamp;
     }
   }
 
@@ -72,7 +38,6 @@ export class Engine {
         recent: [p],
         pending: []
       };
-      this.recordDebug(p, 'stationary');
       return;
     }
 
@@ -96,11 +61,9 @@ export class Engine {
       draft.recent.push(p);
       if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
       draft.pending = []; // Reset hysteresis
-      this.recordDebug(p, 'stationary', stats.mean, stats.variance, m2);
     } else {
       // Potential motion
       draft.pending.push(p);
-      this.recordDebug(p, 'pending', stats.mean, stats.variance, m2);
 
       if (draft.pending.length >= PENDING_THRESHOLD) {
         // Alignment Gate: Transition only if points are coherent
@@ -114,9 +77,26 @@ export class Engine {
         const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
         const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > HARD_BREAKOUT_DISTANCE);
 
-        if (isCoherent || anyPendingFar) {
+        // In addition to coherence, the raw speed of the draft must be plausible.
+        const firstPending = draft.pending[0];
+        let isFastEnough = true;
+        if (firstPending && draft.pending.length > 1) {
+          const lastPending = draft.pending[draft.pending.length - 1]!;
+          const dist = haversineDistance(fromWebMercator(firstPending.mean), fromWebMercator(lastPending.mean));
+
+          // If they've moved less than HARD_BREAKOUT, we demand a minimum speed to prevent slow drift
+          if (dist < HARD_BREAKOUT_DISTANCE) {
+            const timeSecs = (lastPending.timestamp - firstPending.timestamp) / 1000;
+            if (timeSecs > 0) {
+              const speed = dist / timeSecs;
+              isFastEnough = speed > (profile.minAverageVelocity * 0.25);
+            }
+          }
+        }
+
+        if (firstPending && (anyPendingFar || (isCoherent && isFastEnough))) {
           // Transition to Motion
-          const startTimestamp = draft.pending[0]!.timestamp;
+          const startTimestamp = firstPending.timestamp;
           this.draft = {
             type: 'motion',
             start: startTimestamp,
@@ -124,14 +104,23 @@ export class Engine {
             predecessor: draft,
             startAnchor: stats.mean,
             path: [...draft.pending],
-            recent: [draft.pending[draft.pending.length - 1]!]
+            recent: [draft.pending[draft.pending.length - 1] ?? firstPending]
           };
         } else {
           // Mushy noise. Merge oldest pending into recent to prevent buffer bloat
-          const first = draft.pending.shift()!;
-          draft.recent.push(first);
-          if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
-          this.recordDebug(p, 'stationary'); // Re-classify as stationary mush
+          const first = draft.pending.shift();
+          if (first) {
+            draft.recent.push(first);
+            if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
+
+            if (draft.recent.length >= 10) {
+              const newStats = this.computeStats(draft.recent);
+              const distToAnchor = haversineDistance(fromWebMercator(newStats.mean), fromWebMercator(draft.stationaryStartAnchor));
+              if (distToAnchor > profile.maxStationaryRadius) {
+                draft.stationaryStartAnchor = newStats.mean; // Update anchor to prevent drag
+              }
+            }
+          }
         }
       }
     }
@@ -150,18 +139,22 @@ export class Engine {
     const isSettled = this.checkSettled(draft, profile);
 
     if (!isSettled) {
-      this.recordDebug(p, 'motion');
       return;
     }
 
     // Settled! Decide if significant or noise
-    const settleStart = draft.recent[0]!.timestamp;
+    const firstRecent = draft.recent[0];
+    if (!firstRecent) {
+      return;
+    }
+    const settleStart = firstRecent.timestamp;
     const settleStats = this.computeStats(draft.recent);
     const totalDistance = this.computePathLength(draft.path);
     const startEndDist = haversineDistance(fromWebMercator(draft.startAnchor), fromWebMercator(settleStats.mean));
     const maxDev = this.maxDeviation(draft.path, draft.startAnchor);
 
-    const settleEnd = draft.recent[draft.recent.length - 1]!.timestamp;
+    const lastRecent = draft.recent[draft.recent.length - 1];
+    const settleEnd = lastRecent ? lastRecent.timestamp : p.timestamp;
     const settleDurationSeconds = (settleEnd - draft.start) / 1000;
     const avgRoadSpeed = settleDurationSeconds > 0 ? totalDistance / settleDurationSeconds : 0;
     const efficiency = totalDistance > 0 ? startEndDist / totalDistance : 0;
@@ -204,20 +197,24 @@ export class Engine {
       this.closed.push({
         type: 'stationary',
         start: draft.predecessor.start,
-        end: draft.stationaryCutoff,
+        end: Math.max(draft.predecessor.start, draft.stationaryCutoff),
         mean: predStats.mean,
-        variance: predStats.variance
+        variance: predStats.variance,
+        isDraft: false
       });
 
       this.closed.push({
         type: 'motion',
         start: draft.start,
-        end: settleStart,
+        end: Math.max(draft.start, settleStart),
         startAnchor: draft.startAnchor,
         endAnchor: settleStats.mean,
         path: stablePath,
-        distance: totalDistance
+        distance: totalDistance,
+        isDraft: false,
+        bounds: computeBounds(stablePath)
       });
+      vlog(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
 
       // Start new stationary
       this.draft = {
@@ -227,7 +224,6 @@ export class Engine {
         recent: [...draft.recent],
         pending: []
       };
-      this.recordDebug(p, 'settled-significant');
     } else {
       // ABSORB: Merge into predecessor
       const predecessor = draft.predecessor;
@@ -238,70 +234,52 @@ export class Engine {
       predecessor.stationaryStartAnchor = settleStats.mean; // Update anchor to prevent drag!
 
       this.draft = predecessor;
-      this.recordDebug(p, 'settled-absorbed');
     }
   }
 
   private checkSettled(draft: MotionDraft, profile: MotionProfileConfig): boolean {
     if (draft.recent.length < profile.motionSettleWindowSize) return false;
 
-    const duration = draft.recent[draft.recent.length - 1]!.timestamp - draft.recent[0]!.timestamp;
-    if (duration < profile.minStationaryDuration) return false;
+    const first = draft.recent[0];
+    const last = draft.recent[draft.recent.length - 1];
+    if (!first || !last || (last.timestamp - first.timestamp) < profile.minStationaryDuration) return false;
 
     const stats = this.computeStats(draft.recent);
     const minVariance = Math.pow(profile.maxStationaryRadius / 3, 2); // 1-sigma floor
     const effectiveVariance = Math.max(stats.variance, minVariance);
 
-    for (const p of draft.recent) {
-      const m2 = this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance);
-      if (m2 > profile.motionSettleMahalanobisThreshold) return false;
-    }
-
-    return true;
+    return draft.recent.every(p => this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance) <= profile.motionSettleMahalanobisThreshold);
   }
 
   private checkCoherence(directions: Vec2[], threshold: number): boolean {
     if (directions.length < 2) return true;
-    let sx = 0, sy = 0;
-    for (const d of directions) {
-      sx += d[0];
-      sy += d[1];
-    }
-    const mag = Math.hypot(sx, sy);
+
+    const sum = directions.reduce((acc, d) => [acc[0] + d[0], acc[1] + d[1]], [0, 0]);
+    const mag = Math.hypot(sum[0], sum[1]);
     if (mag === 0) return false;
-    const avgX = sx / mag;
-    const avgY = sy / mag;
-    for (const d of directions) {
-      if (d[0] * avgX + d[1] * avgY < threshold) return false;
-    }
-    return true;
+
+    const avg: Vec2 = [sum[0] / mag, sum[1] / mag];
+    return directions.every(d => (d[0] * avg[0] + d[1] * avg[1]) >= threshold);
   }
 
   public computeStats(points: DevicePoint[]): { mean: Vec2; variance: number } {
     if (points.length === 0) return { mean: [0, 0], variance: 1 };
 
-    let sumX = 0, sumY = 0;
-    for (const p of points) {
-      sumX += p.mean[0];
-      sumY += p.mean[1];
-    }
-    const mean: Vec2 = [sumX / points.length, sumY / points.length];
+    const sum = points.reduce((acc, p) => [acc[0] + p.mean[0], acc[1] + p.mean[1]] as Vec2, [0, 0] as Vec2);
+    const mean: Vec2 = [sum[0] / points.length, sum[1] / points.length];
 
-    let sumDistSq = 0;
-    for (const p of points) {
+    const sumDistSq = points.reduce((acc, p) => {
       const dx = p.mean[0] - mean[0];
       const dy = p.mean[1] - mean[1];
-      sumDistSq += (dx * dx + dy * dy);
-    }
+      return acc + (dx * dx + dy * dy);
+    }, 0);
 
     const variance = sumDistSq / points.length;
 
     // Variance cap to prevent "mega-anchors" that swallow large jumps
     const MIN_VARIANCE = 2.0;
     const MAX_VARIANCE = 400.0;
-    const v = Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance));
-
-    return { mean, variance: v };
+    return { mean, variance: Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance)) };
   }
 
   private computeMahalanobis2(pos: Vec2, mean: Vec2, variance: number): number {
@@ -311,102 +289,80 @@ export class Engine {
   }
 
   public computePathLength(path: (Vec2 | DevicePoint)[]): number {
-    let dist = 0;
-    for (let i = 1; i < path.length; i++) {
-      const a = path[i - 1]!;
-      const b = path[i]!;
+    return path.slice(1).reduce((acc, b, i) => {
+      const a = path[i]!;
       const p1 = 'mean' in a ? a.mean : a;
       const p2 = 'mean' in b ? b.mean : b;
-      dist += haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
-    }
-    return dist;
+      return acc + haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
+    }, 0);
   }
 
   private maxDeviation(path: DevicePoint[], anchor: Vec2): number {
-    let maxD2 = 0;
-    for (const p of path) {
+    const maxD2 = path.reduce((max, p) => {
       const dx = p.mean[0] - anchor[0];
       const dy = p.mean[1] - anchor[1];
-      const d2 = dx * dx + dy * dy;
-      if (d2 > maxD2) maxD2 = d2;
-    }
+      return Math.max(max, dx * dx + dy * dy);
+    }, 0);
     return Math.sqrt(maxD2);
   }
 
-  private recordDebug(p: DevicePoint, decision: DebugDecision, mean: Vec2 | null = null, variance: number | null = null, m2: number | null = null) {
-    this.debugFrames.push({
-      timestamp: p.timestamp,
-      decision,
-      point: p.mean,
-      mean,
-      variance,
-      mahalanobis2: m2,
-      pendingCount: this.draft?.type === 'stationary' ? this.draft.pending.length : 0,
-      draftType: this.draft?.type ?? 'none'
-    });
-    // Cap debug frames
-    if (this.debugFrames.length > DEBUG_FRAME_CAP) this.debugFrames.shift();
-  }
-
-  getCurrentSnapshot(): EngineSnapshot | null {
+  getState(): EngineState | null {
     if (!this.draft) return null;
     return {
       draft: this.draft,
       closed: this.closed,
-      timestamp: this.lastTimestamp,
-      activeConfidence: 1.0 // Simple for now
+      lastTimestamp: this.lastTimestamp,
     };
   }
 
   createSnapshot(): EngineState {
-    return {
-      draft: JSON.parse(JSON.stringify(this.draft)) as EngineDraft,
-      closed: JSON.parse(JSON.stringify(this.closed)) as EngineEvent[],
-      debugFrames: [...this.debugFrames],
-      seenDebugKeys: new Set(this.seenDebugKeys)
-    };
+    vlog(`[Engine] Creating snapshot. History size: ${this.closed.length}`);
+    return JSON.parse(JSON.stringify({
+      draft: this.draft,
+      closed: this.closed,
+      lastTimestamp: this.lastTimestamp,
+    })) as EngineState;
   }
 
   restoreSnapshot(state: EngineState) {
     this.draft = state.draft;
-    this.closed = state.closed;
-    this.debugFrames = state.debugFrames;
-    this.seenDebugKeys = new Set(state.seenDebugKeys);
-    this.lastTimestamp = this.draft?.start ?? null;
+    this.closed = (state.closed ?? []).map(ev => ({ ...ev, isDraft: ev.isDraft ?? false }));
+    this.lastTimestamp = state.lastTimestamp ?? this.draft?.start ?? null;
+    vlog(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
   }
 
   pruneHistory(horizon: Timestamp) {
     this.closed = this.closed.filter(ev => ev.end > horizon);
   }
 
-  refineHistory(profile: MotionProfileConfig) {
-    // Safety: ensure chronological order before merging
+  refineHistory() {
+    const profile = this.getProfile();
     this.closed.sort((a, b) => a.start - b.start);
 
     let i = 0;
     while (i < this.closed.length - 2) {
-      const current = this.closed[i]!;
-      const next = this.closed[i + 1]!;
-      const nextNext = this.closed[i + 2]!;
+      const current = this.closed[i];
+      const next = this.closed[i + 1];
+      const nextNext = this.closed[i + 2];
 
       if (
-        current.type === 'motion' &&
-        next.type === 'stationary' &&
-        nextNext.type === 'motion' &&
-        next.end > next.start && // Basic validity check
-        next.end - next.start < profile.maxMergeGapDuration
+        current?.type === 'motion' &&
+        next?.type === 'stationary' &&
+        nextNext?.type === 'motion' &&
+        (next.end - next.start) < profile.maxMergeGapDuration
       ) {
         const merged: MotionEvent = {
           type: 'motion',
           start: current.start,
-          end: nextNext.end,
+          end: Math.max(current.start, nextNext.end),
           startAnchor: current.startAnchor,
           endAnchor: nextNext.endAnchor,
           path: [...current.path, ...nextNext.path],
-          distance: 0
+          distance: 0,
+          isDraft: false,
+          bounds: computeBounds([...current.path, ...nextNext.path])
         };
         merged.distance = this.computePathLength(merged.path);
-
         this.closed.splice(i, 3, merged);
       } else {
         i++;

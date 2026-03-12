@@ -4,58 +4,21 @@ import { LoginPage } from "./ui/LoginPage";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { TimelinePanel, type TimelineEvent } from "./ui/TimelinePanel";
 import { useEffect, useState, useMemo, useRef } from "react";
+import { useServerConnection } from "./hooks/useServerConnection";
 import { useStore } from "./store";
-import { useTraccarConnection } from "./hooks/useTraccarConnection";
 import DeviceListSidePanel from "./ui/DeviceListSidePanel";
 import DeviceOverlay from "./ui/DeviceOverlay";
 import MapView, { type MapViewHandle } from "./ui/MapView";
-import type { DebugAnchor, DebugFrameView, UiDevice, Timestamp } from "./types";
 import UnifiedEditModal from "./ui/UnifiedEditModal";
 
 export function App() {
   const createGroup = useStore(state => state.createGroup);
   const deleteGroup = useStore(state => state.deleteGroup);
   const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
-  const addPositions = useStore(state => state.addPositions);
-  const setDevicesFromApi = useStore(state => state.setDevicesFromApi);
-  const groupDevices = useStore(state => state.groups);
 
-  const enginesRef = useStore(state => state.refs.engines);
-  const devices = useStore(state => state.devices);
-  const { deviceNames, deviceColors, deviceIcons, deviceLastSeen } = useMemo(() => {
-    const names: Record<number, string> = {};
-    const colors: Record<number, string> = {};
-    const icons: Record<number, string> = {};
-    const lastSeen: Record<number, Timestamp | null> = {};
-    for (const id of Object.keys(devices)) {
-      const numId = Number(id);
-      const d = devices[numId];
-      if (!d) continue;
-      names[numId] = d.name;
-      colors[numId] = d.color ?? "";
-      icons[numId] = d.emoji;
-      lastSeen[numId] = d.lastSeen;
-    }
-    // Add groups to deviceLastSeen
-    for (const group of groupDevices) {
-      let maxLastSeen: Timestamp | null = null;
-      for (const memberId of group.memberDeviceIds) {
-        const ts = lastSeen[memberId];
-        if (ts && (maxLastSeen == null || ts > maxLastSeen)) {
-          maxLastSeen = ts;
-        }
-      }
-      lastSeen[group.id] = maxLastSeen;
-    }
-    return { deviceNames: names, deviceColors: colors, deviceIcons: icons, deviceLastSeen: lastSeen };
-  }, [devices, groupDevices]);
+  const entities = useStore(state => state.entities);
+  const metadata = useStore(state => state.metadata);
 
-  const RECENT_DEVICE_CUTOFF_MS = 48 * 60 * 60 * 1000; // 48 hours
-
-  const traccarSecure = useStore(state => state.settings.secure);
-  const traccarEmail = useStore(state => state.settings.email);
-  const traccarPassword = useStore(state => state.settings.password);
-  const traccarBaseUrl = useStore(state => state.settings.baseUrl);
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const theme = useStore(state => state.settings.theme);
 
@@ -92,25 +55,12 @@ export function App() {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [theme]);
 
-  const fetchConfig = useStore((state) => state.fetchConfig);
-  const fetchMaptilerKey = useStore((state) => state.fetchMaptilerKey);
   const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
-
-  useEffect(() => {
-    fetchConfig();
-    if (isAuthenticated) {
-      fetchMaptilerKey();
-    }
-  }, [fetchConfig, fetchMaptilerKey, isAuthenticated]);
 
   const selectedDeviceId = useStore(state => state.ui.selectedDeviceId);
   const setSelectedDeviceId = useStore(state => state.setSelectedDeviceId);
   const isSidePanelOpen = useStore(state => state.ui.isSidePanelOpen);
   const setIsSidePanelOpen = useStore(state => state.setIsSidePanelOpen);
-  const debugMode = useStore(state => state.ui.debugMode);
-  const setDebugMode = useStore(state => state.setDebugMode);
-  const debugFrameIndex = useStore(state => state.ui.debugFrameIndex);
-  const setDebugFrameIndex = useStore(state => state.setDebugFrameIndex);
   const editingTarget = useStore(state => state.ui.editingTarget);
   const setEditingTarget = useStore(state => state.setEditingTarget);
 
@@ -118,186 +68,38 @@ export function App() {
 
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
 
-  const mockMode = useStore(state => state.settings.mockMode);
-
-  useTraccarConnection({
-    baseUrl: mockMode ? null : traccarBaseUrl,
-    secure: traccarSecure,
-    email: traccarEmail,
-    password: traccarPassword,
-    onDevices: setDevicesFromApi,
-    onPositions: addPositions,
-  });
+  useServerConnection();
 
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
 
-  const engineSnapshotsByDevice = useStore(state => state.engineSnapshotsByDevice);
+  const activePointsByDevice = useStore(state => state.activePointsByDevice);
   const eventsByDevice = useStore(state => state.eventsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
 
-
   const visibleComponents = useMemo(() => {
-    const allComps = Object.values(engineSnapshotsByDevice).flat();
+    return Object.values(activePointsByDevice)
+      .flat()
+      .filter((comp) => entities[comp.device] != null);
+  }, [activePointsByDevice, entities]);
 
-    // Filter devices not seen in the last cutoff using deviceLastSeen
-    const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-
-    // Create a set of group member IDs to hide them if they should be shown via group
-    const groupMemberIds = new Set<number>();
-    for (const group of groupDevices) {
-      for (const memberId of group.memberDeviceIds) {
-        groupMemberIds.add(memberId);
-      }
-    }
-
-    return allComps.filter((comp) => {
-      const lastSeen = deviceLastSeen[comp.device];
-      const isRecent = lastSeen != null && lastSeen > cutoff;
-      const isIndividual = !groupMemberIds.has(comp.device);
-      return isRecent && isIndividual;
-    });
-  }, [engineSnapshotsByDevice, deviceLastSeen, groupDevices]);
-
-  const debugAnchors = useMemo((): DebugAnchor[] => {
-    if (!debugMode || selectedDeviceId == null) return [];
-    const engine = enginesRef.get(selectedDeviceId);
-    if (!engine) return [];
-    const anchors: DebugAnchor[] = [];
-
-    // Closed events as anchors
-    for (const ev of engine.closed) {
-      if (ev.type === 'stationary') {
-        anchors.push({
-          mean: ev.mean,
-          variance: ev.variance,
-          confidence: 1.0,
-          type: 'closed',
-          startTimestamp: ev.start,
-          endTimestamp: ev.end,
-          lastUpdateTimestamp: ev.end
-        });
-      }
-    }
-
-    // Active draft as active anchor
-    if (engine.draft) {
-      if (engine.draft.type === 'stationary') {
-        const stats = engine.computeStats(engine.draft.recent);
-        anchors.push({
-          mean: stats.mean,
-          variance: stats.variance,
-          confidence: 1.0,
-          type: 'active',
-          startTimestamp: engine.draft.start,
-          endTimestamp: null,
-          lastUpdateTimestamp: engine.lastTimestamp ?? engine.draft.start
-        });
-      }
-    }
-    return anchors;
-  }, [debugMode, selectedDeviceId, engineSnapshotsByDevice]);
-
-  // Reset debug index when device changes
-  const lastSelectedDeviceId = useRef<number | null>(null);
-  useEffect(() => {
-    if (selectedDeviceId == null) return;
-    if (selectedDeviceId === lastSelectedDeviceId.current) return;
-    lastSelectedDeviceId.current = selectedDeviceId;
-
-    const frames = enginesRef.get(selectedDeviceId)?.getDebugFrames() ?? [];
-    if (frames.length === 0) setDebugFrameIndex(0);
-    else setDebugFrameIndex(Math.max(0, frames.length - 1));
-  }, [selectedDeviceId]);
 
   // Clear selected motion segment when device changes
   useEffect(() => {
     setSelectedTimelineEvent(null);
   }, [selectedDeviceId]);
 
-  // Current debug frame for map rendering
-  const debugFrame = useMemo((): DebugFrameView | null => {
-    if (!debugMode || selectedDeviceId == null) return null;
-    const eng = enginesRef.get(selectedDeviceId);
-    if (!eng) return null;
-    const frames = eng.getDebugFrames();
-    if (frames.length === 0) return null;
-    const f = frames[Math.max(0, Math.min(frames.length - 1, debugFrameIndex))];
-    if (!f) return null;
-    return f as DebugFrameView;
-  }, [debugMode, selectedDeviceId, debugFrameIndex, engineSnapshotsByDevice]);
-
-  const deviceList = useMemo(() => {
-    const cutoff = Date.now() - RECENT_DEVICE_CUTOFF_MS;
-    const result: UiDevice[] = [];
-
-    // Track seen IDs to prevent duplicates
-    const seenIds = new Set<number>();
-
-    // Create a set of group IDs to skip when processing individual devices
-    const groupIds = new Set(groupDevices.map(g => g.id));
-
-    // Add individual devices (skip if they're members of a group or if they're group devices themselves)
-    for (const [id, name] of Object.entries(deviceNames)) {
-      const numId = Number(id);
-
-      if (groupIds.has(numId) || seenIds.has(numId)) continue;
-
-      const lastSeen = deviceLastSeen[numId] ?? null;
-      if (!lastSeen || lastSeen <= cutoff) continue; // Skip old devices
-
-      const color = deviceColors[numId];
-      result.push({
-        id: numId,
-        isGroup: false,
-        name,
-        emoji: deviceIcons[numId] ?? "device_unknown",
-        lastSeen,
-        hasPosition: (engineSnapshotsByDevice[numId]?.length ?? 0) > 0,
-        memberDeviceIds: [],
-        color: color && color !== "" ? color : null,
-      });
-      seenIds.add(numId);
-    }
-
-    // Add group devices
-    for (const groupDevice of groupDevices) {
-      // Skip if already added (defensive against duplicate group IDs)
-      if (seenIds.has(groupDevice.id)) {
-        continue;
-      }
-
-      // Calculate lastSeen as max of all member devices
-      const groupLastSeen = deviceLastSeen[groupDevice.id] ?? null;
-
-      result.push({
-        id: groupDevice.id,
-        isGroup: true,
-        name: groupDevice.name,
-        emoji: groupDevice.emoji,
-        lastSeen: groupLastSeen,
-        hasPosition: (engineSnapshotsByDevice[groupDevice.id]?.length ?? 0) > 0,
-        memberDeviceIds: groupDevice.memberDeviceIds,
-        color: groupDevice.color,
-      });
-      seenIds.add(groupDevice.id);
-    }
-
-    // Sort alphabetically
-    result.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    return result;
-  }, [groupDevices, deviceNames, deviceLastSeen, engineSnapshotsByDevice, deviceColors]);
 
   const allDevicesForSelection = useMemo(() => {
-    return Object.entries(deviceNames)
-      .filter(([id]) => !groupDevices.some(g => g.id === Number(id)))
-      .map(([id, name]) => ({
-        id: Number(id),
-        name,
-        emoji: deviceIcons[Number(id)] ?? name?.charAt(0).toUpperCase() ?? "?"
+    return Object.values(entities)
+      .filter(e => e.memberDeviceIds === null) // Only individual devices
+      .map(e => ({
+        id: e.id,
+        name: e.name,
+        emoji: e.emoji
       }));
-  }, [deviceNames, groupDevices, deviceIcons]);
+  }, [entities]);
 
-  if (!isAuthenticated && !mockMode) {
+  if (!isAuthenticated) {
     return <LoginPage />;
   }
 
@@ -310,7 +112,8 @@ export function App() {
         />
       )}
       <DeviceListSidePanel
-        devices={deviceList}
+        entities={entities}
+        rootIds={metadata.rootIds}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           if (typeof id === "number") {
@@ -330,62 +133,37 @@ export function App() {
       />
       <MapView
         ref={mapViewRef}
-        components={visibleComponents}
+        activePoints={visibleComponents}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           mapViewRef.current?.flyToDevice(id);
           setSelectedDeviceId(id);
         }}
-        deviceNames={deviceNames}
-        deviceIcons={deviceIcons}
-        deviceColors={deviceColors}
+        entities={entities}
         maptilerApiKey={maptilerApiKey}
         darkMode={isDark}
-        debugAnchors={debugAnchors}
-        debugFrame={debugFrame}
         pulsingDeviceIds={pulsingDeviceIds}
         selectedHistoryItem={selectedTimelineEvent?.item ?? null}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
-              debugMode={debugMode}
-              setDebugMode={setDebugMode}
               onLogout={logout}
             />
 
             <DeviceOverlay
               selectedDeviceId={selectedDeviceId}
-              engineSnapshotsByDevice={engineSnapshotsByDevice}
-              debugMode={debugMode}
-              debugFrameIndex={debugFrameIndex}
-              setDebugFrameIndex={setDebugFrameIndex}
-              deviceNames={deviceNames}
-              deviceLastSeen={deviceLastSeen}
-              groupDevices={groupDevices}
+              activePointsByDevice={activePointsByDevice}
+              entities={entities}
               setSelectedDeviceId={setSelectedDeviceId}
-              enginesRef={enginesRef}
               setEditingTarget={setEditingTarget}
+              isOwner={selectedDeviceId != null ? (entities[selectedDeviceId]?.isOwner ?? false) : false}
             />
 
             <TimelinePanel
               selectedDeviceId={selectedDeviceId}
-              enginesRef={enginesRef}
-              engineSnapshot={selectedDeviceId != null ? engineSnapshotsByDevice[selectedDeviceId] : undefined}
               eventsByDevice={eventsByDevice}
               onSelectEvent={(event) => {
                 setSelectedTimelineEvent(event);
-                const startTime = event.item.start;
-
-                if (selectedDeviceId != null) {
-                  const engine = enginesRef.get(selectedDeviceId);
-                  if (engine) {
-                    const frames = [...engine.getDebugFrames()].sort((a, b) => a.timestamp - b.timestamp);
-                    const idx = frames.findIndex(f => f.timestamp >= startTime);
-                    if (idx >= 0) {
-                      setDebugFrameIndex(idx);
-                    }
-                  }
-                }
 
                 if (event.item.type === 'stationary') {
                   const geo = fromWebMercator(event.item.mean);
@@ -393,20 +171,11 @@ export function App() {
                   mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
                 } else {
                   const s = event.item;
-                  if (s.path.length > 0) {
-                    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
-                    for (const p of s.path) {
-                      const geo = fromWebMercator(p);
-                      minLng = Math.min(minLng, geo[0]);
-                      maxLng = Math.max(maxLng, geo[0]);
-                      minLat = Math.min(minLat, geo[1]);
-                      maxLat = Math.max(maxLat, geo[1]);
-                    }
-                    if (minLng !== Infinity) {
-                      const padding = Math.max(0.001, (maxLng - minLng) * 0.1, (maxLat - minLat) * 0.1);
-                      mapViewRef.current?.flyToBounds([[minLng - padding, minLat - padding], [maxLng + padding, maxLat + padding]]);
-                    }
-                  }
+                  // Use server-computed bounds instead of iterating through path
+                  const sw = fromWebMercator([s.bounds.minX, s.bounds.minY]);
+                  const ne = fromWebMercator([s.bounds.maxX, s.bounds.maxY]);
+                  const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+                  mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
                 }
               }}
               selectedEventId={selectedTimelineEvent?.id ?? null}

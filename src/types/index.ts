@@ -1,32 +1,25 @@
+export type TraccarDevice = {
+  id: number;
+  name: string;
+  lastUpdate: string | null;
+  attributes: Record<string, unknown>;
+};
+
+export interface Session {
+  token: string;
+  username: string;
+  traccarToken: string;
+  createdAt: number;
+  lastActive: number;
+}
+
 export type Timestamp = number & { readonly __u?: 'timestamp' };
 
 export type Vec2 = [number, number];
 
-export type DebugAnchor = {
-  mean: Vec2;        // Web Mercator [x, y]
-  variance: number;  // meters²
-  confidence: number;
-  type: "active" | "candidate" | "closed" | "frame";
-  startTimestamp: Timestamp;
-  endTimestamp: Timestamp | null;
-  lastUpdateTimestamp: Timestamp;
-};
-
-/** Snapshot of a single debug frame for map rendering. */
-export type DebugFrameView = {
-  timestamp: Timestamp;
-  decision: 'stationary' | 'pending' | 'motion' | 'settled-significant' | 'settled-absorbed';
-  point: Vec2 | null;
-  mean: Vec2 | null;
-  variance: number | null;
-  mahalanobis2: number | null;
-  pendingCount: number;
-  draftType: 'stationary' | 'motion' | 'none';
-};
-
 export type DevicePoint = {
   device: number;
-  sourceDeviceId: number | undefined;
+  sourceDeviceId: number | null;
   geo: Vec2;
   mean: Vec2;
   timestamp: Timestamp;
@@ -46,24 +39,16 @@ export type MotionProfileName = 'person' | 'car';
 
 export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
 
-export type GroupDevice = {
+export type AppDevice = {
   id: number;
   name: string;
   emoji: string;
-  color: string;
-  memberDeviceIds: number[];
-  motionProfile: MotionProfileName | null;
-};
-
-export type UiDevice = {
-  id: number;
-  isGroup: boolean;
-  name: string;
-  emoji: string;
-  lastSeen: Timestamp | null;
-  hasPosition: boolean;
-  memberDeviceIds: number[];
   color: string | null;
+  lastSeen: Timestamp | null;
+  effectiveMotionProfile: MotionProfileName;
+  motionProfile: MotionProfileName | null;
+  isOwner: boolean;
+  memberDeviceIds: number[] | null;
 };
 
 export type StationaryEvent = {
@@ -72,6 +57,7 @@ export type StationaryEvent = {
   end: Timestamp;
   mean: Vec2;
   variance: number;
+  isDraft: boolean;
 };
 
 export type MotionEvent = {
@@ -82,6 +68,8 @@ export type MotionEvent = {
   endAnchor: Vec2;
   path: Vec2[];
   distance: number;
+  isDraft: boolean;
+  bounds: WorldBounds;
 };
 
 export type EngineEvent = StationaryEvent | MotionEvent;
@@ -105,3 +93,47 @@ export type MotionDraft = {
 };
 
 export type EngineDraft = StationaryDraft | MotionDraft;
+
+export type EngineState = {
+  draft: EngineDraft | null;
+  closed: EngineEvent[];
+  lastTimestamp: Timestamp | null;
+};
+
+export interface RawTraccarPosition {
+  deviceId: number;
+  fixTime: string | number;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  [key: string]: unknown;
+}
+
+// --- WebSocket Protocol ---
+
+export type InitialStatePayload = {
+  entities: Record<number, AppDevice>;
+  activePointsByDevice: Record<number, DevicePoint[]>;
+  eventsByDevice: Record<number, EngineEvent[]>;
+  maptilerApiKey: string;
+  metadata: {
+    rootIds: number[];
+  };
+};
+
+export type ServerMessage =
+  | { type: "initial_state"; payload: InitialStatePayload; requestId?: never }
+  | { type: "positions_update"; payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }; requestId?: never }
+  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: AppDevice[] | null }; requestId?: never }
+  | { type: "update_success"; deviceId: number; requestId?: string }
+  | { type: "create_success"; device: TraccarDevice; requestId?: string }
+  | { type: "delete_success"; groupId: number; requestId?: string }
+  | { type: "error"; message: string; requestId?: string };
+
+export type ClientMessage =
+  | { type: "authenticate"; token: string }
+  | { type: "update_device"; payload: { deviceId: number; updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: string | null } }; requestId?: string }
+  | { type: "create_group"; payload: { name: string; emoji: string; memberDeviceIds: number[] }; requestId?: string }
+  | { type: "delete_group"; payload: { groupId: number }; requestId?: string }
+  | { type: "add_device_to_group"; payload: { groupId: number; deviceId: number }; requestId?: string }
+  | { type: "remove_device_from_group"; payload: { groupId: number; deviceId: number }; requestId?: string };

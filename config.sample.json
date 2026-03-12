@@ -1,5 +1,7 @@
 {
     "maptilerApiKey": "YOUR_MAPTILER_API_KEY",
     "traccarBaseUrl": "demo.traccar.org",
-    "traccarSecure": true
+    "traccarSecure": true,
+    "traccarApiToken": "YOUR_TRACCAR_API_TOKEN",
+    "historyDays": 2
 }

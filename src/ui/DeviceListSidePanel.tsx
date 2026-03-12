@@ -6,11 +6,10 @@ import { EMOJI_OPTIONS } from "@/util/constants";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { useStore } from "@/store";
-import { useTimeAgo } from "@/hooks/useTimeAgo";
+import { useTimeAgo } from "@/util/time";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 
-import type { UiDevice, Timestamp } from "@/types";
+import type { AppDevice, Timestamp } from "@/types";
 
 const LastSeenDisplay: React.FC<{ timestamp: Timestamp | null }> = ({ timestamp }) => {
   const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
@@ -18,7 +17,8 @@ const LastSeenDisplay: React.FC<{ timestamp: Timestamp | null }> = ({ timestamp 
 };
 
 const DeviceListSidePanel: React.FC<{
-  devices: UiDevice[];
+  entities: Record<number, AppDevice>;
+  rootIds: number[];
   selectedDeviceId: number | null;
   onSelectDevice: (id: number) => void;
   isOpen: boolean;
@@ -30,7 +30,8 @@ const DeviceListSidePanel: React.FC<{
   onCreateGroupSelectionChange: (selectedIds: number[]) => void;
   allDevices: Array<{ id: number; name: string; emoji: string }>;
 }> = ({
-  devices,
+  entities,
+  rootIds,
   selectedDeviceId,
   onSelectDevice,
   isOpen,
@@ -42,8 +43,6 @@ const DeviceListSidePanel: React.FC<{
   onCreateGroupSelectionChange,
   allDevices
 }) => {
-    const isMockMode = useStore(state => state.settings.mockMode);
-    const isMockUiVisible = useStore(state => state.ui.isMockUiVisible);
     const [expanded, setExpanded] = useState<Set<number>>(new Set());
     const [mode, setMode] = useState<"list" | "create">("list");
 
@@ -80,25 +79,19 @@ const DeviceListSidePanel: React.FC<{
       };
     }, [contextMenu]);
 
-    const { topLevel, memberMap, sort } = useMemo(() => {
-      const memberIds = new Set<number>();
-      const map = new Map<number, UiDevice>();
-      devices.forEach(d => {
-        map.set(d.id, d);
-        d.memberDeviceIds?.forEach((id: number) => memberIds.add(id));
-      });
-      const top = devices.filter(d => !(typeof d.id === "number" && memberIds.has(d.id)));
+    const { topLevel, sort } = useMemo(() => {
+      const top = rootIds.map(id => entities[id]).filter((e): e is AppDevice => !!e);
+      const now = Date.now(); // capture once for deterministic sorting
 
-      // Sort logic
-      const sort = (list: UiDevice[]) => [...list].sort((a, b) => {
-        const aOn = a.lastSeen ? Date.now() - a.lastSeen < 300000 : false;
-        const bOn = b.lastSeen ? Date.now() - b.lastSeen < 300000 : false;
+      const sort = (list: AppDevice[]) => [...list].sort((a, b) => {
+        const aOn = a.lastSeen ? now - a.lastSeen < 300000 : false;
+        const bOn = b.lastSeen ? now - b.lastSeen < 300000 : false;
         if (aOn !== bOn) return aOn ? -1 : 1;
         return (a.name || `Device ${a.id}`).localeCompare(b.name || `Device ${b.id}`);
       });
 
-      return { topLevel: sort(top), memberMap: map, sort };
-    }, [devices]);
+      return { topLevel: sort(top), sort };
+    }, [rootIds, entities]);
 
     const toggle = (e: React.MouseEvent, id: number) => {
       e.stopPropagation();
@@ -110,20 +103,18 @@ const DeviceListSidePanel: React.FC<{
       });
     };
 
-    const handleCreateSubmit = () => {
-      void (async () => {
-        if (!newGroupName.trim() || selectedCreateDevices.length === 0) return;
-        setIsCreating(true);
-        try {
-          await onCreateGroup(newGroupName, selectedCreateDevices, selectedEmoji);
-          setMode("list");
-          setNewGroupName("");
-          setSelectedCreateDevices([]);
-          setSelectedEmoji("group");
-        } finally {
-          setIsCreating(false);
-        }
-      })();
+    const handleCreateSubmit = async () => {
+      if (!newGroupName.trim() || selectedCreateDevices.length === 0) return;
+      setIsCreating(true);
+      try {
+        await onCreateGroup(newGroupName, selectedCreateDevices, selectedEmoji);
+        setMode("list");
+        setNewGroupName("");
+        setSelectedCreateDevices([]);
+        setSelectedEmoji("group");
+      } finally {
+        setIsCreating(false);
+      }
     };
 
     const handleContextMenu = (e: React.MouseEvent, groupId: number) => {
@@ -135,20 +126,20 @@ const DeviceListSidePanel: React.FC<{
       setContextMenu({ groupId, x, y });
     };
 
-    const renderItem = (device: UiDevice, depth: number = 0, isLast = false, isFirst = false) => {
+    const renderItem = (device: AppDevice, depth: number = 0, isLast = false, isFirst = false) => {
       const [r, g, b] = colorForDevice(device.id);
       const defaultColor = `rgb(${r}, ${g}, ${b})`;
       const colorStr = device.color ?? defaultColor;
-      const displayName = device.name || `Device ${device.id}`;
-      const children = (device.isGroup ? device.memberDeviceIds ?? [] : [])
-        .map(id => memberMap.get(id)).filter((d: UiDevice | undefined): d is UiDevice => !!d);
+      const displayName = device.name;
+      const children = (device.memberDeviceIds ?? [])
+        .map(id => entities[id]).filter((d: AppDevice | undefined): d is AppDevice => !!d);
 
       const sortedChildren = sort(children);
 
       return (
-        <React.Fragment key={`${device.isGroup ? "g" : "d"}-${device.id}`}>
+        <React.Fragment key={`${device.memberDeviceIds !== null ? "g" : "d"}-${device.id}`}>
           <li onContextMenu={(e) => {
-            if (device.isGroup) {
+            if (device.memberDeviceIds !== null && device.isOwner) {
               handleContextMenu(e, device.id);
             }
           }}>
@@ -167,8 +158,8 @@ const DeviceListSidePanel: React.FC<{
                 </div>
               )}
 
-              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => device.isGroup && toggle(e, device.id)}>
-                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${device.isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
+              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => device.memberDeviceIds !== null && toggle(e, device.id)}>
+                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${device.memberDeviceIds !== null ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
                   {device.emoji?.length > 1 ? (
                     <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.emoji}</span>
                   ) : (
@@ -222,7 +213,7 @@ const DeviceListSidePanel: React.FC<{
           <div className="p-4 border-b border-border bg-muted/30 flex items-center justify-between pl-20 h-[73px]">
             {mode === "list" ? (
               <>
-                <div><h2 className="text-lg font-semibold text-foreground">Devices</h2><p className="text-sm text-muted-foreground">{devices.length} total</p></div>
+                <div><h2 className="text-lg font-semibold text-foreground">Devices</h2><p className="text-sm text-muted-foreground">{Object.keys(entities).length} total</p></div>
                 <Button
                   variant="outline"
                   size="icon"
@@ -232,20 +223,6 @@ const DeviceListSidePanel: React.FC<{
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
-                {isMockMode && isMockUiVisible && (
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => {
-                      const id = useStore.getState().createMockDevice("Mock Device", "smartphone", "#3b82f6");
-                      onSelectDevice(id);
-                    }}
-                    className="h-8 w-8 rounded-full bg-yellow-500/10 border-yellow-500/50 hover:bg-yellow-500/20"
-                    title="Add Mock Device"
-                  >
-                    <Smartphone className="h-4 w-4 text-yellow-600" />
-                  </Button>
-                )}
               </>
             ) : (
               <div className="flex items-center w-full">
@@ -258,7 +235,7 @@ const DeviceListSidePanel: React.FC<{
           <div className="h-[calc(100%-73px)]">
             {mode === "list" ? (
               <div className="overflow-y-auto h-full p-0">
-                {devices.length === 0 ? <div className="p-4 text-center text-muted-foreground text-sm">No devices found</div> : (
+                {topLevel.length === 0 ? <div className="p-4 text-center text-muted-foreground text-sm">No devices found</div> : (
                   <ul className="divide-y divide-border dark:divide-white/10 text-sm pb-20">
                     {topLevel.map(d => renderItem(d))}
                   </ul>
@@ -348,7 +325,7 @@ const DeviceListSidePanel: React.FC<{
                   <Button
                     className="w-full"
                     disabled={!newGroupName.trim() || selectedCreateDevices.length === 0 || isCreating}
-                    onClick={handleCreateSubmit}
+                    onClick={() => void handleCreateSubmit()}
                   >
                     {isCreating ? "Creating..." : "Create Group"}
                   </Button>
@@ -400,35 +377,35 @@ const DeviceListSidePanel: React.FC<{
                 {/* Submenu */}
                 <div className="absolute left-full top-0 ml-1 bg-background rounded-lg shadow-xl border border-border py-1 hidden group-hover/add:block min-w-[200px] max-h-[300px] overflow-y-auto">
                   {(() => {
-                    const groupDevice = devices.find(d => d.id === contextMenu.groupId);
+                    const groupDevice = entities[contextMenu.groupId];
                     const memberIds = new Set(groupDevice?.memberDeviceIds ?? []);
                     const availableDevices = allDevices.filter(d => !memberIds.has(d.id));
 
-                    if (availableDevices.length === 0) {
-                      return <div className="px-4 py-2 text-xs text-muted-foreground italic">No devices available</div>;
-                    }
-
-                    return availableDevices.map(d => (
-                      <Button
-                        key={d.id}
-                        variant="ghost"
-                        className="w-full justify-start px-4 py-2 text-sm truncate"
-                        onClick={() => {
-                          void onAddDeviceToGroup(contextMenu.groupId, d.id).then(() => {
-                            setContextMenu(null);
-                          });
-                        }}
-                      >
-                        <span className="w-6 inline-flex items-center justify-center flex-shrink-0 text-muted-foreground">
-                          {d.emoji?.length > 1 ? (
-                            <span className="material-symbols-outlined text-lg select-none">{d.emoji}</span>
-                          ) : (
-                            <span className="select-none text-sm font-semibold">{d.emoji || d.name?.charAt(0)}</span>
-                          )}
-                        </span>
-                        {d.name}
-                      </Button>
-                    ));
+                    return availableDevices.length === 0 ? (
+                      <div className="px-4 py-2 text-xs text-muted-foreground italic">No devices available</div>
+                    ) : (
+                      availableDevices.map(d => (
+                        <Button
+                          key={d.id}
+                          variant="ghost"
+                          className="w-full justify-start px-4 py-2 text-sm truncate"
+                          onClick={() => {
+                            void onAddDeviceToGroup(contextMenu.groupId, d.id).then(() => {
+                              setContextMenu(null);
+                            });
+                          }}
+                        >
+                          <span className="w-6 inline-flex items-center justify-center flex-shrink-0 text-muted-foreground">
+                            {d.emoji?.length > 1 ? (
+                              <span className="material-symbols-outlined text-lg select-none">{d.emoji}</span>
+                            ) : (
+                              <span className="select-none text-sm font-semibold">{d.emoji || d.name?.charAt(0)}</span>
+                            )}
+                          </span>
+                          {d.name}
+                        </Button>
+                      ))
+                    );
                   })()}
                 </div>
               </div>
@@ -438,7 +415,7 @@ const DeviceListSidePanel: React.FC<{
                 variant="ghost"
                 className="w-full justify-start px-4 py-2 text-sm text-destructive hover:text-destructive hover:bg-destructive/10"
                 onClick={() => {
-                  const groupName = devices.find(d => d.id === contextMenu.groupId)?.name;
+                  const groupName = entities[contextMenu.groupId]?.name;
                   if (window.confirm(`Delete group "${groupName}"?`)) {
                     void onDeleteGroup(contextMenu.groupId).then(() => {
                       setContextMenu(null);
