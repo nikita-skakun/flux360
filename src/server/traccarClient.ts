@@ -1,4 +1,5 @@
 import { extractPositionsFromMessage } from "./traccarAdminUtils";
+import { vlog } from "@/util/logger";
 import type { NormalizedPosition, TraccarDevice, Timestamp, RawTraccarPosition } from "@/types";
 
 type ServerStateDeps = {
@@ -30,7 +31,7 @@ export class TraccarAdminClient {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        console.log("✅ Traccar Admin WebSocket connected");
+        vlog("✅ Traccar Admin WebSocket connected");
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       };
@@ -55,14 +56,14 @@ export class TraccarAdminClient {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const devices = await res.json() as TraccarDevice[];
-      console.log(`[TraccarAdminClient] Fetched ${devices.length} devices via REST`);
+      vlog(`[TraccarAdminClient] Fetched ${devices.length} devices via REST`);
       this.deps.onDevicesReceived(devices);
     } catch (err) { console.error("Traccar REST error:", err); }
   }
 
   private scheduleReconnect() {
     if (!this.reconnectTimer) {
-      console.log("⚠️ Traccar Admin WS closed. Reconnecting in 5s...");
+      vlog("⚠️ Traccar Admin WS closed. Reconnecting in 5s...");
       this.reconnectTimer = setTimeout(() => (this.reconnectTimer = null, this.connect()), 5000);
     }
   }
@@ -78,7 +79,7 @@ export class TraccarAdminClient {
 
     const url = `${this.secure ? "https" : "http"}://${this.baseUrl}/api/positions?${params.toString()}`;
 
-    console.log(`[TraccarAdminClient] Fetching history for device ${deviceId} at ${url}`);
+    vlog(`[TraccarAdminClient] Fetching history for device ${deviceId} at ${url}`);
 
     try {
       const res = await fetch(url, {
@@ -95,7 +96,7 @@ export class TraccarAdminClient {
         .map(p => this.normalizePosition(p))
         .filter((p): p is NormalizedPosition => p !== null);
 
-      console.log(`[TraccarAdminClient] Received ${normalized.length} historical positions for device ${deviceId}`);
+      vlog(`[TraccarAdminClient] Received ${normalized.length} historical positions for device ${deviceId}`);
       return normalized;
     } catch (err) {
       console.error(`[TraccarAdminClient] History fetch failed for device ${deviceId}:`, err);

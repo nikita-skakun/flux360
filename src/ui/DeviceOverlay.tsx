@@ -32,11 +32,6 @@ function DeviceOverlayComponent({
   isOwner,
 }: Props) {
   const sessionToken = useStore(state => state.settings.sessionToken);
-  if (selectedDeviceId == null) return null;
-
-  const points = activePointsByDevice[selectedDeviceId] ?? [];
-  const chosen = points.length > 0 ? points[points.length - 1] : null;
-  if (!chosen) return null;
 
   // Derive group-related info
   const { group, contributors, mostRecentSourceName } = useMemo(() => {
@@ -59,6 +54,14 @@ function DeviceOverlayComponent({
 
     return { group: entity, contributors: contribs, mostRecentSourceName: latestName };
   }, [selectedDeviceId, entities]);
+
+  if (selectedDeviceId == null) return null;
+
+  const points = activePointsByDevice[selectedDeviceId] ?? [];
+  const chosen = points.length > 0 ? points[points.length - 1] : null;
+  if (!chosen) return null;
+
+
 
   return (
     <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">

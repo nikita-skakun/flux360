@@ -4,6 +4,7 @@ import { Engine } from "@/engine/engine";
 import { toWebMercator } from "@/util/webMercator";
 import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { rgbToHex, colorForDevice } from "@/util/color";
+import { vlog } from "@/util/logger";
 import type { NormalizedPosition, DevicePoint, MotionProfileName, EngineEvent, Timestamp, AppDevice, TraccarDevice, EngineState } from "@/types";
 
 export class ServerState {
@@ -25,7 +26,7 @@ export class ServerState {
 
   constructor(public readonly historyDays: number) {
     this.historyMs = historyDays * 24 * 60 * 60 * 1000;
-    console.log(`[ServerState] Restoring engine checkpoints...`);
+    vlog(`[ServerState] Restoring engine checkpoints...`);
 
     // 1. Restore Checkpoints
     (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string | object }[])
@@ -43,7 +44,7 @@ export class ServerState {
         }
       });
 
-    console.log(`[ServerState] Restoring recent positions...`);
+    vlog(`[ServerState] Restoring recent positions...`);
     // 2. Restore recent raw positions so `positionsAll` is populated
     const cutoff = Date.now() - this.historyMs;
     const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff) as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number }[];
@@ -65,7 +66,7 @@ export class ServerState {
         this.processedKeys.add(dedupeKey(p));
       }
     }
-    console.log(`[ServerState] Restored ${posRows.length} trailing positions. ${this.engines.size} engines ready.`);
+    vlog(`[ServerState] Restored ${posRows.length} trailing positions. ${this.engines.size} engines ready.`);
   }
 
   handleDevices(devices: TraccarDevice[]) {
@@ -125,7 +126,7 @@ export class ServerState {
     }
 
     if (isFirst && this.positionsAll.length > 0) {
-      console.log(`[ServerState] Initial catch-up for ${this.positionsAll.length} positions...`);
+      vlog(`[ServerState] Initial catch-up for ${this.positionsAll.length} positions...`);
       this.allPosById.clear();
       for (const p of this.positionsAll) {
         const ids = [p.device, ...(this.deviceToGroupsMap.get(p.device) ?? [])];
@@ -138,7 +139,7 @@ export class ServerState {
       this.handlePositions([]);
     }
 
-    console.log(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
+    vlog(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
   }
 
   handlePositions(pts: NormalizedPosition[]) {
@@ -311,7 +312,7 @@ export class ServerState {
 
     if (pts[0]?.device !== undefined) {
       const afterCount = this.eventsByDevice[pts[0].device]?.length ?? 0;
-      console.log(`[ServerState] handlePositions: ${pts.length} pts. Events: ${beforeCount} -> ${afterCount}`);
+      vlog(`[ServerState] handlePositions: ${pts.length} pts. Events: ${beforeCount} -> ${afterCount}`);
     }
 
     return { engineStates: result.engineStatesByDevice, events: result.eventsByDevice };

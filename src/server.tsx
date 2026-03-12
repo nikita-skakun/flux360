@@ -32,6 +32,11 @@ import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { ServerState } from "./server/serverState";
 import { TraccarAdminClient } from "./server/traccarClient";
+import { setVerbose, vlog } from "./util/logger";
+
+// Handle CLI flags
+const verboseFlag = Bun.argv.includes("--verbose") || Bun.argv.includes("-v");
+setVerbose(verboseFlag);
 
 let config: Config;
 try {
@@ -141,7 +146,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
         devicesToBackfill.forEach(id => serverState.backfilled.add(id));
 
         (async () => {
-          console.log(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
+          vlog(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
           for (const id of devicesToBackfill) {
             const lastTs = serverState.engines.get(id)?.lastTimestamp ?? null;
             const firstTs = serverState.positionsAll.find(p => p.device === id)?.timestamp ?? null;
@@ -153,7 +158,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
             if (Date.now() - from < 60000) continue;
 
             try {
-              console.log(`[Server] Device ${id} backfill: type=${isDelta ? "DELTA" : "FULL"}, from=${new Date(from).toISOString()}`);
+              vlog(`[Server] Device ${id} backfill: type=${isDelta ? "DELTA" : "FULL"}, from=${new Date(from).toISOString()}`);
               const history = await traccarClient!.fetchHistory(id, from, Date.now());
               if (history.length > 0 && serverState.handlePositions(history)) {
                 broadcastUpdate(server, [id]);
@@ -163,7 +168,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
               console.error(`[Server] History backfill failed for device ${id}:`, err);
             }
           }
-          console.log(`[Server] Sequential backfill complete.`);
+          vlog(`[Server] Sequential backfill complete.`);
         })();
       }
 
@@ -351,9 +356,11 @@ if (isProduction) {
         }
       },
       "/api/ws": (request: Request, server: Server<WSData>) => {
+        vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
         const upgraded = server.upgrade(request, {
           data: { username: null, traccarToken: null, allowedDeviceIds: new Set(), ownedDeviceIds: new Set() }
         });
+        vlog(`[WS] Upgrade result: ${upgraded}`);
         if (upgraded) return undefined;
         return new Response("Upgrade failed", { status: 400 });
       },
@@ -366,7 +373,7 @@ if (isProduction) {
         try {
           const data = JSON.parse(message as string);
           if (data.type === "authenticate" && data.token) {
-            console.log(`[WS] Authenticating client with session token: ${data.token.substring(0, 10)}...`);
+            vlog(`[WS] Authenticating client with session token: ${data.token.substring(0, 10)}...`);
 
             const session = sessionStore.getSession(data.token);
             if (!session) {
@@ -406,7 +413,7 @@ if (isProduction) {
             ws.data.ownedDeviceIds = ownedDeviceIds;
             ws.data.allowedDeviceIds = allowedDeviceIds;
 
-            console.log(`[WS] Authentication successful for ${username}. Devices: ${allowedDeviceIds.size}`);
+            vlog(`[WS] Authentication successful for ${username}. Devices: ${allowedDeviceIds.size}`);
 
             for (const id of allowedDeviceIds) {
               ws.subscribe(`device-${id}`);
@@ -437,7 +444,7 @@ if (isProduction) {
               }
             });
             ws.send(payloadStr);
-            console.log(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
+            vlog(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
           } else if (data.requestId && ws.data.username && ws.data.traccarToken) {
             // RPC handlers
             const { type, payload, requestId } = data;
@@ -563,13 +570,10 @@ if (isProduction) {
         }
       },
       open(_ws: ServerWebSocket<WSData>) {
+        vlog("[WS] Connection opened");
       },
-      close(ws: ServerWebSocket<WSData>) {
-        if (ws.data.allowedDeviceIds) {
-          for (const id of ws.data.allowedDeviceIds) {
-            ws.unsubscribe(`device-${id}`);
-          }
-        }
+      close(_ws: ServerWebSocket<WSData>) {
+        vlog("[WS] Connection closed");
       }
     },
     development: {

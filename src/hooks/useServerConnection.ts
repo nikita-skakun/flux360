@@ -114,9 +114,12 @@ export function useServerConnection() {
       };
 
       ws.onerror = (error) => {
+        // Suppress generic errors if the socket is already closing or closed
+        if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) return;
+
         console.error('WebSocket error:', error);
         setStatus('error');
-        ws.close(); // Ensure onclose is called to trigger reconnection
+        ws.close();
       };
     };
 

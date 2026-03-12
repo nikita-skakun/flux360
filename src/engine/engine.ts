@@ -2,6 +2,7 @@ import { fromWebMercator } from "@/util/webMercator";
 import { haversineDistance, computeBounds } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, type MotionProfileConfig } from "./motionDetector";
 import { smoothPath } from "@/util/pathSmoothing";
+import { vlog } from "@/util/logger";
 import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
 
 export class Engine {
@@ -213,7 +214,7 @@ export class Engine {
         isDraft: false,
         bounds: computeBounds(stablePath)
       });
-      console.log(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
+      vlog(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
 
       // Start new stationary
       this.draft = {
@@ -315,7 +316,7 @@ export class Engine {
   }
 
   createSnapshot(): EngineState {
-    console.log(`[Engine] Creating snapshot. History size: ${this.closed.length}`);
+    vlog(`[Engine] Creating snapshot. History size: ${this.closed.length}`);
     return JSON.parse(JSON.stringify({
       draft: this.draft,
       closed: this.closed,
@@ -327,7 +328,7 @@ export class Engine {
     this.draft = state.draft;
     this.closed = (state.closed ?? []).map(ev => ({ ...ev, isDraft: ev.isDraft ?? false }));
     this.lastTimestamp = state.lastTimestamp ?? this.draft?.start ?? null;
-    console.log(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
+    vlog(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
   }
 
   pruneHistory(horizon: Timestamp) {
