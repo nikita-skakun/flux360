@@ -61,8 +61,6 @@ function DeviceOverlayComponent({
   const chosen = points.length > 0 ? points[points.length - 1] : null;
   if (!chosen) return null;
 
-
-
   return (
     <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
       <div className="flex items-start">

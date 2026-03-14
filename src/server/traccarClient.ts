@@ -49,7 +49,7 @@ export class TraccarAdminClient {
     } catch { this.scheduleReconnect(); }
   }
 
-  private async fetchInitialDevices() {
+  async fetchDevices(): Promise<TraccarDevice[]> {
     try {
       const res = await fetch(`${this.secure ? "https" : "http"}://${this.baseUrl}/api/devices`, {
         headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
@@ -57,8 +57,16 @@ export class TraccarAdminClient {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const devices = await res.json() as TraccarDevice[];
       vlog(`[TraccarAdminClient] Fetched ${devices.length} devices via REST`);
-      this.deps.onDevicesReceived(devices);
-    } catch (err) { console.error("Traccar REST error:", err); }
+      return devices;
+    } catch (err) {
+      console.error("[TraccarAdminClient] Devices fetch failed:", err);
+      return [];
+    }
+  }
+
+  private async fetchInitialDevices() {
+    const devices = await this.fetchDevices();
+    this.deps.onDevicesReceived(devices);
   }
 
   private scheduleReconnect() {
