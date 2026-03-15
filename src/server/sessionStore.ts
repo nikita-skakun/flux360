@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { SessionSchema } from "@/types";
 import type { Session } from "@/types";
 
 const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -17,21 +18,30 @@ export const sessionStore = {
   },
 
   getSession(token: string): Session | undefined {
-    const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token) as Session | undefined;
+    const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token) as unknown;
 
     if (!row) return undefined;
 
+    let session: Session;
+    try {
+      session = SessionSchema.parse(row);
+    } catch (err) {
+      console.error("Invalid session in database:", err);
+      db.run(`DELETE FROM user_tokens WHERE token = ?`, [token]);
+      return undefined;
+    }
+
     const now = Date.now();
-    if (now - row.lastActive > SESSION_TTL) {
+    if (now - session.lastActive > SESSION_TTL) {
       db.run(`DELETE FROM user_tokens WHERE token = ?`, [token]);
       return undefined;
     }
 
     // Update last_active
     db.run(`UPDATE user_tokens SET last_active = ? WHERE token = ?`, [now, token]);
-    row.lastActive = now;
+    session.lastActive = now;
 
-    return row;
+    return session;
   },
 
   deleteSession(token: string): void {

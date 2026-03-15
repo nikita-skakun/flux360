@@ -18,7 +18,7 @@ type Props = {
     id: number;
 };
 
-const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
+export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     const target = useStore((state) => state.entities[id]);
     const updateDevice = useStore((state) => state.updateDevice);
     const updateGroup = useStore((state) => state.updateGroup);
@@ -253,4 +253,3 @@ const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
     );
 };
 
-export default UnifiedEditModal;

@@ -1,13 +1,17 @@
+import { ClientMessageSchema, TraccarDeviceSchema } from "@/types";
 import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
-import { loadConfig, type Config } from "./util/config";
+import { loadConfig } from "./util/config";
 import { parseArgs } from "util";
-import { serve, type Server, type ServerWebSocket } from "bun";
+import { serve } from "bun";
 import { ServerState } from "./server/serverState";
 import { setVerbose, vlog } from "./util/logger";
 import { TraccarAdminClient } from "./server/traccarClient";
+import { z } from "zod";
 import indexHtml from "./index.html";
+import type { Config } from "./util/config";
 import type { NormalizedPosition, TraccarDevice, AppDevice, DevicePoint, EngineEvent } from "@/types";
+import type { Server, ServerWebSocket } from "bun";
 
 const isProduction = process.env.NODE_ENV === "production";
 
@@ -199,7 +203,7 @@ async function verifyTraccarSession(request: Request): Promise<{ username: strin
 
     if (!devicesRes.ok) return null;
 
-    const devices = await devicesRes.json() as { id: number }[];
+    const devices = z.array(z.object({ id: z.number() })).parse(await devicesRes.json());
     return {
       username: session.username,
       ownedDeviceIds: devices.map(d => d.id),
@@ -250,17 +254,18 @@ if (isProduction) {
     routes: {
       "/api/login": async (request: Request) => {
         try {
-          const { email, password } = await request.json() as { email: string; password: string };
-          if (!email || !password) {
-            return new Response("Email and password required", { status: 400 });
-          }
+          const LoginSchema = z.object({
+            username: z.string().min(1, "Username is required"),
+            password: z.string().min(1, "Password is required"),
+          });
+          const rawData = await request.json();
+          const { username: inputUsername, password } = LoginSchema.parse(rawData);
 
           const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
           const sessionUrl = `${apiBase}/session`;
 
-          let username = email;
           try {
-            const params = new URLSearchParams({ email, password });
+            const params = new URLSearchParams({ email: inputUsername, password });
             const sessionRes = await fetch(sessionUrl, {
               method: "POST",
               headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
@@ -271,21 +276,21 @@ if (isProduction) {
               return new Response("Invalid credentials", { status: 401 });
             }
 
+            // Traccar returns the user object on successful session creation
             const user = await sessionRes.json();
-            username = user.email || user.name || email;
+            // We'll use the canonical email/username returned by Traccar or fallback to input
+            const identifier = user.email || inputUsername;
+
+            const traccarToken = await tokenManager.getOrCreateTraccarPermanentToken(identifier, password);
+            const token = sessionStore.createSession(identifier, traccarToken);
+            return Response.json({ token });
           } catch {
             return new Response("Login failed", { status: 500 });
           }
-
-          const traccarToken = await tokenManager.getOrCreateTraccarPermanentToken(username, password);
-          const token = sessionStore.createSession(username, traccarToken);
-
-          return Response.json({
-            success: true,
-            token,
-            username
-          });
         } catch (e) {
+          if (e instanceof z.ZodError) {
+            return new Response(`Invalid request: ${e.issues.map(err => err.message).join(", ")}`, { status: 400 });
+          }
           console.error("Login route error:", e);
           return new Response("Login failed", { status: 500 });
         }
@@ -296,8 +301,8 @@ if (isProduction) {
 
         try {
           const params = (request as unknown as { params: { id: string } }).params;
-          const deviceId = parseInt(params.id);
-          const { username } = await request.json() as { username: string };
+          const { id: deviceId } = z.object({ id: z.coerce.number() }).parse(params);
+          const { username } = z.object({ username: z.string().min(1) }).parse(await request.json());
 
           // Verify ownership via Traccar
           if (!userInfo.ownedDeviceIds.includes(deviceId)) {
@@ -318,8 +323,10 @@ if (isProduction) {
 
         try {
           const params = (request as unknown as { params: { id: string; username: string } }).params;
-          const deviceId = parseInt(params.id);
-          const targetUsername = params.username;
+          const { id: deviceId, username: targetUsername } = z.object({
+            id: z.coerce.number(),
+            username: z.string().min(1)
+          }).parse(params);
 
           // Verify ownership or self-removal
           const isOwner = userInfo.ownedDeviceIds.includes(deviceId);
@@ -353,8 +360,9 @@ if (isProduction) {
     websocket: {
       async message(ws: ServerWebSocket<WSData>, message) {
         try {
-          const data = JSON.parse(message as string);
-          if (data.type === "authenticate" && data.token) {
+          const data = ClientMessageSchema.parse(JSON.parse(message as string));
+
+          if (data.type === "authenticate") {
             vlog(`[WS] Authenticating client with session token: ${data.token.substring(0, 10)}...`);
 
             const session = sessionStore.getSession(data.token);
@@ -380,7 +388,7 @@ if (isProduction) {
               return;
             }
 
-            const devices = await devicesRes.json() as TraccarDevice[];
+            const devices = TraccarDeviceSchema.array().parse(await devicesRes.json());
             const ownedDeviceIds = new Set(devices.map(d => d.id));
 
             // Update server state with device metadata so getMetadata() computes correct rootIds
@@ -427,7 +435,7 @@ if (isProduction) {
             });
             ws.send(payloadStr);
             vlog(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
-          } else if (data.requestId && ws.data.username && ws.data.traccarToken) {
+          } else if (ws.data.username && ws.data.traccarToken) {
             // RPC handlers
             const { type, payload, requestId } = data;
 
@@ -441,12 +449,8 @@ if (isProduction) {
 
             try {
               if (type === "create_group") {
-                const { name, emoji, memberDeviceIds } = payload as { name?: string; emoji?: string; memberDeviceIds?: number[] };
-                if (typeof name !== 'string' || typeof emoji !== 'string' || !Array.isArray(memberDeviceIds)) {
-                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: name, emoji, and memberDeviceIds are required", requestId }));
-                  return;
-                }
-                if (!memberDeviceIds.every((id: number) => typeof id === 'number' && ws.data.allowedDeviceIds.has(id))) {
+                const { name, emoji, memberDeviceIds } = payload;
+                if (!memberDeviceIds.every((id: number) => ws.data.allowedDeviceIds.has(id))) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden or invalid device IDs", requestId }));
                   return;
                 }
@@ -460,16 +464,12 @@ if (isProduction) {
                   })
                 });
                 if (!res.ok) throw new Error(await res.text());
-                const device = await res.json();
+                const device = TraccarDeviceSchema.parse(await res.json());
                 serverState.handleDevices([device]);
                 ws.send(JSON.stringify({ type: "create_success", device, requestId }));
               }
               else if (type === "update_device") {
-                const { deviceId, updates } = payload as { deviceId?: number; updates?: Record<string, any> };
-                if (typeof deviceId !== 'number' || typeof updates !== 'object' || updates === null) {
-                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: deviceId and updates object are required", requestId }));
-                  return;
-                }
+                const { deviceId, updates } = payload;
                 if (!ws.data.allowedDeviceIds.has(deviceId)) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
                   return;
@@ -479,27 +479,23 @@ if (isProduction) {
                 const current = await getRes.json();
 
                 const attributes = { ...current.attributes };
-                if (typeof updates['emoji'] === 'string') attributes['emoji'] = updates['emoji'];
-                if (typeof updates['color'] === 'string') attributes['color'] = updates['color'];
-                if (typeof updates['motionProfile'] === 'string') attributes['motionProfile'] = updates['motionProfile'];
-                if (Array.isArray(updates['memberDeviceIds'])) attributes['memberDeviceIds'] = JSON.stringify(updates['memberDeviceIds']);
+                if (updates.emoji !== undefined) attributes['emoji'] = updates.emoji;
+                if (updates.color !== undefined) attributes['color'] = updates.color;
+                if (updates.motionProfile !== undefined) attributes['motionProfile'] = updates.motionProfile;
+                // Note: updates for groups is handled via other RPCs or not explicitly in ClientMessageSchema payload for update_device but added for completeness if needed
 
                 const putRes = await fetch(`${apiBase}/devices/${deviceId}`, {
                   method: "PUT",
                   headers: reqHeaders,
-                  body: JSON.stringify({ ...current, name: updates['name'] || current.name, attributes })
+                  body: JSON.stringify({ ...current, name: updates.name || current.name, attributes })
                 });
                 if (!putRes.ok) throw new Error(await putRes.text());
-                const updated = await putRes.json();
+                const updated = TraccarDeviceSchema.parse(await putRes.json());
                 serverState.handleDevices([updated]);
                 ws.send(JSON.stringify({ type: "update_success", deviceId, requestId }));
               }
               else if (type === "delete_group") {
-                const { groupId } = payload as { groupId?: number };
-                if (typeof groupId !== 'number') {
-                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: groupId must be a number", requestId }));
-                  return;
-                }
+                const { groupId } = payload;
                 if (!ws.data.allowedDeviceIds.has(groupId)) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
                   return;
@@ -509,11 +505,7 @@ if (isProduction) {
                 ws.send(JSON.stringify({ type: "delete_success", groupId, requestId }));
               }
               else if (type === "add_device_to_group" || type === "remove_device_from_group") {
-                const { groupId, deviceId } = payload as { groupId?: number; deviceId?: number };
-                if (typeof groupId !== 'number' || typeof deviceId !== 'number') {
-                  ws.send(JSON.stringify({ type: "error", message: "Invalid payload: groupId and deviceId must be numbers", requestId }));
-                  return;
-                }
+                const { groupId, deviceId } = payload;
                 if (!ws.data.allowedDeviceIds.has(groupId) || !ws.data.allowedDeviceIds.has(deviceId)) {
                   ws.send(JSON.stringify({ type: "error", message: "Forbidden", requestId }));
                   return;
@@ -535,11 +527,9 @@ if (isProduction) {
                   body: JSON.stringify({ ...current, attributes: { ...current.attributes, memberDeviceIds: JSON.stringify(memberDeviceIds) } })
                 });
                 if (!putRes.ok) throw new Error(await putRes.text());
-                const updated = await putRes.json();
+                const updated = TraccarDeviceSchema.parse(await putRes.json());
                 serverState.handleDevices([updated]);
                 ws.send(JSON.stringify({ type: "update_success", deviceId: groupId, requestId }));
-              } else {
-                ws.send(JSON.stringify({ type: "error", message: "Unknown RPC type", requestId }));
               }
             } catch (err: unknown) {
               const errorMessage = err instanceof Error ? err.message : String(err);
@@ -548,7 +538,11 @@ if (isProduction) {
             }
           }
         } catch (e) {
-          console.error("Invalid WS message", e);
+          if (e instanceof z.ZodError) {
+            ws.send(JSON.stringify({ type: "error", message: `Validation error: ${e.issues.map(err => err.message).join(", ")}` }));
+          } else {
+            console.error("Invalid WS message", e);
+          }
         }
       },
       open(_ws: ServerWebSocket<WSData>) {

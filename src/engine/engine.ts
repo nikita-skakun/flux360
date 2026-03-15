@@ -1,14 +1,15 @@
 import { fromWebMercator } from "@/util/webMercator";
 import { haversineDistance, computeBounds } from "@/util/geo";
-import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP, type MotionProfileConfig } from "./motionDetector";
+import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
 import { smoothPath } from "@/util/pathSmoothing";
 import { vlog } from "@/util/logger";
-import type { DevicePoint, MotionProfileName, Timestamp, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
+import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
+import type { MotionProfileConfig } from "./motionDetector";
 
 export class Engine {
   draft: EngineDraft | null = null;
   closed: EngineEvent[] = [];
-  lastTimestamp: Timestamp | null = null;
+  lastTimestamp: number | null = null;
   public motionProfile: MotionProfileName = "person";
 
   setMotionProfile(profile: MotionProfileName) {
@@ -331,7 +332,7 @@ export class Engine {
     vlog(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
   }
 
-  pruneHistory(horizon: Timestamp) {
+  pruneHistory(horizon: number) {
     this.closed = this.closed.filter(ev => ev.end > horizon);
   }
 

@@ -146,7 +146,7 @@ export const TimelinePanel: React.FC<Props> = ({
                     const isSelected = selectedEventId === ev.id;
                     const { item, isNewDay, dayLabel } = ev;
                     const isCurrent = ev.id.startsWith('draft-');
-                    const durationStr = humanDurationSince(item.start, (isCurrent ? now : item.end) as import('@/types').Timestamp);
+                    const durationStr = humanDurationSince(item.start, isCurrent ? now : item.end);
 
                     return (
                         <React.Fragment key={ev.id}>

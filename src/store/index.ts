@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { rgbToHex, colorForDevice } from '@/util/color';
 import { sendRPC } from '@/wsRPC';
-import type { AppDevice, MotionProfileName, Timestamp } from '@/types';
+import { z } from "zod";
+import type { AppDevice, MotionProfileName } from '@/types';
 import type { Store, StoreState } from './types';
 
 const initialState: StoreState = {
@@ -61,7 +62,7 @@ export const useStore = create<Store>()(
             const maxTimestamp = Math.max(...points.map(p => p.timestamp));
             const currentLastSeen = entity.lastSeen;
             if (!currentLastSeen || maxTimestamp > currentLastSeen) {
-              newEntities[id] = { ...entity, lastSeen: maxTimestamp as Timestamp };
+              newEntities[id] = { ...entity, lastSeen: maxTimestamp };
             }
           }
 
@@ -330,7 +331,7 @@ export const useStore = create<Store>()(
         }));
       },
 
-      login: async (email, password) => {
+      login: async (username, password) => {
         set(state => ({
           auth: { ...state.auth, isLoggingIn: true, loginError: null }
         }));
@@ -339,7 +340,7 @@ export const useStore = create<Store>()(
           const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({ username, password })
           });
 
           if (!response.ok) {
@@ -347,8 +348,9 @@ export const useStore = create<Store>()(
             throw new Error(errorText || 'Login failed');
           }
 
-          // Wait for response normally
-          const { token } = (await response.json()) as { token: string };
+          // Validate response structure
+          const LoginResponseSchema = z.object({ token: z.string() });
+          const { token } = LoginResponseSchema.parse(await response.json());
           set(state => ({
             settings: {
               ...state.settings,

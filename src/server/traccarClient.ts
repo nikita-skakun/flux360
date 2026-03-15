@@ -1,6 +1,8 @@
 import { extractPositionsFromMessage } from "./traccarAdminUtils";
+import { normalizePosition } from "./serverUtils";
+import { TraccarDeviceSchema, RawTraccarPositionSchema } from "@/types";
 import { vlog } from "@/util/logger";
-import type { NormalizedPosition, TraccarDevice, Timestamp, RawTraccarPosition } from "@/types";
+import type { NormalizedPosition, TraccarDevice } from "@/types";
 
 type ServerStateDeps = {
   // Dependencies injected from server logic so this client can push data to it
@@ -38,9 +40,13 @@ export class TraccarAdminClient {
 
       this.ws.onmessage = (ev) => {
         try {
-          const data = JSON.parse(ev.data as string) as { devices?: TraccarDevice[]; positions?: unknown };
-          if (data.devices) this.deps.onDevicesReceived(data.devices);
-          if (data.positions) this.deps.onPositionsReceived(extractPositionsFromMessage(data));
+          const data = JSON.parse(ev.data as string);
+          if (data.devices) {
+            this.deps.onDevicesReceived(TraccarDeviceSchema.array().parse(data.devices));
+          }
+          if (data.positions) {
+            this.deps.onPositionsReceived(extractPositionsFromMessage(data));
+          }
         } catch (err) { console.error("Traccar processing error:", err); }
       };
 
@@ -55,7 +61,7 @@ export class TraccarAdminClient {
         headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const devices = await res.json() as TraccarDevice[];
+      const devices = TraccarDeviceSchema.array().parse(await res.json());
       vlog(`[TraccarAdminClient] Fetched ${devices.length} devices via REST`);
       return devices;
     } catch (err) {
@@ -99,9 +105,8 @@ export class TraccarAdminClient {
         throw new Error(`HTTP ${res.status}: ${text}`);
       }
 
-      const rawPositions = await res.json() as RawTraccarPosition[];
-      const normalized = rawPositions
-        .map(p => this.normalizePosition(p))
+      const normalized = RawTraccarPositionSchema.array().parse(await res.json())
+        .map(p => normalizePosition(p))
         .filter((p): p is NormalizedPosition => p !== null);
 
       vlog(`[TraccarAdminClient] Received ${normalized.length} historical positions for device ${deviceId}`);
@@ -110,24 +115,6 @@ export class TraccarAdminClient {
       console.error(`[TraccarAdminClient] History fetch failed for device ${deviceId}:`, err);
       return [];
     }
-  }
-
-  private normalizePosition(raw: RawTraccarPosition): NormalizedPosition | null {
-    if (!raw || typeof raw !== "object") return null;
-
-    const { latitude, longitude, fixTime, deviceId, accuracy } = raw;
-    if (typeof latitude !== "number" || typeof longitude !== "number") return null;
-
-    const ts = typeof fixTime === "string" ? Date.parse(fixTime) :
-      (typeof fixTime === "number" ? fixTime : undefined);
-    if (ts === undefined || Number.isNaN(ts)) return null;
-
-    return {
-      device: deviceId,
-      timestamp: ts as Timestamp,
-      geo: [longitude, latitude],
-      accuracy: typeof accuracy === "number" ? accuracy : 100,
-    };
   }
 
   close() {

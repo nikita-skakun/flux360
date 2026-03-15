@@ -8,15 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useTimeAgo } from "@/util/time";
 import React, { useState, useMemo, useEffect, useRef } from "react";
+import type { AppDevice } from "@/types";
 
-import type { AppDevice, Timestamp } from "@/types";
-
-const LastSeenDisplay: React.FC<{ timestamp: Timestamp | null }> = ({ timestamp }) => {
+const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
   const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
   return <>{timeAgo}</>;
 };
 
-const DeviceListSidePanel: React.FC<{
+export const DeviceListSidePanel: React.FC<{
   entities: Record<number, AppDevice>;
   rootIds: number[];
   selectedDeviceId: number | null;
@@ -433,4 +432,3 @@ const DeviceListSidePanel: React.FC<{
     );
   };
 
-export default DeviceListSidePanel;

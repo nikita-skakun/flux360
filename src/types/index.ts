@@ -1,139 +1,218 @@
-export type TraccarDevice = {
-  id: number;
-  name: string;
-  lastUpdate: string | null;
-  attributes: Record<string, unknown>;
-};
+import { z } from "zod";
 
-export interface Session {
-  token: string;
-  username: string;
-  traccarToken: string;
-  createdAt: number;
-  lastActive: number;
-}
+export const Vec2Schema = z.tuple([z.number(), z.number()]);
+export type Vec2 = z.infer<typeof Vec2Schema>;
 
-export type Timestamp = number & { readonly __u?: 'timestamp' };
+export const TraccarDeviceSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  lastUpdate: z.string().nullable(),
+  attributes: z.record(z.string(), z.unknown()),
+});
+export type TraccarDevice = z.infer<typeof TraccarDeviceSchema>;
 
-export type Vec2 = [number, number];
+export const SessionSchema = z.object({
+  token: z.string(),
+  username: z.string(),
+  traccarToken: z.string(),
+  createdAt: z.number(),
+  lastActive: z.number(),
+});
+export type Session = z.infer<typeof SessionSchema>;
 
-export type DevicePoint = {
-  device: number;
-  sourceDeviceId: number | null;
-  geo: Vec2;
-  mean: Vec2;
-  timestamp: Timestamp;
-  accuracy: number;
-  anchorStartTimestamp: Timestamp;
-  confidence: number;
-};
+export const DevicePointSchema = z.object({
+  device: z.number(),
+  sourceDeviceId: z.number().nullable(),
+  geo: Vec2Schema,
+  mean: Vec2Schema,
+  timestamp: z.number(),
+  accuracy: z.number(),
+  anchorStartTimestamp: z.number(),
+  confidence: z.number(),
+});
+export type DevicePoint = z.infer<typeof DevicePointSchema>;
 
-export type NormalizedPosition = {
-  device: number;
-  timestamp: Timestamp;
-  geo: Vec2;
-  accuracy: number; // meters
-};
+export const NormalizedPositionSchema = z.object({
+  device: z.number(),
+  timestamp: z.number(),
+  geo: Vec2Schema,
+  accuracy: z.number(), // meters
+});
+export type NormalizedPosition = z.infer<typeof NormalizedPositionSchema>;
 
-export type MotionProfileName = 'person' | 'car';
+export const MotionProfileNameSchema = z.enum(['person', 'car']);
+export type MotionProfileName = z.infer<typeof MotionProfileNameSchema>;
 
-export type WorldBounds = { minX: number; minY: number; maxX: number; maxY: number };
+export const WorldBoundsSchema = z.object({
+  minX: z.number(),
+  minY: z.number(),
+  maxX: z.number(),
+  maxY: z.number(),
+});
+export type WorldBounds = z.infer<typeof WorldBoundsSchema>;
 
-export type AppDevice = {
-  id: number;
-  name: string;
-  emoji: string;
-  color: string | null;
-  lastSeen: Timestamp | null;
-  effectiveMotionProfile: MotionProfileName;
-  motionProfile: MotionProfileName | null;
-  isOwner: boolean;
-  memberDeviceIds: number[] | null;
-};
+export const AppDeviceSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  emoji: z.string(),
+  color: z.string().nullable(),
+  lastSeen: z.number().nullable(),
+  effectiveMotionProfile: MotionProfileNameSchema,
+  motionProfile: MotionProfileNameSchema.nullable(),
+  isOwner: z.boolean(),
+  memberDeviceIds: z.array(z.number()).nullable(),
+});
+export type AppDevice = z.infer<typeof AppDeviceSchema>;
 
-export type StationaryEvent = {
-  type: 'stationary';
-  start: Timestamp;
-  end: Timestamp;
-  mean: Vec2;
-  variance: number;
-  isDraft: boolean;
-};
+export const StationaryEventSchema = z.object({
+  type: z.literal('stationary'),
+  start: z.number(),
+  end: z.number(),
+  mean: Vec2Schema,
+  variance: z.number(),
+  isDraft: z.boolean(),
+});
+export type StationaryEvent = z.infer<typeof StationaryEventSchema>;
 
-export type MotionEvent = {
-  type: 'motion';
-  start: Timestamp;
-  end: Timestamp;
-  startAnchor: Vec2;
-  endAnchor: Vec2;
-  path: Vec2[];
-  distance: number;
-  isDraft: boolean;
-  bounds: WorldBounds;
-};
+export const MotionEventSchema = z.object({
+  type: z.literal('motion'),
+  start: z.number(),
+  end: z.number(),
+  startAnchor: Vec2Schema,
+  endAnchor: Vec2Schema,
+  path: z.array(Vec2Schema),
+  distance: z.number(),
+  isDraft: z.boolean(),
+  bounds: WorldBoundsSchema,
+});
+export type MotionEvent = z.infer<typeof MotionEventSchema>;
 
-export type EngineEvent = StationaryEvent | MotionEvent;
+export const EngineEventSchema = z.union([StationaryEventSchema, MotionEventSchema]);
+export type EngineEvent = z.infer<typeof EngineEventSchema>;
 
-export type StationaryDraft = {
-  type: 'stationary';
-  start: Timestamp;
-  stationaryStartAnchor: Vec2;
-  recent: DevicePoint[];  // Sliding window
-  pending: DevicePoint[]; // Hysteresis buffer
-};
+// Internal engine types
+export const StationaryDraftSchema = z.object({
+  type: z.literal('stationary'),
+  start: z.number(),
+  stationaryStartAnchor: Vec2Schema,
+  recent: z.array(DevicePointSchema),
+  pending: z.array(DevicePointSchema),
+});
+export type StationaryDraft = z.infer<typeof StationaryDraftSchema>;
 
-export type MotionDraft = {
-  type: 'motion';
-  start: Timestamp;
-  stationaryCutoff: Timestamp;
-  predecessor: StationaryDraft;
-  startAnchor: Vec2;
-  path: DevicePoint[];
-  recent: DevicePoint[]; // Settling window
-};
+export const MotionDraftSchema = z.object({
+  type: z.literal('motion'),
+  start: z.number(),
+  stationaryCutoff: z.number(),
+  predecessor: StationaryDraftSchema,
+  startAnchor: Vec2Schema,
+  path: z.array(DevicePointSchema),
+  recent: z.array(DevicePointSchema),
+});
+export type MotionDraft = z.infer<typeof MotionDraftSchema>;
 
-export type EngineDraft = StationaryDraft | MotionDraft;
+export const EngineDraftSchema = z.union([StationaryDraftSchema, MotionDraftSchema]);
+export type EngineDraft = z.infer<typeof EngineDraftSchema>;
 
-export type EngineState = {
-  draft: EngineDraft | null;
-  closed: EngineEvent[];
-  lastTimestamp: Timestamp | null;
-};
+export const EngineStateSchema = z.object({
+  draft: EngineDraftSchema.nullable(),
+  closed: z.array(EngineEventSchema),
+  lastTimestamp: z.number().nullable(),
+});
+export type EngineState = z.infer<typeof EngineStateSchema>;
 
-export interface RawTraccarPosition {
-  deviceId: number;
-  fixTime: string | number;
-  latitude: number;
-  longitude: number;
-  accuracy?: number;
-  [key: string]: unknown;
-}
+export const RawTraccarPositionSchema = z.object({
+  deviceId: z.number(),
+  fixTime: z.union([z.string(), z.number()]),
+  latitude: z.number(),
+  longitude: z.number(),
+  accuracy: z.number().optional(),
+}).loose();
+export type RawTraccarPosition = z.infer<typeof RawTraccarPositionSchema>;
+
+// --- Shared Record Types ---
+
+export const EntitiesSchema = z.record(z.string(), AppDeviceSchema);
+export type Entities = z.infer<typeof EntitiesSchema>;
+
+export const ActivePointsByDeviceSchema = z.record(z.string(), z.array(DevicePointSchema));
+export type ActivePointsByDevice = z.infer<typeof ActivePointsByDeviceSchema>;
+
+export const EventsByDeviceSchema = z.record(z.string(), z.array(EngineEventSchema));
+export type EventsByDevice = z.infer<typeof EventsByDeviceSchema>;
 
 // --- WebSocket Protocol ---
 
-export type InitialStatePayload = {
-  entities: Record<number, AppDevice>;
-  activePointsByDevice: Record<number, DevicePoint[]>;
-  eventsByDevice: Record<number, EngineEvent[]>;
-  maptilerApiKey: string;
-  metadata: {
-    rootIds: number[];
-  };
-};
+export const InitialStatePayloadSchema = z.object({
+  entities: EntitiesSchema,
+  activePointsByDevice: ActivePointsByDeviceSchema,
+  eventsByDevice: EventsByDeviceSchema,
+  maptilerApiKey: z.string(),
+  metadata: z.object({
+    rootIds: z.array(z.number()),
+  }),
+});
+export type InitialStatePayload = z.infer<typeof InitialStatePayloadSchema>;
 
-export type ServerMessage =
-  | { type: "initial_state"; payload: InitialStatePayload; requestId?: never }
-  | { type: "positions_update"; payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }; requestId?: never }
-  | { type: "config_update"; payload: { devices: Record<number, AppDevice> | null, groups: AppDevice[] | null }; requestId?: never }
-  | { type: "update_success"; deviceId: number; requestId?: string }
-  | { type: "create_success"; device: TraccarDevice; requestId?: string }
-  | { type: "delete_success"; groupId: number; requestId?: string }
-  | { type: "error"; message: string; requestId?: string };
+export const ServerMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("initial_state"), payload: InitialStatePayloadSchema, requestId: z.never().optional() }),
+  z.object({
+    type: z.literal("positions_update"),
+    payload: z.object({
+      activePoints: ActivePointsByDeviceSchema,
+      events: EventsByDeviceSchema,
+    }),
+    requestId: z.never().optional()
+  }),
+  z.object({
+    type: z.literal("config_update"),
+    payload: z.object({
+      devices: EntitiesSchema.nullable(),
+      groups: z.array(AppDeviceSchema).nullable()
+    }),
+    requestId: z.never().optional()
+  }),
+  z.object({ type: z.literal("update_success"), deviceId: z.number(), requestId: z.string().optional() }),
+  z.object({ type: z.literal("create_success"), device: TraccarDeviceSchema, requestId: z.string().optional() }),
+  z.object({ type: z.literal("delete_success"), groupId: z.number(), requestId: z.string().optional() }),
+  z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().optional() }),
+]);
+export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
-export type ClientMessage =
-  | { type: "authenticate"; token: string }
-  | { type: "update_device"; payload: { deviceId: number; updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: string | null } }; requestId?: string }
-  | { type: "create_group"; payload: { name: string; emoji: string; memberDeviceIds: number[] }; requestId?: string }
-  | { type: "delete_group"; payload: { groupId: number }; requestId?: string }
-  | { type: "add_device_to_group"; payload: { groupId: number; deviceId: number }; requestId?: string }
-  | { type: "remove_device_from_group"; payload: { groupId: number; deviceId: number }; requestId?: string };
+export const ClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("authenticate"), token: z.string() }),
+  z.object({
+    type: z.literal("update_device"),
+    payload: z.object({
+      deviceId: z.number(),
+      updates: z.object({
+        name: z.string().optional(),
+        emoji: z.string().optional(),
+        color: z.string().nullable().optional(),
+        motionProfile: z.string().nullable().optional()
+      })
+    }),
+    requestId: z.string().optional()
+  }),
+  z.object({
+    type: z.literal("create_group"),
+    payload: z.object({
+      name: z.string(),
+      emoji: z.string(),
+      memberDeviceIds: z.array(z.number())
+    }),
+    requestId: z.string().optional()
+  }),
+  z.object({ type: z.literal("delete_group"), payload: z.object({ groupId: z.number() }), requestId: z.string().optional() }),
+  z.object({
+    type: z.literal("add_device_to_group"),
+    payload: z.object({ groupId: z.number(), deviceId: z.number() }),
+    requestId: z.string().optional()
+  }),
+  z.object({
+    type: z.literal("remove_device_from_group"),
+    payload: z.object({ groupId: z.number(), deviceId: z.number() }),
+    requestId: z.string().optional()
+  }),
+]);
+export type ClientMessage = z.infer<typeof ClientMessageSchema>;

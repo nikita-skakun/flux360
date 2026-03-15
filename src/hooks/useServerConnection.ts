@@ -1,11 +1,11 @@
+import { handleResponse } from '@/wsRPC';
+import { ServerMessageSchema } from '@/types';
+import { setWebSocket } from '@/wsClient';
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store';
-import { setWebSocket } from '@/wsClient';
-import type { ServerMessage, ClientMessage } from '@/types';
+import type { ClientMessage } from '@/types';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
-
-import { handleResponse } from '@/wsRPC';
 
 export function useServerConnection() {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
@@ -58,18 +58,20 @@ export function useServerConnection() {
 
       ws.onmessage = (event) => {
         try {
-          const parsed = JSON.parse(String(event.data)) as Record<string, unknown>;
+          const raw = JSON.parse(String(event.data));
 
-          if (parsed && typeof parsed === 'object' && 'requestId' in parsed && parsed['requestId']) {
-            handleResponse(parsed as { requestId: string;[key: string]: unknown }); // Let handleResponse deal with casting
-            const msgType = String(parsed['type']);
+          // 1. Check for RPC responses (they have a requestId)
+          if (raw && typeof raw === 'object' && 'requestId' in raw && raw.requestId) {
+            handleResponse(raw as { requestId: string;[key: string]: unknown });
+            // If it's just an RPC response, we might not need to parse it as a broadcast
+            const msgType = String(raw['type']);
             if (msgType === 'error' || msgType.endsWith('_success')) {
               return;
             }
           }
 
-          // Handle regular broadcast messages
-          const message = parsed as ServerMessage;
+          // 2. Strict parse as ServerMessage
+          const message = ServerMessageSchema.parse(raw);
 
           if (message.type === 'error' && message.message === 'Session expired') {
             console.error('Session expired, logging out...');

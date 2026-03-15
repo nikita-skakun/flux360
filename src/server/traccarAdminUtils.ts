@@ -1,25 +1,5 @@
+import { normalizePosition } from "./serverUtils";
 import type { NormalizedPosition } from "@/types";
-
-export function normalizePosition(raw: unknown): NormalizedPosition | null {
-  if (!raw || typeof raw !== "object") return null;
-  const obj = raw as Record<string, unknown>;
-  const lat = typeof obj["latitude"] === "number" ? obj["latitude"] : undefined;
-  const lon = typeof obj["longitude"] === "number" ? obj["longitude"] : undefined;
-  if (typeof lat !== "number" || typeof lon !== "number") return null;
-
-  const ts = typeof obj["fixTime"] === "string" ? Date.parse(obj["fixTime"]) : undefined;
-  if (typeof ts !== "number" || Number.isNaN(ts)) return null;
-
-  const deviceId = typeof obj["deviceId"] === "number" ? obj["deviceId"] : undefined;
-  if (typeof deviceId !== "number") return null;
-
-  return {
-    device: deviceId,
-    timestamp: ts,
-    geo: [lon, lat],
-    accuracy: typeof obj["accuracy"] === "number" ? obj["accuracy"] : 100,
-  };
-}
 
 export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] {
   const out: NormalizedPosition[] = [];

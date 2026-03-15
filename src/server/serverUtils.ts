@@ -1,10 +1,30 @@
 import { computeBounds } from "@/util/geo";
 import { Engine } from "@/engine/engine";
 import { fromWebMercator } from "@/util/webMercator";
-import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, Timestamp, EngineState } from "@/types";
+import { RawTraccarPositionSchema } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, EngineState, NormalizedPosition } from "@/types";
 
-export function dedupeKey(p: { device: number; timestamp: Timestamp; geo: Vec2 }) {
+export function dedupeKey(p: { device: number; timestamp: number; geo: Vec2 }) {
     return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
+}
+
+export function normalizePosition(raw: unknown): NormalizedPosition | null {
+    try {
+        const parsed = RawTraccarPositionSchema.parse(raw);
+        const { latitude, longitude, fixTime, deviceId, accuracy } = parsed;
+
+        const ts = typeof fixTime === "string" ? Date.parse(fixTime) : fixTime;
+        if (Number.isNaN(ts)) return null;
+
+        return {
+            device: deviceId,
+            timestamp: ts,
+            geo: [longitude, latitude],
+            accuracy: accuracy ?? 100,
+        };
+    } catch {
+        return null;
+    }
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -48,7 +68,7 @@ export function buildEngineSnapshotsFromByDevice(
 
                 engineStatesByDevice.set(deviceId, [snapshot]);
                 const draft = snapshot.draft;
-                const endTs = snapshot.lastTimestamp ?? (Date.now() as Timestamp);
+                const endTs = snapshot.lastTimestamp ?? Date.now();
 
                 const isStationary = draft.type === 'stationary';
                 const isMotion = draft.type === 'motion';

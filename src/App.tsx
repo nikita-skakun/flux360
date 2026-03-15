@@ -1,15 +1,17 @@
+import { DeviceListSidePanel } from "./ui/DeviceListSidePanel";
+import { DeviceOverlay } from "./ui/DeviceOverlay";
 import { fromWebMercator } from "./util/webMercator";
 import { HistoryObservationBar } from "./ui/HistoryObservationBar";
 import { LoginPage } from "./ui/LoginPage";
+import { MapView } from "./ui/MapView";
 import { SettingsPanel } from "./ui/SettingsPanel";
-import { TimelinePanel, type TimelineEvent } from "./ui/TimelinePanel";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { TimelinePanel } from "./ui/TimelinePanel";
+import { UnifiedEditModal } from "./ui/UnifiedEditModal";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerConnection } from "./hooks/useServerConnection";
 import { useStore } from "./store";
-import DeviceListSidePanel from "./ui/DeviceListSidePanel";
-import DeviceOverlay from "./ui/DeviceOverlay";
-import MapView, { type MapViewHandle } from "./ui/MapView";
-import UnifiedEditModal from "./ui/UnifiedEditModal";
+import type { MapViewHandle } from "./ui/MapView";
+import type { TimelineEvent } from "./ui/TimelinePanel";
 
 export function App() {
   const createGroup = useStore(state => state.createGroup);
@@ -193,4 +195,3 @@ export function App() {
   );
 }
 
-export default App;

@@ -1,13 +1,15 @@
 import "@maptiler/sdk/dist/maptiler-sdk.css";
-import { CLUSTER_DISTANCE_PX, computeClusters, type DrawItem } from "@/util/clustering";
+import { CLUSTER_DISTANCE_PX, computeClusters } from "@/util/clustering";
 import { ClusterPopup } from "./map/ClusterPopup";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
-import { getColorForDevice, type Color } from "@/util/color";
+import { getColorForDevice } from "@/util/color";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
+import type { Color } from "@/util/color";
+import type { DrawItem } from "@/util/clustering";
 import type { Feature, Point, Polygon, LineString } from "geojson";
 
 export type MapViewHandle = {
@@ -27,7 +29,7 @@ type Props = {
   selectedHistoryItem?: EngineEvent | null;
 };
 
-const MapView = React.forwardRef<MapViewHandle, Props>(({
+const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   activePoints,
   entities,
   overlay,
@@ -679,4 +681,4 @@ const MapView = React.forwardRef<MapViewHandle, Props>(({
   );
 });
 
-export default React.memo(MapView);
+export const MapView = React.memo(MapViewComponent);

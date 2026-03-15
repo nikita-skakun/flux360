@@ -11,13 +11,13 @@ export const LoginPage: React.FC = () => {
     const isLoggingIn = useStore((state) => state.auth.isLoggingIn);
     const loginError = useStore((state) => state.auth.loginError);
 
-    const [email, setEmail] = React.useState("");
+    const [username, setUsername] = React.useState("");
     const [password, setPassword] = React.useState("");
 
     const handleSubmit = async (e: React.SyntheticEvent) => {
         e.preventDefault();
         try {
-            await login(email, password);
+            await login(username, password);
         } catch {
             // Error is handled in store and displayed via loginError
         }
@@ -43,14 +43,14 @@ export const LoginPage: React.FC = () => {
                         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6">
                             <div className="space-y-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="email" className="text-xs font-semibold text-muted-foreground ml-1 uppercase tracking-wider">Username</Label>
+                                    <Label htmlFor="username" className="text-xs font-semibold text-muted-foreground ml-1 uppercase tracking-wider">Username</Label>
                                     <div className="relative group">
                                         <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/20 to-primary/10 rounded-lg blur opacity-0 group-focus-within:opacity-100 transition duration-500" />
                                         <Input
-                                            id="email"
+                                            id="username"
                                             type="text"
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
+                                            value={username}
+                                            onChange={(e) => setUsername(e.target.value)}
                                             required
                                             className="relative bg-background/50 border-border/50 focus:border-primary/50 transition-all duration-300 h-12 text-base rounded-lg"
                                         />

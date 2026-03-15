@@ -33,7 +33,7 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
     let detailsNode = null;
 
     const isDraft = event.id.startsWith('draft-');
-    const durationStr = humanDurationSince(item.start, (isDraft ? now : item.end) as import('@/types').Timestamp);
+    const durationStr = humanDurationSince(item.start, isDraft ? now : item.end);
 
     if (item.type === 'stationary') {
         detailsNode = (

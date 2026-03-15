@@ -1,11 +1,13 @@
+import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { db } from "./db";
 import { dedupeKey, buildEngineSnapshotsFromByDevice } from "./serverUtils";
 import { Engine } from "@/engine/engine";
-import { toWebMercator } from "@/util/webMercator";
-import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
+import { EngineStateSchema, NormalizedPositionSchema } from "@/types";
 import { rgbToHex, colorForDevice } from "@/util/color";
+import { toWebMercator } from "@/util/webMercator";
 import { vlog } from "@/util/logger";
-import type { NormalizedPosition, DevicePoint, MotionProfileName, EngineEvent, Timestamp, AppDevice, TraccarDevice, EngineState } from "@/types";
+import { z } from "zod";
+import type { NormalizedPosition, DevicePoint, MotionProfileName, EngineEvent, AppDevice, TraccarDevice, EngineState } from "@/types";
 
 export class ServerState {
   devices: Record<number, AppDevice> = {};
@@ -13,7 +15,7 @@ export class ServerState {
   deviceToGroupsMap = new Map<number, number[]>();
   groupIds = new Set<number>();
   engines = new Map<number, Engine>();
-  engineCheckpoints = new Map<number, { timestamp: Timestamp; snapshot: EngineState }[]>();
+  engineCheckpoints = new Map<number, { timestamp: number; snapshot: EngineState }[]>();
   processedKeys = new Set<string>();
   backfilled = new Set<number>();
   private rawTraccarDevices = new Map<number, TraccarDevice>();
@@ -29,41 +31,48 @@ export class ServerState {
     vlog(`[ServerState] Restoring engine checkpoints...`);
 
     // 1. Restore Checkpoints
-    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as { device_id: number, timestamp: number, snapshot_json: string | object }[])
+    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as unknown[])
       .forEach(row => {
-        if (!this.engineCheckpoints.has(row.device_id)) {
-          this.engineCheckpoints.set(row.device_id, []);
-          this.engines.set(row.device_id, new Engine());
+        const typedRow = row as { device_id: number, timestamp: number, snapshot_json: string | object };
+        if (!this.engineCheckpoints.has(typedRow.device_id)) {
+          this.engineCheckpoints.set(typedRow.device_id, []);
+          this.engines.set(typedRow.device_id, new Engine());
         }
         try {
-          const snapshot = typeof row.snapshot_json === 'string' ? JSON.parse(row.snapshot_json) as EngineState : row.snapshot_json as EngineState;
-          this.engineCheckpoints.get(row.device_id)?.push({ timestamp: row.timestamp as Timestamp, snapshot });
-          this.engines.get(row.device_id)?.restoreSnapshot(snapshot);
+          const rawSnapshot = typeof typedRow.snapshot_json === 'string' ? JSON.parse(typedRow.snapshot_json) : typedRow.snapshot_json;
+          const snapshot = EngineStateSchema.parse(rawSnapshot);
+          this.engineCheckpoints.get(typedRow.device_id)?.push({ timestamp: typedRow.timestamp, snapshot });
+          this.engines.get(typedRow.device_id)?.restoreSnapshot(snapshot);
         } catch (err) {
-          console.error("Failed to parse snapshot for device", row.device_id, err);
+          console.error("Failed to parse/validate snapshot for device", (row as any)?.device_id, err);
         }
       });
 
     vlog(`[ServerState] Restoring recent positions...`);
     // 2. Restore recent raw positions so `positionsAll` is populated
     const cutoff = Date.now() - this.historyMs;
-    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff) as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number }[];
+    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff) as unknown[];
     for (const row of posRows) {
-      const p: NormalizedPosition = {
-        device: row.device_id,
-        geo: [row.geo_lng, row.geo_lat],
-        accuracy: row.accuracy,
-        timestamp: row.timestamp as Timestamp
-      };
-      this.positionsAll.push(p);
+      const typedRow = row as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number };
+      try {
+        const p = NormalizedPositionSchema.parse({
+          device: typedRow.device_id,
+          geo: [typedRow.geo_lng, typedRow.geo_lat],
+          accuracy: typedRow.accuracy,
+          timestamp: typedRow.timestamp
+        });
+        this.positionsAll.push(p);
 
-      let list = this.allPosById.get(p.device);
-      if (!list) this.allPosById.set(p.device, list = []);
-      list.push(p);
+        let list = this.allPosById.get(p.device);
+        if (!list) this.allPosById.set(p.device, list = []);
+        list.push(p);
 
-      const engine = this.engines.get(p.device);
-      if (engine?.lastTimestamp && p.timestamp <= engine.lastTimestamp) {
-        this.processedKeys.add(dedupeKey(p));
+        const engine = this.engines.get(p.device);
+        if (engine?.lastTimestamp && p.timestamp <= engine.lastTimestamp) {
+          this.processedKeys.add(dedupeKey(p));
+        }
+      } catch (err) {
+        console.error("Failed to validate position from DB:", err);
       }
     }
     vlog(`[ServerState] Restored ${posRows.length} trailing positions. ${this.engines.size} engines ready.`);
@@ -79,7 +88,7 @@ export class ServerState {
     const processed = Array.from(this.rawTraccarDevices.values())
       .map(device => {
         const { attributes, id, name, lastUpdate } = device;
-        const lastSeen = lastUpdate ? (Date.parse(lastUpdate) as Timestamp) : null;
+        const lastSeen = lastUpdate ? (Date.parse(lastUpdate)) : null;
         if (lastSeen && lastSeen < Date.now() - this.historyMs) return null;
 
         const profileAttr = attributes["motionProfile"];
@@ -93,7 +102,8 @@ export class ServerState {
         let group: AppDevice | null = null;
         if (typeof memberIdsAttr === "string") {
           try {
-            group = { ...base, emoji: base.emoji ? base.emoji : 'group', lastSeen: null, memberDeviceIds: JSON.parse(memberIdsAttr) as number[] };
+            const memberDeviceIds = z.array(z.number()).parse(JSON.parse(memberIdsAttr));
+            group = { ...base, emoji: base.emoji ? base.emoji : 'group', lastSeen: null, memberDeviceIds };
           } catch { /* ignore */ }
         }
         return { id, base, group };
@@ -105,7 +115,7 @@ export class ServerState {
 
     for (const group of this.groups) {
       if (group.memberDeviceIds) {
-        let max: Timestamp | null = null;
+        let max: number | null = null;
         for (const mid of group.memberDeviceIds) {
           const ts = this.devices[mid]?.lastSeen ?? null;
           if (ts && (max === null || ts > max)) max = ts;
@@ -276,11 +286,11 @@ export class ServerState {
 
     // Prune and Checkpoint
     const cpCutoff = Date.now() - (this.historyMs * 2);
-    const cpToDb: { id: number, cp: { timestamp: Timestamp, snapshot: EngineState } }[] = [];
+    const cpToDb: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
 
     for (const [id, engine] of this.engines) {
       if (engine.lastTimestamp) {
-        engine.pruneHistory(cpCutoff as Timestamp);
+        engine.pruneHistory(cpCutoff);
         const checkpoints = this.engineCheckpoints.get(id) ?? [];
         const lastCp = checkpoints[checkpoints.length - 1];
         if (rawByDevice[id]?.length && (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS)) {

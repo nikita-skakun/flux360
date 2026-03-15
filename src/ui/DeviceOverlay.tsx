@@ -3,7 +3,7 @@ import { Pencil, UserPlus, X } from "lucide-react";
 import { useStore } from "@/store";
 import { useTimeAgo } from "@/util/time";
 import React, { useMemo } from "react";
-import type { AppDevice, DevicePoint, Timestamp } from "@/types";
+import type { AppDevice, DevicePoint } from "@/types";
 
 // UI confidence thresholds for display
 const CONFIDENCE_HIGH_THRESHOLD = 0.8;
@@ -18,7 +18,7 @@ type Props = {
   isOwner?: boolean;
 };
 
-const DurationDisplay: React.FC<{ timestamp: Timestamp, addSuffix?: boolean }> = ({ timestamp, addSuffix = true }) => {
+const DurationDisplay: React.FC<{ timestamp: number, addSuffix?: boolean }> = ({ timestamp, addSuffix = true }) => {
   const timeAgo = useTimeAgo(timestamp, addSuffix);
   return <>{timeAgo}</>;
 };
@@ -136,4 +136,4 @@ function DeviceOverlayComponent({
   );
 }
 
-export default React.memo(DeviceOverlayComponent);
+export const DeviceOverlay = React.memo(DeviceOverlayComponent);

@@ -1,4 +1,4 @@
-import type { AppDevice, DevicePoint, EngineEvent, MotionProfileName } from '@/types';
+import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, MotionProfileName } from '@/types';
 
 export type StoreState = {
   // Entities slice (unifies devices and groups)
@@ -32,7 +32,7 @@ export type StoreState = {
   eventsByDevice: Record<number, EngineEvent[]>;
 
   // Pre-calculated metadata from server
-  metadata: import("@/types").InitialStatePayload['metadata'];
+  metadata: InitialStatePayload['metadata'];
 };
 
 export type StoreActions = {
@@ -45,7 +45,7 @@ export type StoreActions = {
   updateDevice: (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
 
   // Data Handlers from WebSocket
-  setInitialState: (payload: import("@/types").InitialStatePayload) => void;
+  setInitialState: (payload: InitialStatePayload) => void;
   updatePositions: (payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
   updateConfig: (payload: { devices: Record<number, AppDevice> | null; groups: AppDevice[] | null }) => void;
 
@@ -53,7 +53,7 @@ export type StoreActions = {
   updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => void;
 
   // Settings & Auth
-  login: (email: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
 
