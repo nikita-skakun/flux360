@@ -6,6 +6,7 @@ import { drawPin, PIN_R } from "@/util/rendering";
 import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
 import { getColorForDevice } from "@/util/color";
+import { z } from "zod";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
 import type { Color } from "@/util/color";
@@ -559,14 +560,10 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const props = features[0]?.properties;
       const members: unknown = props?.['members'];
       let memberIds: number[] = [];
-      if (typeof members === 'string') {
-        try {
-          const parsed: unknown = JSON.parse(members);
-          if (Array.isArray(parsed)) memberIds = (parsed as unknown[]).map(Number);
-        } catch { /* ignore malformed data */ }
-      } else if (Array.isArray(members)) {
-        memberIds = (members as unknown[]).map(Number);
-      }
+      try {
+        const source = typeof members === 'string' ? JSON.parse(members) : members;
+        memberIds = z.coerce.number().array().parse(source);
+      } catch { /* ignore malformed data */ }
 
       const geo = features[0]?.geometry;
       if (memberIds.length > 0 && geo?.type === 'Point') {

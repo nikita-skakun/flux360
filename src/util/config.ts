@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const ConfigSchema = z.object({
-  traccarBaseUrl: z.url(),
+  traccarBaseUrl: z.string().min(1),
   traccarSecure: z.boolean(),
   maptilerApiKey: z.string().min(1),
   traccarApiToken: z.string().min(1),

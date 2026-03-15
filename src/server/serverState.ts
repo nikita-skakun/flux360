@@ -44,7 +44,7 @@ export class ServerState {
           this.engineCheckpoints.get(typedRow.device_id)?.push({ timestamp: typedRow.timestamp, snapshot });
           this.engines.get(typedRow.device_id)?.restoreSnapshot(snapshot);
         } catch (err) {
-          console.error("Failed to parse/validate snapshot for device", (row as any)?.device_id, err);
+          console.error("Failed to parse/validate snapshot for device", typedRow.device_id, err);
         }
       });
 
