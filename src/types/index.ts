@@ -123,7 +123,7 @@ export type EngineState = z.infer<typeof EngineStateSchema>;
 
 export const RawTraccarPositionSchema = z.object({
   deviceId: z.number(),
-  fixTime: z.union([z.string(), z.number()]),
+  fixTime: z.string(),
   latitude: z.number(),
   longitude: z.number(),
   accuracy: z.number().optional(),

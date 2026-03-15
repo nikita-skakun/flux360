@@ -36,8 +36,8 @@ export class TraccarTokenManager {
       throw new Error(`Failed to generate Traccar token: ${tokenRes.status}`);
     }
 
-    const tokenData = await tokenRes.text(); // sometimes plain string or json
-    const newToken = tokenData.replace(/"/g, '');
+    const newToken = (await tokenRes.text()).trim();
+    if (!newToken) throw new Error("Received empty token from Traccar");
 
     return newToken;
   }

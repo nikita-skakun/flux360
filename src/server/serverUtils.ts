@@ -13,7 +13,7 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
         const parsed = RawTraccarPositionSchema.parse(raw);
         const { latitude, longitude, fixTime, deviceId, accuracy } = parsed;
 
-        const ts = typeof fixTime === "string" ? Date.parse(fixTime) : fixTime;
+        const ts = Date.parse(fixTime);
         if (Number.isNaN(ts)) return null;
 
         return {

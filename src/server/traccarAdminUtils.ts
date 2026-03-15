@@ -2,31 +2,16 @@ import { normalizePosition } from "./serverUtils";
 import type { NormalizedPosition } from "@/types";
 
 export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] {
-  const out: NormalizedPosition[] = [];
-  const visited = new WeakSet();
+  if (!raw || typeof raw !== "object") return [];
 
-  function walk(node: unknown) {
-    if (!node || typeof node !== "object") return;
-    if (visited.has(node)) return;
-    visited.add(node);
-    if (Array.isArray(node)) {
-      for (const v of node) walk(v);
-      return;
-    }
+  const obj = raw as { positions?: unknown; data?: { positions?: unknown } };
+  const positions = Array.isArray(obj.positions)
+    ? obj.positions
+    : Array.isArray(obj.data?.positions)
+    ? obj.data?.positions
+    : [];
 
-    const tryNorm = normalizePosition(node);
-    if (tryNorm) {
-      out.push(tryNorm);
-      return;
-    }
-    const obj = node as Record<string, unknown>;
-    const searchKeys = ["positions", "data", "payload", "body", "message"] as const;
-    for (const k of searchKeys) {
-      if (k in obj) walk(obj[k]);
-    }
-    for (const v of Object.values(obj)) walk(v);
-  }
-
-  walk(raw);
-  return out;
+  return positions
+    .map(p => normalizePosition(p))
+    .filter((p): p is NonNullable<typeof p> => p !== null);
 }
