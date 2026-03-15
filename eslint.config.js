@@ -27,6 +27,7 @@ export default [
         setTimeout: 'readonly',
         window: 'readonly',
         React: 'readonly',
+        Bun: 'readonly',
       }
     },
     plugins: {

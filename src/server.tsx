@@ -1,17 +1,15 @@
+import { db } from "./server/db";
+import { getTraccarApiBase } from "./server/traccarUrlUtils";
+import { loadConfig, type Config } from "./util/config";
+import { parseArgs } from "util";
 import { serve, type Server, type ServerWebSocket } from "bun";
+import { ServerState } from "./server/serverState";
+import { setVerbose, vlog } from "./util/logger";
+import { TraccarAdminClient } from "./server/traccarClient";
 import indexHtml from "./index.html";
 import type { NormalizedPosition, TraccarDevice, AppDevice, DevicePoint, EngineEvent } from "@/types";
 
 const isProduction = process.env.NODE_ENV === "production";
-const port = Number(process.env["PORT"] || 3000);
-
-interface Config {
-  traccarBaseUrl: string;
-  traccarSecure: boolean;
-  maptilerApiKey: string;
-  traccarApiToken: string;
-  historyDays: number;
-}
 
 interface WSData {
   username: string | null;
@@ -20,38 +18,22 @@ interface WSData {
   ownedDeviceIds: Set<number>;
 }
 
-// Validate mandatory configuration on startup
-const configFile = Bun.file("config.json");
-if (!(await configFile.exists())) {
-  console.error("Error: config.json is missing. Please create it based on config.sample.json.");
-  process.exit(1);
-}
-
-// Application state and Traccar Client
-import { db } from "./server/db";
-import { getTraccarApiBase } from "./server/traccarUrlUtils";
-import { ServerState } from "./server/serverState";
-import { TraccarAdminClient } from "./server/traccarClient";
-import { setVerbose, vlog } from "./util/logger";
-
 // Handle CLI flags
-const verboseFlag = Bun.argv.includes("--verbose") || Bun.argv.includes("-v");
-setVerbose(verboseFlag);
+const { values } = parseArgs({
+  options: {
+    verbose: { type: "boolean", short: "v" },
+    port: { type: "string", short: "p", default: "3000" },
+  }
+});
+
+setVerbose(!!values.verbose);
+const port = parseInt(values.port, 10);
 
 let config: Config;
 try {
-  config = await configFile.json();
+  config = await loadConfig();
 } catch (e) {
-  console.error("Error: config.json is not valid JSON.");
-  process.exit(1);
-}
-
-const requiredFields: (keyof Config)[] = ["traccarBaseUrl", "maptilerApiKey", "traccarApiToken", "historyDays"];
-
-const missingFields = requiredFields.filter(field => !config[field]);
-
-if (missingFields.length > 0) {
-  console.error(`Error: Mandatory configuration fields are missing in config.json: ${missingFields.join(", ")}`);
+  console.error("Error:", e instanceof Error ? e.message : String(e));
   process.exit(1);
 }
 
@@ -233,7 +215,7 @@ const currentBaseUrl = config.traccarBaseUrl;
 const currentToken = config.traccarApiToken;
 const tokenManager = new TraccarTokenManager(currentBaseUrl, config.traccarSecure);
 
-let serverInst: import("bun").Server<WSData>;
+let serverInst: Server<WSData>;
 
 if (isProduction) {
   // Production: serve static files from dist with SPA fallback

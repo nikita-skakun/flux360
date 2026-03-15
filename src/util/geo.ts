@@ -1,3 +1,4 @@
+import { toWebMercator, WORLD_R } from "@/util/webMercator";
 import type { Vec2 } from "@/types";
 
 export function distance(a: Vec2, b: Vec2): number {
@@ -17,7 +18,6 @@ export function getRadiusFromVariance(variance: number): number {
 }
 
 export function haversineDistance(a: Vec2, b: Vec2): number {
-  const R = 6371e3; // Earth radius in meters
   const [lon1, lat1] = a;
   const [lon2, lat2] = b;
 
@@ -31,7 +31,7 @@ export function haversineDistance(a: Vec2, b: Vec2): number {
     Math.sin(dLambda / 2) * Math.sin(dLambda / 2);
   const c = 2 * Math.atan2(Math.sqrt(a_val), Math.sqrt(1 - a_val));
 
-  return R * c;
+  return WORLD_R * c;
 }
 
 export function computeBearing(from: Vec2, to: Vec2): number {
@@ -60,4 +60,20 @@ export function computeBounds(points: Vec2[]): { minX: number; minY: number; max
     if (y > maxY) maxY = y;
   }
   return { minX, minY, maxX, maxY };
+}
+
+export function pointLineDistance(p: Vec2, a: Vec2, b: Vec2): number {
+  const pM = toWebMercator(p);
+  const aM = toWebMercator(a);
+  const bM = toWebMercator(b);
+
+  const dx = bM[0] - aM[0];
+  const dy = bM[1] - aM[1];
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) return distance(pM, aM);
+
+  const t = ((pM[0] - aM[0]) * dx + (pM[1] - aM[1]) * dy) / l2;
+  const tClamped = Math.max(0, Math.min(1, t));
+  const proj: Vec2 = [aM[0] + tClamped * dx, aM[1] + tClamped * dy];
+  return distance(pM, proj);
 }
