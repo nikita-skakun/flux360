@@ -277,12 +277,12 @@ export class ServerState {
       }));
     }
 
-    const groupProfiles = new Map(this.groups.map(g => [
-      g.id,
-      g.motionProfile ?? ((g.memberDeviceIds?.some(mId => profiles[mId] === "car")) ? "car" : "person")
-    ]));
+    const motionProfiles: Record<number, MotionProfileName> = { ...profiles };
+    for (const g of this.groups) {
+      motionProfiles[g.id] = g.motionProfile ?? ((g.memberDeviceIds?.some(mId => profiles[mId] === "car")) ? "car" : "person");
+    }
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, this.engines, this.groupIds, groupProfiles, profiles);
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, this.engines, motionProfiles);
 
     // Prune and Checkpoint
     const cpCutoff = Date.now() - (this.historyMs * 2);

@@ -30,25 +30,22 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
 export function buildEngineSnapshotsFromByDevice(
     byDevice: Record<number, DevicePoint[]>,
     enginesRef: Map<number, Engine>,
-    groupIdsRef: Set<number>,
-    groupMotionProfiles: Map<number, MotionProfileName>,
-    deviceMotionProfiles: Record<number, MotionProfileName>
+    motionProfiles: Record<number, MotionProfileName>
 ): { positionsByDevice: Record<number, DevicePoint[]>; engineStatesByDevice: Map<number, EngineState[]>; eventsByDevice: Record<number, EngineEvent[]> } {
     try {
         // 1. Process measurements for all devices in this batch
-        Object.entries(byDevice).forEach(([deviceKey, arr]) => {
+        for (const [deviceKey, arr] of Object.entries(byDevice)) {
             const deviceId = Number(deviceKey);
-            if (!enginesRef.has(deviceId)) {
-                enginesRef.set(deviceId, new Engine());
+            let engine = enginesRef.get(deviceId);
+            if (!engine) {
+                engine = new Engine();
+                enginesRef.set(deviceId, engine);
             }
-            const engine = enginesRef.get(deviceId)!;
-            const profile = groupIdsRef.has(deviceId)
-                ? (groupMotionProfiles.get(deviceId) ?? "person")
-                : deviceMotionProfiles[deviceId] ?? "person";
+            const profile = motionProfiles[deviceId] ?? "person";
             engine.setMotionProfile(profile);
             engine.processMeasurements(arr);
             engine.refineHistory();
-        });
+        }
 
         // 2. Build current state for all engines
         const positionsByDevice: Record<number, DevicePoint[]> = {};
