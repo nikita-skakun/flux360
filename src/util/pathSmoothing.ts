@@ -1,17 +1,12 @@
-import type { Vec2 } from "@/types";
+import { pointLineDistance } from "@/util/geo";
+import type { NormalizedPosition, Vec2 } from "@/types";
 
-type PathPoint = {
-    point: Vec2;
-    accuracy: number;
-    timestamp: number;
-};
+export function smoothPath(points: NormalizedPosition[], iterations = 3): Vec2[] {
+    if (points.length <= 2) return points.map(p => p.geo);
 
-export function smoothPath(points: PathPoint[], iterations = 3): Vec2[] {
-    if (points.length <= 2) return points.map(p => p.point);
-
-    let result: Vec2[] = points.map(p => [...p.point] as Vec2);
+    let result: Vec2[] = points.map(p => [...p.geo] as Vec2);
     const radii = points.map(p => p.accuracy);
-    const centers = points.map(p => p.point);
+    const centers = points.map(p => p.geo);
 
     for (let iter = 0; iter < iterations; iter++) {
         result = result.map((curr, i, arr) => {
@@ -60,4 +55,39 @@ export function smoothPath(points: PathPoint[], iterations = 3): Vec2[] {
     }
 
     return result;
+}
+
+export function simplifyPath(points: Vec2[], epsilon: number): Vec2[] {
+    if (points.length < 3) return points;
+
+    const keep = new Array(points.length).fill(false);
+    keep[0] = true;
+    keep[points.length - 1] = true;
+
+    function simplifySegment(start: number, end: number): void {
+        let maxDist = 0;
+        let index = -1;
+        const startPt = points[start];
+        const endPt = points[end];
+        if (!startPt || !endPt) return;
+
+        for (let i = start + 1; i < end; i++) {
+            const pt = points[i];
+            if (!pt) continue;
+            const d = pointLineDistance(pt, startPt, endPt);
+            if (d > maxDist) {
+                maxDist = d;
+                index = i;
+            }
+        }
+
+        if (maxDist > epsilon && index !== -1) {
+            keep[index] = true;
+            simplifySegment(start, index);
+            simplifySegment(index, end);
+        }
+    }
+
+    simplifySegment(0, points.length - 1);
+    return points.filter((_, idx) => keep[idx]);
 }

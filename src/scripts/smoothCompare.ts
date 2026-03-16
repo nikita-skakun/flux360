@@ -1,8 +1,8 @@
-import { haversineDistance, pointLineDistance } from "@/util/geo";
+import { haversineDistance } from "@/util/geo";
 import { parseArgs } from "util";
 import { parseGpx } from "@/util/gpx";
 import { readFile, writeFile } from "fs/promises";
-import { smoothPath } from "@/util/pathSmoothing";
+import { smoothPath, simplifyPath } from "@/util/pathSmoothing";
 import path from "path";
 import type { NormalizedPosition, Vec2 } from "@/types";
 
@@ -17,40 +17,6 @@ function findClosestByDistance<T extends { geo: Vec2 }>(items: T[], geo: Vec2): 
     }
   }
   return best;
-}
-
-function simplifyPath(points: Vec2[], epsilon: number): Vec2[] {
-  if (points.length < 3) return points;
-
-  const keep = new Array(points.length).fill(false);
-  keep[0] = true;
-  keep[points.length - 1] = true;
-
-  function simplifySegment(start: number, end: number): void {
-    let maxDist = 0;
-    let index = -1;
-    const startPt = points[start];
-    const endPt = points[end];
-    if (!startPt || !endPt) return;
-
-    for (let i = start + 1; i < end; i++) {
-      const pt = points[i];
-      if (!pt) continue;
-      const d = pointLineDistance(pt, startPt, endPt);
-      if (d > maxDist) {
-        maxDist = d;
-        index = i;
-      }
-    }
-    if (maxDist > epsilon && index !== -1) {
-      keep[index] = true;
-      simplifySegment(start, index);
-      simplifySegment(index, end);
-    }
-  }
-
-  simplifySegment(0, points.length - 1);
-  return points.filter((_, idx) => keep[idx]);
 }
 
 function stats(values: number[]): { count: number; mean: number; median: number; max: number } {
@@ -115,8 +81,8 @@ async function main() {
   const cleanPoints = parseGpx(cleanRaw);
   if (cleanPoints.length === 0) throw new Error("No points found in clean track.");
 
-  const rawPathPoints: Array<{ point: Vec2; accuracy: number; timestamp: number }> = rawPoints
-    .map((p: NormalizedPosition) => ({ point: p.geo, accuracy: p.accuracy ?? 100, timestamp: p.timestamp }))
+  const rawPathPoints: NormalizedPosition[] = Object.values(rawJson.data)
+    .flat()
     .sort((a, b) => a.timestamp - b.timestamp);
 
   let smoothed = smoothPath(rawPathPoints, Number(values.iterations)).map((geo, i) => ({

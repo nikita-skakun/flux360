@@ -1,7 +1,7 @@
 import { humanDurationSince } from '@/util/time';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
 import React, { useMemo } from 'react';
-import { smoothPath } from '@/util/pathSmoothing';
+import { simplifyPath, smoothPath } from '@/util/pathSmoothing';
 import type { EngineEvent, MotionEvent } from '@/types';
 
 export type TimelineEvent = {
@@ -14,9 +14,11 @@ type Props = {
     eventsByDevice: Record<number, EngineEvent[]>;
     onSelectEvent: (event: TimelineEvent) => void;
     selectedEventId: string | null;
+    smoothingIterations: number;
+    simplifyEpsilon: number;
 };
 
-const Sparkline = ({ event }: { event: MotionEvent }) => {
+const Sparkline = ({ event, smoothingIterations, simplifyEpsilon }: { event: MotionEvent; smoothingIterations: number; simplifyEpsilon: number }) => {
     if (event.path.length < 2) return null;
 
     const { bounds } = event;
@@ -34,7 +36,8 @@ const Sparkline = ({ event }: { event: MotionEvent }) => {
 
     const flipY = (y: number) => bounds.minY + bounds.maxY - y;
 
-    const smoothed = smoothPath(event.path.map(p => ({ point: p.geo, accuracy: p.accuracy, timestamp: p.timestamp })));
+    const raw = smoothingIterations > 0 ? smoothPath(event.path, smoothingIterations) : event.path.map(p => p.geo);
+    const smoothed = simplifyEpsilon > 0 ? simplifyPath(raw, simplifyEpsilon) : raw;
     const pointsStr = smoothed.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
 
     return (
@@ -62,6 +65,8 @@ export const TimelinePanel: React.FC<Props> = ({
     eventsByDevice,
     onSelectEvent,
     selectedEventId,
+    smoothingIterations,
+    simplifyEpsilon,
 }) => {
     const [now, setNow] = React.useState(Date.now());
     const [copiedId, setCopiedId] = React.useState<string | null>(null);
@@ -201,7 +206,7 @@ export const TimelinePanel: React.FC<Props> = ({
                                 </div>
 
                                 {item.type === 'motion' && (
-                                    <Sparkline event={item} />
+                                    <Sparkline event={item} smoothingIterations={smoothingIterations} simplifyEpsilon={simplifyEpsilon} />
                                 )}
                             </div>
                         </React.Fragment>

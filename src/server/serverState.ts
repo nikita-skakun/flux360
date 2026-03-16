@@ -36,13 +36,13 @@ export class ServerState {
     vlog(`[ServerState] Restoring engine checkpoints...`);
 
     // 1. Restore Checkpoints
-    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all() as unknown[])
+    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all())
       .forEach(row => {
         const typedRow = row as { device_id: number, timestamp: number, snapshot_json: string | object };
         const checkpoints = this.engineCheckpoints[typedRow.device_id] ??= [];
         this.engines[typedRow.device_id] ??= new Engine();
         try {
-          const rawSnapshot = typeof typedRow.snapshot_json === 'string' ? JSON.parse(typedRow.snapshot_json) : typedRow.snapshot_json;
+          const rawSnapshot = typeof typedRow.snapshot_json === 'string' ? JSON.parse(typedRow.snapshot_json) as unknown : typedRow.snapshot_json;
           const snapshot = EngineStateSchema.parse(rawSnapshot);
           checkpoints.push({ timestamp: typedRow.timestamp, snapshot });
           this.engines[typedRow.device_id]?.restoreSnapshot(snapshot);
@@ -54,7 +54,7 @@ export class ServerState {
     vlog(`[ServerState] Restoring recent positions...`);
     // 2. Restore recent raw positions so `positionsAll` is populated
     const cutoff = Date.now() - this.historyMs;
-    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff) as unknown[];
+    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff);
     for (const row of posRows) {
       const typedRow = row as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number };
       try {
@@ -90,7 +90,7 @@ export class ServerState {
 
     const processed = Object.values(this.rawTraccarDevices)
       .map(device => {
-        const { attributes, id, name, lastUpdate } = device as TraccarDevice;
+        const { attributes, id, name, lastUpdate } = device;
         const lastSeen = lastUpdate ? (Date.parse(lastUpdate)) : null;
         if (lastSeen && lastSeen < Date.now() - this.historyMs) return null;
 

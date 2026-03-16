@@ -8,15 +8,11 @@ export class TraccarTokenManager {
     this.apiBase = getTraccarApiBase(traccarBaseUrl, traccarSecure);
   }
 
-  async getOrCreateTraccarPermanentToken(username: string, password?: string): Promise<string> {
+  async getOrCreateTraccarPermanentToken(username: string, password: string): Promise<string> {
     // 1. Try to find in DB (return any valid non-expired token for this user)
     const row = db.query("SELECT traccar_token FROM user_tokens WHERE username = ? ORDER BY last_active DESC LIMIT 1").get(username) as { traccar_token: string } | undefined;
     if (row?.traccar_token) {
       return row.traccar_token;
-    }
-
-    if (!password) {
-      throw new Error(`Password required to generate new Traccar token for ${username}`);
     }
 
     // 2. Not found, create a new one using the user's credentials via POST /api/session/token

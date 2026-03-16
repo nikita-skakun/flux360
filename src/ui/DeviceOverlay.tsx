@@ -15,10 +15,10 @@ type Props = {
   entities: Record<number, AppDevice>;
   setSelectedDeviceId: (id: number | null) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
-  isOwner?: boolean;
+  isOwner: boolean;
 };
 
-const DurationDisplay: React.FC<{ timestamp: number, addSuffix?: boolean }> = ({ timestamp, addSuffix = true }) => {
+const DurationDisplay: React.FC<{ timestamp: number, addSuffix: boolean }> = ({ timestamp, addSuffix = true }) => {
   const timeAgo = useTimeAgo(timestamp, addSuffix);
   return <>{timeAgo}</>;
 };
@@ -130,7 +130,7 @@ function DeviceOverlayComponent({
           </Button>
         </div>
       </div>
-      <div className="text-xs text-muted-foreground">Last updated: <DurationDisplay timestamp={entities[chosen.device]?.lastSeen ?? chosen.timestamp} /></div>
+      <div className="text-xs text-muted-foreground">Last updated: <DurationDisplay timestamp={entities[chosen.device]?.lastSeen ?? chosen.timestamp} addSuffix={false} /></div>
 
     </div>
   );

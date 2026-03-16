@@ -40,7 +40,7 @@ export class TraccarAdminClient {
 
       this.ws.onmessage = (ev) => {
         try {
-          const data = JSON.parse(ev.data as string);
+          const data = JSON.parse(ev.data as string) as { devices?: unknown; positions?: unknown };
           if (data.devices) {
             this.deps.onDevicesReceived(TraccarDeviceSchema.array().parse(data.devices));
           }

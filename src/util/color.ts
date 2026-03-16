@@ -25,7 +25,7 @@ export function parseHexColor(hex: string): Color | null {
 
 export function getColorForDevice(
     deviceId: number,
-    deviceColor?: string | null
+    deviceColor: string | null
 ): Color {
     // If device has a custom color, use it
     if (deviceColor) {

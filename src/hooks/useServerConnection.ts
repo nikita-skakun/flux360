@@ -4,6 +4,7 @@ import { setWebSocket } from '@/wsClient';
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store';
 import type { ClientMessage } from '@/types';
+import { z } from 'zod';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
@@ -56,15 +57,21 @@ export function useServerConnection() {
         ws.send(JSON.stringify(authMessage));
       };
 
+      const RpcResponseSchema = z.object({
+        requestId: z.string(),
+        type: z.string().optional(),
+      }).loose();
+
       ws.onmessage = (event) => {
         try {
-          const raw = JSON.parse(String(event.data));
+          const raw = JSON.parse(String(event.data)) as unknown;
 
           // 1. Check for RPC responses (they have a requestId)
-          if (raw && typeof raw === 'object' && 'requestId' in raw && raw.requestId) {
-            handleResponse(raw as { requestId: string;[key: string]: unknown });
+          const rpcResult = RpcResponseSchema.safeParse(raw);
+          if (rpcResult.success) {
+            handleResponse(rpcResult.data);
             // If it's just an RPC response, we might not need to parse it as a broadcast
-            const msgType = String(raw['type']);
+            const msgType = rpcResult.data.type ?? '';
             if (msgType === 'error' || msgType.endsWith('_success')) {
               return;
             }

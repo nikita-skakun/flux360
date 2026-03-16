@@ -431,4 +431,3 @@ export const DeviceListSidePanel: React.FC<{
       </>
     );
   };
-

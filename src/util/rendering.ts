@@ -1,5 +1,5 @@
-import type { Color } from "@/util/color";
 import { rgbaString } from "@/util/color";
+import type { Color } from "@/util/color";
 
 export const PIN_R = 14;
 
@@ -16,7 +16,7 @@ export function drawPin(
     iconColor: Color,
     darkMode: boolean,
     isSelected = false,
-    badgeText?: string
+    badgeText: string | null = null
 ) {
     const bodyHeight = pinRadius * 1.5;
     const headY = tipY - bodyHeight;

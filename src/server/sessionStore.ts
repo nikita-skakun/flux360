@@ -18,8 +18,7 @@ export const sessionStore = {
   },
 
   getSession(token: string): Session | undefined {
-    const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token) as unknown;
-
+    const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token);
     if (!row) return undefined;
 
     let session: Session;

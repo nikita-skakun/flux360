@@ -252,4 +252,3 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
         </Dialog>
     );
 };
-
