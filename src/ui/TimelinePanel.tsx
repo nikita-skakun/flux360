@@ -1,6 +1,7 @@
 import { humanDurationSince } from '@/util/time';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
 import React, { useMemo } from 'react';
+import { smoothPath } from '@/util/pathSmoothing';
 import type { EngineEvent, MotionEvent } from '@/types';
 
 export type TimelineEvent = {
@@ -32,7 +33,9 @@ const Sparkline = ({ event }: { event: MotionEvent }) => {
     const vbH = size + padding * 2;
 
     const flipY = (y: number) => bounds.minY + bounds.maxY - y;
-    const pointsStr = event.path.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
+
+    const smoothed = smoothPath(event.path.map(p => ({ point: p.geo, accuracy: p.accuracy, timestamp: p.timestamp })));
+    const pointsStr = smoothed.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
 
     return (
         <svg
@@ -48,8 +51,8 @@ const Sparkline = ({ event }: { event: MotionEvent }) => {
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />
-            <circle cx={event.path[0]?.[0] ?? 0} cy={flipY(event.path[0]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
-            <circle cx={event.path[event.path.length - 1]?.[0] ?? 0} cy={flipY(event.path[event.path.length - 1]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" />
+            <circle cx={smoothed[0]?.[0] ?? 0} cy={flipY(smoothed[0]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
+            <circle cx={smoothed[smoothed.length - 1]?.[0] ?? 0} cy={flipY(smoothed[smoothed.length - 1]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" />
         </svg>
     );
 };

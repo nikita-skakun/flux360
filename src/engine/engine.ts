@@ -1,7 +1,6 @@
 import { fromWebMercator } from "@/util/webMercator";
 import { haversineDistance, computeBounds } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
-import { smoothPath } from "@/util/pathSmoothing";
 import { vlog } from "@/util/logger";
 import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
 import type { MotionProfileConfig } from "./motionDetector";
@@ -150,7 +149,7 @@ export class Engine {
     }
     const settleStart = firstRecent.timestamp;
     const settleStats = this.computeStats(draft.recent);
-    const totalDistance = this.computePathLength(draft.path);
+    const totalDistance = this.computePathLength(draft.path.map(p => p.mean));
     const startEndDist = haversineDistance(fromWebMercator(draft.startAnchor), fromWebMercator(settleStats.mean));
     const maxDev = this.maxDeviation(draft.path, draft.startAnchor);
 
@@ -187,13 +186,15 @@ export class Engine {
       // Trim settling jitter: remove points that occur after the settlement window started
       const trimmedPath = draft.path.filter(pt => pt.timestamp < settleStart);
 
-      // Build accuracy-aware path and smooth it
-      const rawPoints = [
-        { point: draft.startAnchor, accuracy: 1, timestamp: draft.start }, // Anchor: high certainty
-        ...trimmedPath.map(pt => ({ point: pt.mean, accuracy: pt.accuracy, timestamp: pt.timestamp })),
-        { point: settleStats.mean, accuracy: 1, timestamp: settleStart },  // Anchor: high certainty
+      // Build raw, accuracy-aware path (client will smooth)
+      const deviceId = draft.path[0]?.device ?? draft.predecessor.recent[0]?.device;
+      if (deviceId === undefined) { throw new Error('Engine: unable to determine deviceId for motion path'); }
+
+      const path = [
+        { device: deviceId, geo: draft.startAnchor, accuracy: 1, timestamp: draft.start }, // Anchor: high certainty
+        ...trimmedPath.map(pt => ({ device: pt.device, geo: pt.mean, accuracy: pt.accuracy, timestamp: pt.timestamp })),
+        { device: deviceId, geo: settleStats.mean, accuracy: 1, timestamp: settleStart },  // Anchor: high certainty
       ];
-      const stablePath = smoothPath(rawPoints);
 
       this.closed.push({
         type: 'stationary',
@@ -210,10 +211,10 @@ export class Engine {
         end: Math.max(draft.start, settleStart),
         startAnchor: draft.startAnchor,
         endAnchor: settleStats.mean,
-        path: stablePath,
+        path,
         distance: totalDistance,
         isDraft: false,
-        bounds: computeBounds(stablePath)
+        bounds: computeBounds(path.map(p => p.geo))
       });
       vlog(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
 
@@ -289,12 +290,10 @@ export class Engine {
     return (dx * dx + dy * dy) / variance;
   }
 
-  public computePathLength(path: (Vec2 | DevicePoint)[]): number {
+  public computePathLength(path: Vec2[]): number {
     return path.slice(1).reduce((acc, b, i) => {
       const a = path[i]!;
-      const p1 = 'mean' in a ? a.mean : a;
-      const p2 = 'mean' in b ? b.mean : b;
-      return acc + haversineDistance(fromWebMercator(p1), fromWebMercator(p2));
+      return acc + haversineDistance(fromWebMercator(a), fromWebMercator(b));
     }, 0);
   }
 
@@ -352,18 +351,19 @@ export class Engine {
         nextNext?.type === 'motion' &&
         (next.end - next.start) < profile.maxMergeGapDuration
       ) {
+        const mergedPath = [...current.path, ...nextNext.path];
         const merged: MotionEvent = {
           type: 'motion',
           start: current.start,
           end: Math.max(current.start, nextNext.end),
           startAnchor: current.startAnchor,
           endAnchor: nextNext.endAnchor,
-          path: [...current.path, ...nextNext.path],
+          path: mergedPath,
           distance: 0,
           isDraft: false,
-          bounds: computeBounds([...current.path, ...nextNext.path])
+          bounds: computeBounds(mergedPath.map(p => p.geo))
         };
-        merged.distance = this.computePathLength(merged.path);
+        merged.distance = this.computePathLength(merged.path.map(p => p.geo));
         this.closed.splice(i, 3, merged);
       } else {
         i++;

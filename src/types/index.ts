@@ -34,9 +34,9 @@ export type DevicePoint = z.infer<typeof DevicePointSchema>;
 
 export const NormalizedPositionSchema = z.object({
   device: z.number(),
-  timestamp: z.number(),
   geo: Vec2Schema,
-  accuracy: z.number(), // meters
+  accuracy: z.number(),
+  timestamp: z.number(),
 });
 export type NormalizedPosition = z.infer<typeof NormalizedPositionSchema>;
 
@@ -74,13 +74,16 @@ export const StationaryEventSchema = z.object({
 });
 export type StationaryEvent = z.infer<typeof StationaryEventSchema>;
 
+export const MotionPathPointSchema = NormalizedPositionSchema;
+export type MotionPathPoint = z.infer<typeof MotionPathPointSchema>;
+
 export const MotionEventSchema = z.object({
   type: z.literal('motion'),
   start: z.number(),
   end: z.number(),
   startAnchor: Vec2Schema,
   endAnchor: Vec2Schema,
-  path: z.array(Vec2Schema),
+  path: z.array(MotionPathPointSchema),
   distance: z.number(),
   isDraft: z.boolean(),
   bounds: WorldBoundsSchema,

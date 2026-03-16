@@ -72,7 +72,7 @@ export function buildEngineSnapshotsFromByDevice(
 
                 const isStationary = draft.type === 'stationary';
                 const isMotion = draft.type === 'motion';
-                const distance = isMotion ? engine.computePathLength(draft.path) : 0;
+                const distance = isMotion ? engine.computePathLength(draft.path.map(p => p.mean)) : 0;
                 const treatAsStationary =
                     isStationary || (isMotion && distance === 0 && draft.path.length > 1);
 
@@ -99,16 +99,17 @@ export function buildEngineSnapshotsFromByDevice(
                 } else if (isMotion) {
                     const lastPt = draft.path[draft.path.length - 1]!;
                     const stats = engine.computeStats(draft.path);
+                    const motionPath = draft.path.map(p => ({ device: p.device, geo: p.mean, accuracy: p.accuracy, timestamp: p.timestamp }));
                     events.push({
                         type: 'motion',
                         start: draft.start,
                         end: endTs,
                         startAnchor: draft.startAnchor,
                         endAnchor: lastPt.mean,
-                        path: draft.path.map(p => p.mean),
+                        path: motionPath,
                         distance,
                         isDraft: true,
-                        bounds: computeBounds(draft.path.map(p => p.mean))
+                        bounds: computeBounds(motionPath.map(p => p.geo))
                     });
                     positionsByDevice[deviceId] = [{
                         mean: lastPt.mean,

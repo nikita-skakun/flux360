@@ -6,6 +6,7 @@ import { drawPin, PIN_R } from "@/util/rendering";
 import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
 import { getColorForDevice } from "@/util/color";
+import { smoothPath } from "@/util/pathSmoothing";
 import { z } from "zod";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
@@ -94,6 +95,14 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     flyToDevice,
     flyToBounds,
   }));
+
+  const motionPathCacheRef = useRef<Map<string, Vec2[]>>(new Map());
+  const [smoothingIterations, setSmoothingIterations] = useState(3);
+
+  // Reset cached smoothed paths when smoothing configuration changes
+  useEffect(() => {
+    motionPathCacheRef.current.clear();
+  }, [smoothingIterations]);
 
   const updateLayers = useCallback(() => {
     const map = mapRef.current;
@@ -356,9 +365,16 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       } else {
         const s = selectedHistoryItem;
         if (s.path && s.path.length > 1) {
+          const key = `motion-${s.start}-${s.end}-${s.path.length}-${s.path[0]?.timestamp ?? 0}-${s.path[s.path.length - 1]?.timestamp ?? 0}-it${smoothingIterations}`;
+          const cached = motionPathCacheRef.current.get(key);
+          const smoothed = cached ?? smoothPath(s.path.map(p => ({ point: p.geo, accuracy: p.accuracy, timestamp: p.timestamp })), smoothingIterations);
+          if (!cached && !s.isDraft) {
+            motionPathCacheRef.current.set(key, smoothed);
+          }
+
           historyFeatures.push({
             type: 'Feature',
-            geometry: { type: 'LineString', coordinates: s.path.map((p: Vec2) => fromWebMercator([p[0], p[1]])) },
+            geometry: { type: 'LineString', coordinates: smoothed.map(fromWebMercator) },
             properties: { isAnchor: false },
           });
         }
@@ -406,7 +422,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem]);
+  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem, smoothingIterations]);
 
   const listenersAttached = useRef(false);
 
@@ -658,6 +674,20 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       <style>{`.maplibregl-ctrl-attrib{display:none} .maplibregl-ctrl-bottom-left{display:none}`}</style>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
       <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>
+      <div style={{ position: "absolute", top: 8, left: 8, zIndex: 10, display: 'flex', flexDirection: 'column', gap: 6, padding: 8, background: 'rgba(0,0,0,0.4)', borderRadius: 8, color: 'white', fontSize: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>Smooth:</span>
+          <input
+            type="range"
+            min={1}
+            max={10}
+            value={smoothingIterations}
+            onChange={e => setSmoothingIterations(Number(e.target.value))}
+            style={{ width: 120 }}
+          />
+          <span style={{ width: 24, textAlign: 'right' }}>{smoothingIterations}</span>
+        </label>
+      </div>
       {clusterPopup && (
         <div style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 20 }}>
           <ClusterPopup
