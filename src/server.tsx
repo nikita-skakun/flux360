@@ -2,6 +2,7 @@ import { ClientMessageSchema, TraccarDeviceSchema } from "@/types";
 import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { loadConfig } from "./util/config";
+import { numericEntries } from "@/util/record";
 import { parseArgs } from "util";
 import { serve } from "bun";
 import { ServerState } from "./server/serverState";
@@ -83,7 +84,7 @@ function broadcastUpdate(server: Server<WSData>, deviceIds?: number[]) {
     // Include groups that contain any of the devices, then filter to root entities
     const allIds = new Set(deviceIds);
     for (const deviceId of deviceIds) {
-      const groups = serverState.deviceToGroupsMap.get(deviceId);
+      const groups = serverState.deviceToGroupsMap[deviceId];
       if (groups) {
         for (const gid of groups) allIds.add(gid);
       }
@@ -134,7 +135,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
         (async () => {
           vlog(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
           for (const id of devicesToBackfill) {
-            const lastTs = serverState.engines.get(id)?.lastTimestamp ?? null;
+            const lastTs = serverState.engines[id]?.lastTimestamp ?? null;
             const firstTs = serverState.positionsAll.find(p => p.device === id)?.timestamp ?? null;
 
             // Fetch head delta if we have reliable data, otherwise full window
@@ -159,8 +160,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
       }
 
       // Broadcast global device changes to relevant topics
-      for (const [deviceId, device] of Object.entries(serverState.devices)) {
-        const id = Number(deviceId);
+      for (const [id, device] of numericEntries(serverState.devices)) {
         server.publish(`device-${id}`, JSON.stringify({
           type: "config_update",
           payload: {

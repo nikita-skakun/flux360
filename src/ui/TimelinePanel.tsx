@@ -74,18 +74,21 @@ export const TimelinePanel: React.FC<Props> = ({
             if (typeof val === 'number') return Math.round(val * 100) / 100;
             if (Array.isArray(val)) return val.map(round);
             if (val && typeof val === 'object') {
-                return Object.fromEntries(
-                    Object.entries(val).map(([k, v]) => [k, round(v)])
-                );
+                const out: Record<string, unknown> = {};
+                const obj = val as Record<string, unknown>;
+                for (const k in obj) {
+                    if (!Object.hasOwn(obj, k)) continue;
+                    out[k] = round(obj[k]);
+                }
+                return out;
             }
             return val;
         };
-
-        const exportData = round({
+        const exportData = {
             id: selectedDeviceId,
-            ev: ev.item,
-            at: new Date().toISOString()
-        });
+            ev: round(ev.item),
+            at: new Date().toISOString(),
+        };
 
         if (navigator?.clipboard) {
             void navigator.clipboard.writeText(JSON.stringify(exportData, null, 2)).catch(() => { });

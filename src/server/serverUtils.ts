@@ -1,12 +1,9 @@
 import { computeBounds } from "@/util/geo";
 import { Engine } from "@/engine/engine";
 import { fromWebMercator } from "@/util/webMercator";
+import { numericEntries } from "@/util/record";
 import { RawTraccarPositionSchema } from "@/types";
-import type { DevicePoint, MotionProfileName, EngineEvent, Vec2, EngineState, NormalizedPosition } from "@/types";
-
-export function dedupeKey(p: { device: number; timestamp: number; geo: Vec2 }) {
-    return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
-}
+import type { DevicePoint, MotionProfileName, EngineEvent, EngineState, NormalizedPosition } from "@/types";
 
 export function normalizePosition(raw: unknown): NormalizedPosition | null {
     try {
@@ -29,17 +26,16 @@ export function normalizePosition(raw: unknown): NormalizedPosition | null {
 
 export function buildEngineSnapshotsFromByDevice(
     byDevice: Record<number, DevicePoint[]>,
-    enginesRef: Map<number, Engine>,
+    engines: Record<number, Engine>,
     motionProfiles: Record<number, MotionProfileName>
-): { positionsByDevice: Record<number, DevicePoint[]>; engineStatesByDevice: Map<number, EngineState[]>; eventsByDevice: Record<number, EngineEvent[]> } {
+): { positionsByDevice: Record<number, DevicePoint[]>; engineStatesByDevice: Record<number, EngineState[]>; eventsByDevice: Record<number, EngineEvent[]> } {
     try {
         // 1. Process measurements for all devices in this batch
-        for (const [deviceKey, arr] of Object.entries(byDevice)) {
-            const deviceId = Number(deviceKey);
-            let engine = enginesRef.get(deviceId);
+        for (const [deviceId, arr] of numericEntries(byDevice)) {
+            let engine = engines[deviceId];
             if (!engine) {
                 engine = new Engine();
-                enginesRef.set(deviceId, engine);
+                engines[deviceId] = engine;
             }
             const profile = motionProfiles[deviceId] ?? "person";
             engine.setMotionProfile(profile);
@@ -49,10 +45,10 @@ export function buildEngineSnapshotsFromByDevice(
 
         // 2. Build current state for all engines
         const positionsByDevice: Record<number, DevicePoint[]> = {};
-        const engineStatesByDevice = new Map<number, EngineState[]>();
+        const engineStatesByDevice: Record<number, EngineState[]> = {};
         const eventsByDevice: Record<number, EngineEvent[]> = {};
 
-        for (const [deviceId, engine] of enginesRef.entries()) {
+        for (const [deviceId, engine] of numericEntries(engines)) {
             try {
                 const snapshot = engine.getState();
                 const events = [...engine.closed];
@@ -63,7 +59,7 @@ export function buildEngineSnapshotsFromByDevice(
                     continue;
                 }
 
-                engineStatesByDevice.set(deviceId, [snapshot]);
+                engineStatesByDevice[deviceId] = [snapshot];
                 const draft = snapshot.draft;
                 const endTs = snapshot.lastTimestamp ?? Date.now();
 
@@ -128,13 +124,13 @@ export function buildEngineSnapshotsFromByDevice(
                 console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
                 positionsByDevice[deviceId] = [];
                 eventsByDevice[deviceId] = [];
-                engineStatesByDevice.set(deviceId, []);
+                engineStatesByDevice[deviceId] = [];
             }
         }
 
         return { positionsByDevice, engineStatesByDevice, eventsByDevice };
     } catch (e) {
         console.error("Error building engine snapshots:", e);
-        return { positionsByDevice: {}, engineStatesByDevice: new Map(), eventsByDevice: {} };
+        return { positionsByDevice: {}, engineStatesByDevice: {}, eventsByDevice: {} };
     }
 }

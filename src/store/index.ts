@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
 import { rgbToHex, colorForDevice } from '@/util/color';
 import { sendRPC } from '@/wsRPC';
@@ -54,8 +55,7 @@ export const useStore = create<Store>()(
 
           // Update lastSeen for device entities only (groups are updated via config_update)
           const newEntities = { ...state.entities };
-          for (const [idStr, points] of Object.entries(activePoints)) {
-            const id = parseInt(idStr, 10);
+          for (const [id, points] of numericEntries(activePoints)) {
             const entity = newEntities[id];
             // Only update if entity exists, is NOT a group (no memberDeviceIds), and has points
             if (!entity || entity.memberDeviceIds || !Array.isArray(points) || points.length === 0) continue;
@@ -79,8 +79,7 @@ export const useStore = create<Store>()(
         set(state => {
           const newEntities = { ...state.entities };
           if (payload.devices !== null) {
-            for (const [idStr, newDev] of Object.entries(payload.devices)) {
-              const id = parseInt(idStr, 10);
+            for (const [id, newDev] of numericEntries(payload.devices)) {
               newEntities[id] = {
                 ...newDev,
                 isOwner: state.entities[id]?.isOwner ?? newDev.isOwner ?? false,

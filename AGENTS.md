@@ -16,6 +16,7 @@
   - **Do not** use `eslint-disable` comments. Fix the root cause.
   - Do not extract functions that are only used once.
   - Avoid using optional parameters.
+  - Prefer `Record<number, T>` for application state maps and protocol payloads (devices, positions, events). Use `Map` only for in-memory caches or when you need Map-specific behavior (e.g. fast deletion, non-serializable caching, or key types other than string).
 - **Git Safety**:
   - **NEVER** commit without explicit user permission.
   - **NEVER** run destructive commands (reset, force push) without explicit request.
