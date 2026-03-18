@@ -8,8 +8,8 @@ export function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] 
   const positions = Array.isArray(obj.positions)
     ? obj.positions
     : Array.isArray(obj.data?.positions)
-    ? obj.data?.positions
-    : [];
+      ? obj.data?.positions
+      : [];
 
   return positions
     .map(p => normalizePosition(p))

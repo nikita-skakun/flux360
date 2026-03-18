@@ -36,6 +36,8 @@ export default [
     rules: {
       ...tseslint.configs.recommended.rules,
       ...tseslint.configs['recommended-requiring-type-checking'].rules,
+      'indent': ['error', 2, { SwitchCase: 1 }],
+      '@typescript-eslint/indent': 'off',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': 'error',
       '@typescript-eslint/no-unnecessary-type-assertion': 'error',
