@@ -1,4 +1,4 @@
-import { fromWebMercator } from "@/util/webMercator";
+import { fromWebMercator, WORLD_R } from "@/util/webMercator";
 import { haversineDistance, computeBounds } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
 import { vlog } from "@/util/logger";
@@ -50,7 +50,7 @@ export class Engine {
 
   private handleStationary(draft: StationaryDraft, p: DevicePoint, profile: MotionProfileConfig) {
     const stats = this.computeStats(draft.recent);
-    const m2 = this.computeMahalanobis2(p.mean, stats.mean, stats.variance);
+    const m2 = this.computeMahalanobis2(p.mean, stats.mean, stats.variance, p.accuracy);
 
     // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
     const distFromStart = haversineDistance(fromWebMercator(p.mean), fromWebMercator(draft.stationaryStartAnchor));
@@ -250,7 +250,7 @@ export class Engine {
     const minVariance = Math.pow(profile.maxStationaryRadius / 3, 2); // 1-sigma floor
     const effectiveVariance = Math.max(stats.variance, minVariance);
 
-    return draft.recent.every(p => this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance) <= profile.motionSettleMahalanobisThreshold);
+    return draft.recent.every(p => this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance, p.accuracy) <= profile.motionSettleMahalanobisThreshold);
   }
 
   private checkCoherence(directions: Vec2[], threshold: number): boolean {
@@ -284,10 +284,12 @@ export class Engine {
     return { mean, variance: Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance)) };
   }
 
-  private computeMahalanobis2(pos: Vec2, mean: Vec2, variance: number): number {
+  private computeMahalanobis2(pos: Vec2, mean: Vec2, clusterVariance: number, pointAccuracy: number): number {
     const dx = pos[0] - mean[0];
     const dy = pos[1] - mean[1];
-    return (dx * dx + dy * dy) / variance;
+    const latRad = 2 * Math.atan(Math.exp(pos[1] / WORLD_R)) - Math.PI / 2;
+
+    return (dx * dx + dy * dy) / (clusterVariance + (pointAccuracy / Math.cos(latRad)) ** 2);
   }
 
   public computePathLength(path: Vec2[]): number {
