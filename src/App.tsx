@@ -195,12 +195,13 @@ export function App() {
           </div>
         }
       />
-      <UnifiedEditModal
-        isOpen={!!editingTarget}
-        onClose={() => setEditingTarget(null)}
-        type={editingTarget?.type ?? 'device'}
-        id={editingTarget?.id ?? 0}
-      />
+      {editingTarget && (
+        <UnifiedEditModal
+          onClose={() => setEditingTarget(null)}
+          type={editingTarget.type}
+          id={editingTarget.id}
+        />
+      )}
     </div>
   );
 }

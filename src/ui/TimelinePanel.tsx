@@ -103,7 +103,7 @@ const TimelineEventRow = React.memo(
           </div>
 
           {item.type === 'motion' && (
-            <Sparkline event={item as MotionEvent} smoothingIterations={smoothingIterations} simplifyEpsilon={simplifyEpsilon} />
+            <Sparkline event={item} smoothingIterations={smoothingIterations} simplifyEpsilon={simplifyEpsilon} />
           )}
         </div>
       </>

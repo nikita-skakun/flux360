@@ -12,13 +12,12 @@ import React, { useState, useEffect, useRef } from "react";
 import type { MotionProfileName } from "@/types";
 
 type Props = {
-    isOpen: boolean;
-    onClose: () => void;
-    type: "device" | "group";
-    id: number;
+  id: number;
+  type: "device" | "group";
+  onClose: () => void;
 };
 
-export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id }) => {
+export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
   const target = useStore((state) => state.entities[id]);
   const updateDevice = useStore((state) => state.updateDevice);
   const updateGroup = useStore((state) => state.updateGroup);
@@ -53,13 +52,13 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
   const defaultHex = `#${rgb.map(c => c.toString(16).padStart(2, '0')).join('')}`;
 
   useEffect(() => {
-    if (isOpen && target) {
+    if (target) {
       setName(target.name);
       setEmoji(target.emoji);
       setColor(target.color);
       setMotionProfile(target.motionProfile);
     }
-  }, [isOpen, target, type, id]);
+  }, [target, type, id]);
 
   const handleSave = async () => {
     setIsLoading(true);
@@ -93,7 +92,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto z-[3000]">
         <DialogHeader>
           <DialogTitle>Edit {type === "device" ? "Device" : "Group"}</DialogTitle>
@@ -138,7 +137,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
                         }}
                         className="w-full text-xs"
                       >
-                                                Use Auto Color
+                        Use Auto Color
                       </Button>
                     </div>
                   </div>,
@@ -214,7 +213,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
               disabled={isLoading}
               className="mr-auto dark:bg-red-700 dark:hover:bg-red-800"
             >
-                            Delete
+              Delete
             </Button>
           )}
           <Button
@@ -222,7 +221,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
             onClick={onClose}
             disabled={isLoading}
           >
-                        Cancel
+            Cancel
           </Button>
           <Button
             onClick={() => void handleSave()}
@@ -237,12 +236,12 @@ export const UnifiedEditModal: React.FC<Props> = ({ isOpen, onClose, type, id })
             <AlertDialogHeader>
               <AlertDialogTitle>Delete Group</AlertDialogTitle>
               <AlertDialogDescription>
-                                Are you sure you want to delete this group? This action cannot be undone.
+                Are you sure you want to delete this group? This action cannot be undone.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogAction variant="destructive" onClick={() => void handleDelete()} disabled={isLoading} className="dark:bg-red-700 dark:hover:bg-red-800">
-                                Delete
+                Delete
               </AlertDialogAction>
               <AlertDialogCancel disabled={isLoading}>Cancel</AlertDialogCancel>
             </AlertDialogFooter>
