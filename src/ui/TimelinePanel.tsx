@@ -194,7 +194,20 @@ const Sparkline = React.memo(
 
       const raw = smoothingIterations > 0 ? smoothPath(event.path, smoothingIterations) : event.path.map(p => p.geo);
       const smoothed = simplifyEpsilon > 0 ? simplifyPath(raw, simplifyEpsilon) : raw;
-      const pointsStr = smoothed.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
+
+      const maxPoints = 30;
+      const sampled = smoothed.length <= maxPoints ? smoothed : (() => {
+        const out: Array<[number, number]> = [];
+        const step = (smoothed.length - 1) / (maxPoints - 1);
+        for (let i = 0; i < maxPoints; i++) {
+          const idx = Math.min(smoothed.length - 1, Math.round(i * step));
+          if (!smoothed[idx]) continue;
+          out.push(smoothed[idx]);
+        }
+        return out;
+      })();
+
+      const pointsStr = sampled.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
 
       return { vbMinX, vbMinY, vbW, vbH, pointsStr, smoothed, flipY };
     }, [event, smoothingIterations, simplifyEpsilon]);
@@ -311,7 +324,6 @@ export const TimelinePanel: React.FC<Props> = ({
         };
       });
   }, [selectedDeviceId, eventsByDevice, cutoff, todayStr, yesterdayStr]);
-
 
   if (selectedDeviceId == null) return null;
 
