@@ -456,6 +456,8 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       geolocateControl: false,
       scaleControl: false,
       fullscreenControl: false,
+      dragRotate: false,
+      boxZoom: false,
     });
 
     mapRef.current = map;
