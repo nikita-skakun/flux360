@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useEffect, useReducer } from "react";
 
 export function humanDurationSince(ts: number, end: number = Date.now()): string {
   const sec = Math.round((end - ts) / 1000);
@@ -18,18 +18,18 @@ function getUpdateInterval(ts: number): number {
   return 86400000;
 }
 
-export function useTimeAgo(ts: number, addSuffix: boolean = true): string {
-  const [, setTick] = useState(0);
-
-  const interval = useMemo(() => getUpdateInterval(ts), [ts]);
+export function useTimeAgo(ts: number, addSuffix: boolean = true, enabled: boolean = true): string {
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
   useEffect(() => {
+    if (!enabled) return;
+
     const id = setInterval(() => {
-      setTick(t => t + 1);
-    }, interval);
+      forceUpdate();
+    }, getUpdateInterval(ts));
 
     return () => clearInterval(id);
-  }, [ts, interval]);
+  }, [ts, enabled]);
 
   return humanDurationSince(ts) + (addSuffix ? " ago" : "");
 }

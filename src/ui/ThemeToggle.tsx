@@ -3,8 +3,12 @@ import { Sun, Moon, Monitor } from "lucide-react";
 import { useStore } from "@/store";
 import React from 'react';
 
+const ICON_SUN = <Sun className="h-4 w-4" />;
+const ICON_MOON = <Moon className="h-4 w-4" />;
+const ICON_MONITOR = <Monitor className="h-4 w-4" />;
+
 type Props = {
-    className?: string;
+  className?: string;
 };
 
 export const ThemeToggle: React.FC<Props> = ({ className }) => {
@@ -13,20 +17,20 @@ export const ThemeToggle: React.FC<Props> = ({ className }) => {
 
   const cycleTheme = () => {
     const nextTheme: 'light' | 'dark' | 'system' =
-            theme === 'system' ? 'dark' :
-              theme === 'dark' ? 'light' : 'dark';
+      theme === 'system' ? 'dark' :
+        theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
   };
 
   const getThemeIcon = () => {
     switch (theme) {
       case 'dark':
-        return <Moon className="h-4 w-4" />;
+        return ICON_MOON;
       case 'light':
-        return <Sun className="h-4 w-4" />;
+        return ICON_SUN;
       case 'system':
       default:
-        return <Monitor className="h-4 w-4" />;
+        return ICON_MONITOR;
     }
   };
 

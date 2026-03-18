@@ -6,6 +6,9 @@ import { ThemeToggle } from "./ThemeToggle";
 import { useStore } from "@/store";
 import React from "react";
 
+const ICON_LOGIN_MARKER = <MapPin className="text-primary-foreground h-8 w-8" />;
+const ICON_LOGIN_SPINNER = <Loader2 className="h-4 w-4 animate-spin" />;
+
 export const LoginPage: React.FC = () => {
   const login = useStore((state) => state.login);
   const isLoggingIn = useStore((state) => state.auth.isLoggingIn);
@@ -31,7 +34,7 @@ export const LoginPage: React.FC = () => {
         <div className="bg-muted/30 backdrop-blur-xl border border-border/50 rounded-2xl p-8 shadow-2xl">
           <div className="flex flex-col items-center gap-4 mb-8">
             <div className="w-16 h-16 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20">
-              <MapPin className="text-primary-foreground h-8 w-8" />
+              {ICON_LOGIN_MARKER}
             </div>
             <div className="text-center">
               <h1 className="text-3xl font-bold tracking-tight text-foreground">Flux360</h1>
@@ -86,7 +89,7 @@ export const LoginPage: React.FC = () => {
               >
                 {isLoggingIn ? (
                   <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {ICON_LOGIN_SPINNER}
                     <span>Signing In...</span>
                   </div>
                 ) : (

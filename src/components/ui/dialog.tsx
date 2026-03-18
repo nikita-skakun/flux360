@@ -2,7 +2,9 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Root, Trigger, Portal, Close, Overlay, Content, Title, Description } from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
-import * as React from "react"
+import React from "react"
+
+const ICON_DIALOG_CLOSE = <XIcon />;
 
 function Dialog({
   ...props
@@ -69,7 +71,7 @@ function DialogContent({
             data-slot="dialog-close"
             className="ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
           >
-            <XIcon />
+            {ICON_DIALOG_CLOSE}
             <span className="sr-only">Close</span>
           </Close>
         )}

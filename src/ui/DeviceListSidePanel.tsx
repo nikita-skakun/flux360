@@ -10,8 +10,20 @@ import { useTimeAgo } from "@/util/time";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import type { AppDevice } from "@/types";
 
-const LastSeenDisplay: React.FC<{ timestamp: number | null }> = ({ timestamp }) => {
-  const timeAgo = timestamp !== null ? useTimeAgo(timestamp) : "Never";
+const ICON_CHEVRON_UP = <ChevronUp className="h-3 w-3 text-muted-foreground" />;
+const ICON_CHEVRON_DOWN = <ChevronDown className="h-3 w-3 text-muted-foreground" />;
+const ICON_ARROW_LEFT = <ArrowLeft className="h-5 w-5" />;
+const ICON_CHEVRON_LEFT = <ChevronLeft className="h-5 w-5" />;
+const ICON_SMARTPHONE = <Smartphone className="h-5 w-5" />;
+const ICON_PLUS = <Plus className="h-4 w-4" />;
+const ICON_MORE_HORIZONTAL = <MoreHorizontal className="h-6 w-6" />;
+const ICON_SETTINGS = <Settings className="h-4 w-4 mr-2 text-muted-foreground" />;
+const ICON_USER_PLUS = <UserPlus className="h-4 w-4 text-muted-foreground" />;
+const ICON_CHEVRON_RIGHT = <ChevronRight className="h-4 w-4 text-muted-foreground" />;
+const ICON_TRASH2 = <Trash2 className="h-4 w-4 mr-2" />;
+
+const LastSeenDisplay: React.FC<{ timestamp: number | null; enabled: boolean }> = ({ timestamp, enabled }) => {
+  const timeAgo = timestamp !== null ? useTimeAgo(timestamp, true, enabled) : "Never";
   return <>{timeAgo}</>;
 };
 
@@ -187,11 +199,7 @@ export const DeviceListSidePanel: React.FC<{
                 </div>
                 {sortedChildren.length > 0 && (
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-background rounded-full border border-border shadow-sm flex items-center justify-center z-10">
-                    {expanded.has(device.id) ? (
-                      <ChevronUp className="h-3 w-3 text-muted-foreground" />
-                    ) : (
-                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                    )}
+                    {expanded.has(device.id) ? ICON_CHEVRON_UP : ICON_CHEVRON_DOWN}
                   </div>
                 )}
               </div>
@@ -205,7 +213,7 @@ export const DeviceListSidePanel: React.FC<{
                     {displayName}
                   </span>
                 </div>
-                <div className="text-xs text-muted-foreground mt-0.5">Last seen: <LastSeenDisplay timestamp={device.lastSeen} /></div>
+                <div className="text-xs text-muted-foreground mt-0.5">Last seen: <LastSeenDisplay timestamp={device.lastSeen} enabled={isOpen} /></div>
               </div>
             </div>
           </li>
@@ -222,7 +230,7 @@ export const DeviceListSidePanel: React.FC<{
         className="fixed top-4 left-4 z-[1002] shadow-md"
         title={mode === "create" ? "Back to list" : (isOpen ? "Close" : "Open")}
       >
-        {mode === "create" ? <ArrowLeft className="h-5 w-5" /> : (isOpen ? <ChevronLeft className="h-5 w-5" /> : <Smartphone className="h-5 w-5" />)}
+        {mode === "create" ? ICON_ARROW_LEFT : (isOpen ? ICON_CHEVRON_LEFT : ICON_SMARTPHONE)}
       </Button>
     );
 
@@ -248,7 +256,7 @@ export const DeviceListSidePanel: React.FC<{
                   className="h-8 w-8 rounded-full"
                   title="Create Group"
                 >
-                  <Plus className="h-4 w-4" />
+                  {ICON_PLUS}
                 </Button>
               </>
             ) : (
@@ -306,7 +314,7 @@ export const DeviceListSidePanel: React.FC<{
                           className="aspect-square h-auto w-auto"
                           type="button"
                         >
-                          <MoreHorizontal className="h-6 w-6" />
+                          {ICON_MORE_HORIZONTAL}
                         </Button>
                       )}
                     </div>
@@ -375,7 +383,7 @@ export const DeviceListSidePanel: React.FC<{
                   setContextMenu(null);
                 }}
               >
-                <Settings className="h-4 w-4 mr-2 text-muted-foreground" />
+                {ICON_SETTINGS}
                 Settings
               </Button>
 
@@ -385,10 +393,10 @@ export const DeviceListSidePanel: React.FC<{
                   className="w-full justify-between px-4 py-2 text-sm"
                 >
                   <div className="flex items-center gap-2">
-                    <UserPlus className="h-4 w-4 text-muted-foreground" />
+                    {ICON_USER_PLUS}
                     Add Device
                   </div>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                  {ICON_CHEVRON_RIGHT}
                 </Button>
 
                 {/* Submenu */}
@@ -440,7 +448,7 @@ export const DeviceListSidePanel: React.FC<{
                   }
                 }}
               >
-                <Trash2 className="h-4 w-4 mr-2" />
+                {ICON_TRASH2}
                 Delete Group
               </Button>
             </div>

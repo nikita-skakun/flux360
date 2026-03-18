@@ -3,6 +3,8 @@ import { LogOut } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import React from "react";
 
+const ICON_LOGOUT = <LogOut className="h-4 w-4" />;
+
 type Props = {
   smoothingIterations: number;
   onSmoothingIterationsChange: (value: number) => void;
@@ -63,7 +65,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               className="h-7 w-7 rounded-full"
               title={"Logout"}
             >
-              <LogOut className="h-4 w-4" />
+              {ICON_LOGOUT}
             </Button>
           </div>
         </div>

@@ -5,6 +5,10 @@ import { useTimeAgo } from "@/util/time";
 import React, { useMemo } from "react";
 import type { AppDevice, DevicePoint } from "@/types";
 
+const ICON_PENCIL = <Pencil className="h-4 w-4" />;
+const ICON_USER_PLUS = <UserPlus className="h-4 w-4" />;
+const ICON_CLOSE = <X className="h-4 w-4" />;
+
 // UI confidence thresholds for display
 const CONFIDENCE_HIGH_THRESHOLD = 0.8;
 const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
@@ -31,7 +35,39 @@ function DeviceOverlayComponent({
   setEditingTarget,
   isOwner,
 }: Props) {
-  const sessionToken = useStore(state => state.settings.sessionToken);
+  const chosenDeviceIdRef = React.useRef<number | null>(null);
+  const groupRef = React.useRef<AppDevice | null>(null);
+
+  const handleClose = React.useCallback(() => setSelectedDeviceId(null), [setSelectedDeviceId]);
+
+  const handleShare = React.useCallback(() => {
+    const deviceId = chosenDeviceIdRef.current;
+    if (deviceId == null) return;
+
+    const username = window.prompt("Enter username to share with:");
+    if (!username) return;
+
+    const sessionToken = useStore.getState().settings.sessionToken;
+    void fetch(`/api/devices/${deviceId}/share`, {
+      method: "POST",
+      body: JSON.stringify({ username }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${sessionToken}`,
+      },
+    }).then((r) => {
+      if (r.ok) window.alert("Shared successfully!");
+      else window.alert("Sharing failed.");
+    });
+  }, []);
+
+  const handleEdit = React.useCallback(() => {
+    const deviceId = chosenDeviceIdRef.current;
+    if (deviceId == null) return;
+
+    const group = groupRef.current;
+    setEditingTarget({ type: group ? "group" : "device", id: deviceId });
+  }, [setEditingTarget]);
 
   // Derive group-related info
   const { group, contributors, mostRecentSourceName } = useMemo(() => {
@@ -55,10 +91,18 @@ function DeviceOverlayComponent({
     return { group: entity, contributors: contribs, mostRecentSourceName: latestName };
   }, [selectedDeviceId, entities]);
 
-  if (selectedDeviceId == null) return null;
-
-  const points = activePointsByDevice[selectedDeviceId] ?? [];
+  const points = selectedDeviceId != null ? activePointsByDevice[selectedDeviceId] ?? [] : [];
   const chosen = points.length > 0 ? points[points.length - 1] : null;
+
+  React.useEffect(() => {
+    groupRef.current = group;
+  }, [group]);
+
+  React.useEffect(() => {
+    chosenDeviceIdRef.current = chosen?.device ?? null;
+  }, [chosen?.device]);
+
+  if (selectedDeviceId == null) return null;
   if (!chosen) return null;
 
   return (
@@ -87,24 +131,9 @@ function DeviceOverlayComponent({
                 aria-label="Share device"
                 title="Share Device"
                 className="h-8 w-8 text-primary"
-                onClick={() => {
-                  const username = window.prompt("Enter username to share with:");
-                  if (username) {
-                    void fetch(`/api/devices/${chosen.device}/share`, {
-                      method: "POST",
-                      body: JSON.stringify({ username }),
-                      headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${sessionToken}`
-                      }
-                    }).then(r => {
-                      if (r.ok) window.alert("Shared successfully!");
-                      else window.alert("Sharing failed.");
-                    });
-                  }
-                }}
+                onClick={handleShare}
               >
-                <UserPlus className="h-4 w-4" />
+                {ICON_USER_PLUS}
               </Button>
               <Button
                 variant="ghost"
@@ -112,9 +141,9 @@ function DeviceOverlayComponent({
                 aria-label="Edit settings"
                 title="Edit Settings"
                 className="h-8 w-8"
-                onClick={() => setEditingTarget({ type: group ? 'group' : 'device', id: chosen.device })}
+                onClick={handleEdit}
               >
-                <Pencil className="h-4 w-4" />
+                {ICON_PENCIL}
               </Button>
             </>
           )}
@@ -124,9 +153,9 @@ function DeviceOverlayComponent({
             aria-label="Deselect device"
             title="Close"
             className="h-8 w-8"
-            onClick={() => setSelectedDeviceId(null)}
+            onClick={handleClose}
           >
-            <X className="h-4 w-4" />
+            {ICON_CLOSE}
           </Button>
         </div>
       </div>

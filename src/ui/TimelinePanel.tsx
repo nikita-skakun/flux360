@@ -1,10 +1,15 @@
-import { humanDurationSince } from '@/util/time';
+import { humanDurationSince, useTimeAgo } from '@/util/time';
 import { List, useDynamicRowHeight } from 'react-window';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
 import { simplifyPath, smoothPath } from '@/util/pathSmoothing';
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { EngineEvent, MotionEvent } from '@/types';
 import type { RowComponentProps } from 'react-window';
+
+const ICON_MAP_PIN = <MapPin className="w-4 h-4 text-blue-500" />;
+const ICON_ACTIVITY = <Activity className="w-4 h-4 text-green-500" />;
+const ICON_CHECK = <Check className="w-3 h-3 text-green-500" />;
+const ICON_COPY = <Copy className="w-3 h-3" />;
 
 export type TimelineEvent = {
   id: string;
@@ -74,9 +79,9 @@ const TimelineEventRow = React.memo(
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5 font-medium text-sm">
               {item.type === 'stationary' ? (
-                <><MapPin className="w-4 h-4 text-blue-500" /> Stationary</>
+                <>{ICON_MAP_PIN} Stationary</>
               ) : (
-                <><Activity className="w-4 h-4 text-green-500" /> Moving</>
+                <>{ICON_ACTIVITY} Moving</>
               )}
             </div>
             <div className="text-xs text-muted-foreground font-medium flex items-center gap-2">
@@ -86,11 +91,7 @@ const TimelineEventRow = React.memo(
                 className="p-1 hover:bg-primary/20 rounded-sm transition-colors"
                 title="Copy event with internal state"
               >
-                {copiedId === ev.id ? (
-                  <Check className="w-3 h-3 text-green-500" />
-                ) : (
-                  <Copy className="w-3 h-3" />
-                )}
+                {copiedId === ev.id ? ICON_CHECK : ICON_COPY}
               </button>
             </div>
           </div>
@@ -135,10 +136,9 @@ type TimelineRowProps = {
 
 type RowProps = RowComponentProps<TimelineRowProps> & {
   dynamicRowHeight: ReturnType<typeof useDynamicRowHeight>;
-  now: number;
 };
 
-const Row = ({ index, style, dynamicRowHeight, now, ...props }: RowProps): React.ReactElement | null => {
+const Row = ({ index, style, dynamicRowHeight, ...props }: RowProps): React.ReactElement | null => {
   const ref = useRef<HTMLDivElement | null>(null);
 
   useLayoutEffect(() => {
@@ -151,7 +151,10 @@ const Row = ({ index, style, dynamicRowHeight, now, ...props }: RowProps): React
 
   const isSelected = props.selectedEventId === ev.id;
   const isCurrent = ev.id.startsWith('draft-');
-  const durationStr = humanDurationSince(ev.item.start, isCurrent ? now : ev.item.end);
+  const draftDuration = useTimeAgo(ev.item.start, false, isCurrent);
+  const durationStr = isCurrent
+    ? draftDuration
+    : useMemo(() => humanDurationSince(ev.item.start, ev.item.end), [ev.item.start, ev.item.end]);
 
   return (
     <div ref={ref} style={style} className="px-1 py-1">
@@ -228,8 +231,9 @@ export const TimelinePanel: React.FC<Props> = ({
   smoothingIterations,
   simplifyEpsilon,
 }) => {
-  const [now, setNow] = React.useState(() => Date.now());
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
+  const [cutoff, setCutoff] = React.useState(() => Date.now() - 48 * 60 * 60 * 1000);
+  const [dayBucket, setDayBucket] = React.useState(() => Math.floor(Date.now() / 86400000));
 
   const handleCopy = useCallback(
     (e: React.MouseEvent, ev: TimelineEvent) => {
@@ -265,17 +269,19 @@ export const TimelinePanel: React.FC<Props> = ({
     [selectedDeviceId],
   );
 
-  const [cutoff, setCutoff] = React.useState(() => Date.now() - 48 * 60 * 60 * 1000);
   const dynamicRowHeight = useDynamicRowHeight({ defaultRowHeight: 96, key: selectedDeviceId ?? 'none' });
 
   React.useEffect(() => {
-    const interval = setInterval(() => setCutoff(Date.now() - 48 * 60 * 60 * 1000), 60000);
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setCutoff(now - 48 * 60 * 60 * 1000);
+      setDayBucket(Math.floor(now / 86400000));
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  const nowDayBucket = useMemo(() => Math.floor(now / 86400000), [now]);
-  const todayStr = useMemo(() => new Date(nowDayBucket * 86400000).toDateString(), [nowDayBucket]);
-  const yesterdayStr = useMemo(() => new Date(nowDayBucket * 86400000 - 86400000).toDateString(), [nowDayBucket]);
+  const todayStr = useMemo(() => new Date(dayBucket * 86400000).toDateString(), [dayBucket]);
+  const yesterdayStr = useMemo(() => new Date(dayBucket * 86400000 - 86400000).toDateString(), [dayBucket]);
 
   const events = useMemo(() => {
     if (selectedDeviceId == null) return [];
@@ -306,14 +312,6 @@ export const TimelinePanel: React.FC<Props> = ({
       });
   }, [selectedDeviceId, eventsByDevice, cutoff, todayStr, yesterdayStr]);
 
-  const hasDraft = useMemo(() => events.some(ev => ev.id.startsWith('draft-')), [events]);
-
-  React.useEffect(() => {
-    if (!hasDraft) return;
-    setNow(Date.now());
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [hasDraft]);
 
   if (selectedDeviceId == null) return null;
 
@@ -337,7 +335,6 @@ export const TimelinePanel: React.FC<Props> = ({
             onCopy: handleCopy,
             smoothingIterations,
             simplifyEpsilon,
-            now,
             dynamicRowHeight,
           }}
           overscanCount={0}

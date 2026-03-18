@@ -7,7 +7,7 @@ import { MapView } from "./ui/MapView";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { TimelinePanel } from "./ui/TimelinePanel";
 import { UnifiedEditModal } from "./ui/UnifiedEditModal";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerConnection } from "./hooks/useServerConnection";
 import { useStore } from "./store";
 import type { MapViewHandle } from "./ui/MapView";
@@ -69,6 +69,7 @@ export function App() {
   const logout = useStore((state) => state.logout);
 
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
+  const closeSelectedTimelineEvent = useCallback(() => setSelectedTimelineEvent(null), [setSelectedTimelineEvent]);
 
   useServerConnection();
 
@@ -112,7 +113,7 @@ export function App() {
       {selectedTimelineEvent && (
         <HistoryObservationBar
           event={selectedTimelineEvent}
-          onClose={() => setSelectedTimelineEvent(null)}
+          onClose={closeSelectedTimelineEvent}
         />
       )}
       <DeviceListSidePanel

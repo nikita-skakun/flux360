@@ -1,7 +1,9 @@
 import { CheckIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Root, Indicator } from "@radix-ui/react-checkbox"
-import * as React from "react"
+import React from "react"
+
+const ICON_CHECK = <CheckIcon className="size-3.5" />;
 
 function Checkbox({
   className,
@@ -20,7 +22,7 @@ function Checkbox({
         data-slot="checkbox-indicator"
         className="grid place-content-center text-current transition-none"
       >
-        <CheckIcon className="size-3.5" />
+        {ICON_CHECK}
       </Indicator>
     </Root>
   )
