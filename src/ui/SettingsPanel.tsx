@@ -28,7 +28,7 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               <input
                 type="range"
                 min={0}
-                max={10}
+                max={5}
                 value={smoothingIterations}
                 onChange={(e) => onSmoothingIterationsChange(Number(e.target.value))}
                 className="h-6 w-24"
@@ -38,17 +38,17 @@ export const SettingsPanel = React.memo(function SettingsPanel({
               </span>
             </label>
             <label className="flex items-center gap-2">
-              <span className="text-xs font-medium">Simplify</span>
+              <span className="text-xs font-medium">Simplify (m)</span>
               <input
                 type="range"
                 min={0}
-                max={50}
+                max={10}
                 value={simplifyEpsilon}
                 onChange={(e) => onSimplifyEpsilonChange(Number(e.target.value))}
                 className="h-6 w-24"
               />
-              <span className="w-6 text-right text-xs font-semibold">
-                {simplifyEpsilon}
+              <span className="w-12 text-right text-xs font-semibold">
+                {simplifyEpsilon}m
               </span>
             </label>
           </div>

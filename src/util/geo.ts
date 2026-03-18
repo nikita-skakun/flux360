@@ -1,4 +1,4 @@
-import { toWebMercator, WORLD_R } from "@/util/webMercator";
+import { WORLD_R } from "@/util/webMercator";
 import type { Vec2 } from "@/types";
 
 export function distance(a: Vec2, b: Vec2): number {
@@ -63,17 +63,15 @@ export function computeBounds(points: Vec2[]): { minX: number; minY: number; max
 }
 
 export function pointLineDistance(p: Vec2, a: Vec2, b: Vec2): number {
-  const pM = toWebMercator(p);
-  const aM = toWebMercator(a);
-  const bM = toWebMercator(b);
-
-  const dx = bM[0] - aM[0];
-  const dy = bM[1] - aM[1];
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
   const l2 = dx * dx + dy * dy;
-  if (l2 === 0) return distance(pM, aM);
+  if (l2 === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
 
-  const t = ((pM[0] - aM[0]) * dx + (pM[1] - aM[1]) * dy) / l2;
+  const t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2;
   const tClamped = Math.max(0, Math.min(1, t));
-  const proj: Vec2 = [aM[0] + tClamped * dx, aM[1] + tClamped * dy];
-  return distance(pM, proj);
+  const projX = a[0] + tClamped * dx;
+  const projY = a[1] + tClamped * dy;
+
+  return Math.hypot(p[0] - projX, p[1] - projY);
 }
