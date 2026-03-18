@@ -36,9 +36,8 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
 
   const isDraft = event.id.startsWith('draft-');
   const draftDurationStr = useTimeAgo(startTime, false, isDraft);
-  const durationStr = isDraft
-    ? draftDurationStr
-    : useMemo(() => humanDurationSince(startTime, item.end), [startTime, item.end]);
+  const nonDraftDurationStr = useMemo(() => humanDurationSince(startTime, item.end), [startTime, item.end]);
+  const durationStr = isDraft ? draftDurationStr : nonDraftDurationStr;
 
   if (item.type === 'stationary') {
     detailsNode = (
