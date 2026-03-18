@@ -33,6 +33,9 @@ type Props = {
   simplifyEpsilon: number;
 };
 
+const STYLE_LIGHT = MapStyle.DATAVIZ;
+const STYLE_DARK = "019d01fb-0333-7f54-9107-395c4e551160";
+
 const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   activePoints,
   entities,
@@ -451,7 +454,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       container,
       center: initialCenter,
       zoom: initialZoom,
-      style: darkMode ? MapStyle.DATAVIZ.DARK : MapStyle.DATAVIZ,
+      style: darkMode ? STYLE_DARK : STYLE_LIGHT,
       navigationControl: false,
       geolocateControl: false,
       scaleControl: false,
@@ -473,7 +476,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !maptilerApiKey) return;
-    map.setStyle(darkMode ? MapStyle.DATAVIZ.DARK : MapStyle.DATAVIZ);
+    map.setStyle(darkMode ? STYLE_DARK : STYLE_LIGHT);
   }, [maptilerApiKey, darkMode]);
 
   // Ref to hold updateLayers to avoid stale closure in event listeners
