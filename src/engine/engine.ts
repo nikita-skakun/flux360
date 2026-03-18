@@ -54,7 +54,7 @@ export class Engine {
 
     // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
     const distFromStart = haversineDistance(fromWebMercator(p.mean), fromWebMercator(draft.stationaryStartAnchor));
-    const isFar = distFromStart > HARD_BREAKOUT_DISTANCE;
+    const isFar = (distFromStart - p.accuracy) > HARD_BREAKOUT_DISTANCE;
 
     if (m2 < profile.stationaryMahalanobisThreshold && !isFar) {
       // It's stationary
@@ -75,7 +75,7 @@ export class Engine {
         });
 
         const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
-        const anyPendingFar = draft.pending.some(pt => haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) > HARD_BREAKOUT_DISTANCE);
+        const allPendingFar = draft.pending.every(pt => (haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) - pt.accuracy) > HARD_BREAKOUT_DISTANCE);
 
         // In addition to coherence, the raw speed of the draft must be plausible.
         const firstPending = draft.pending[0];
@@ -94,7 +94,7 @@ export class Engine {
           }
         }
 
-        if (firstPending && (anyPendingFar || (isCoherent && isFastEnough))) {
+        if (firstPending && (allPendingFar || (isCoherent && isFastEnough))) {
           // Transition to Motion
           const startTimestamp = firstPending.timestamp;
           this.draft = {
