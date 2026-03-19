@@ -78,7 +78,7 @@ export const DeviceListSidePanel: React.FC<{
     };
 
     useEffect(() => {
-      onCreateGroupSelectionChange?.(selectedCreateDevices);
+      onCreateGroupSelectionChange(selectedCreateDevices);
     }, [selectedCreateDevices, onCreateGroupSelectionChange]);
 
     useEffect(() => {
@@ -110,10 +110,10 @@ export const DeviceListSidePanel: React.FC<{
       };
     }, [contextMenu]);
 
-    const now = Date.now();
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-    const isRecent = (d: AppDevice) => d.lastSeen !== null && now - d.lastSeen < THIRTY_DAYS_MS;
+    const isRecent = (d: AppDevice) => d.lastSeen !== null && d.lastSeen > Date.now() - THIRTY_DAYS_MS;
     const sortDevices = (list: AppDevice[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
+    const selectedCreateDeviceSet = useMemo(() => new Set(selectedCreateDevices), [selectedCreateDevices]);
 
     const topLevel = useMemo(() => {
       if (!isOpen) return [];
@@ -157,6 +157,7 @@ export const DeviceListSidePanel: React.FC<{
     };
 
     const renderItem = (device: AppDevice, depth: number = 0, isLast = false, isFirst = false) => {
+      const isGroup = device.memberDeviceIds !== null;
       const [r, g, b] = colorForDevice(device.id);
       const defaultColor = `rgb(${r}, ${g}, ${b})`;
       const colorStr = device.color ?? defaultColor;
@@ -168,9 +169,9 @@ export const DeviceListSidePanel: React.FC<{
       const sortedChildren = sortDevices(children);
 
       return (
-        <React.Fragment key={`${device.memberDeviceIds !== null ? "g" : "d"}-${device.id}`}>
+        <React.Fragment key={`${isGroup ? "g" : "d"}-${device.id}`}>
           <li onContextMenu={(e) => {
-            if (device.memberDeviceIds !== null && device.isOwner) {
+            if (isGroup && device.isOwner) {
               handleContextMenu(e, device.id);
             }
           }}>
@@ -189,8 +190,8 @@ export const DeviceListSidePanel: React.FC<{
                 </div>
               )}
 
-              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => device.memberDeviceIds !== null && toggle(e, device.id)}>
-                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${device.memberDeviceIds !== null ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
+              <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => isGroup && toggle(e, device.id)}>
+                <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
                   {device.emoji?.length > 1 ? (
                     <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.emoji}</span>
                   ) : (
@@ -327,21 +328,24 @@ export const DeviceListSidePanel: React.FC<{
                     {allDevices.length === 0 ? (
                       <div className="p-3 text-center text-muted-foreground text-sm">No devices available</div>
                     ) : (
-                      allDevices.map(d => (
-                        <div
-                          key={d.id}
-                          className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors"
-                          onClick={() => setDeviceSelection(d.id, !selectedCreateDevices.includes(d.id))}
-                        >
-                          <Checkbox
-                            checked={selectedCreateDevices.includes(d.id)}
-                            onCheckedChange={(checked) => setDeviceSelection(d.id, Boolean(checked))}
-                          />
-                          <Label className="text-sm font-medium text-foreground cursor-pointer flex-1">
-                            {d.name}
-                          </Label>
-                        </div>
-                      ))
+                      allDevices.map(d => {
+                        const isSelected = selectedCreateDeviceSet.has(d.id);
+                        return (
+                          <div
+                            key={d.id}
+                            className="flex items-center gap-3 p-3 hover:bg-muted/30 cursor-pointer transition-colors"
+                            onClick={() => setDeviceSelection(d.id, !isSelected)}
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => setDeviceSelection(d.id, Boolean(checked))}
+                            />
+                            <Label className="text-sm font-medium text-foreground cursor-pointer flex-1">
+                              {d.name}
+                            </Label>
+                          </div>
+                        );
+                      })
                     )}
                   </div>
                 </div>
