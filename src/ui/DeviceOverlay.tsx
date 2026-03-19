@@ -35,20 +35,20 @@ function DeviceOverlayComponent({
   setEditingTarget,
   isOwner,
 }: Props) {
-  const chosenDeviceIdRef = React.useRef<number | null>(null);
-  const groupRef = React.useRef<AppDevice | null>(null);
-
   const handleClose = React.useCallback(() => setSelectedDeviceId(null), [setSelectedDeviceId]);
 
+  const points = selectedDeviceId != null ? activePointsByDevice[selectedDeviceId] ?? [] : [];
+  const chosen = points.length > 0 ? points[points.length - 1] : null;
+  const chosenDeviceId = chosen?.device ?? null;
+
   const handleShare = React.useCallback(() => {
-    const deviceId = chosenDeviceIdRef.current;
-    if (deviceId == null) return;
+    if (chosenDeviceId == null) return;
 
     const username = window.prompt("Enter username to share with:");
     if (!username) return;
 
     const sessionToken = useStore.getState().settings.sessionToken;
-    void fetch(`/api/devices/${deviceId}/share`, {
+    void fetch(`/api/devices/${chosenDeviceId}/share`, {
       method: "POST",
       body: JSON.stringify({ username }),
       headers: {
@@ -59,15 +59,7 @@ function DeviceOverlayComponent({
       if (r.ok) window.alert("Shared successfully!");
       else window.alert("Sharing failed.");
     });
-  }, []);
-
-  const handleEdit = React.useCallback(() => {
-    const deviceId = chosenDeviceIdRef.current;
-    if (deviceId == null) return;
-
-    const group = groupRef.current;
-    setEditingTarget({ type: group ? "group" : "device", id: deviceId });
-  }, [setEditingTarget]);
+  }, [chosenDeviceId]);
 
   // Derive group-related info
   const { group, contributors, mostRecentSourceName } = useMemo(() => {
@@ -91,16 +83,10 @@ function DeviceOverlayComponent({
     return { group: entity, contributors: contribs, mostRecentSourceName: latestName };
   }, [selectedDeviceId, entities]);
 
-  const points = selectedDeviceId != null ? activePointsByDevice[selectedDeviceId] ?? [] : [];
-  const chosen = points.length > 0 ? points[points.length - 1] : null;
-
-  React.useEffect(() => {
-    groupRef.current = group;
-  }, [group]);
-
-  React.useEffect(() => {
-    chosenDeviceIdRef.current = chosen?.device ?? null;
-  }, [chosen?.device]);
+  const handleEdit = React.useCallback(() => {
+    if (chosenDeviceId == null) return;
+    setEditingTarget({ type: group ? "group" : "device", id: chosenDeviceId });
+  }, [chosenDeviceId, group, setEditingTarget]);
 
   if (selectedDeviceId == null) return null;
   if (!chosen) return null;
