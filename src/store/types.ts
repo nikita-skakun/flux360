@@ -16,6 +16,7 @@ export type StoreState = {
     isAuthenticated: boolean;
     isLoggingIn: boolean;
     loginError: string | null;
+    ownedDeviceIds: number[];
   };
 
   // UI State slice
@@ -30,9 +31,6 @@ export type StoreState = {
 
   // Engine events (Stationary/Motion)
   eventsByDevice: Record<number, EngineEvent[]>;
-
-  // Pre-calculated metadata from server
-  metadata: InitialStatePayload['metadata'];
 };
 
 export type StoreActions = {
@@ -46,6 +44,7 @@ export type StoreActions = {
 
   // Data Handlers from WebSocket
   setInitialState: (payload: InitialStatePayload) => void;
+  setOwnedDeviceIds: (ids: number[]) => void;
   updatePositions: (payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
   updateConfig: (payload: { devices: Record<number, AppDevice> | null; groups: AppDevice[] | null }) => void;
 

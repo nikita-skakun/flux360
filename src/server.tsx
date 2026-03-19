@@ -20,7 +20,6 @@ interface WSData {
   username: string | null;
   traccarToken: string | null;
   allowedDeviceIds: Set<number>;
-  ownedDeviceIds: Set<number>;
 }
 
 // Handle CLI flags
@@ -347,7 +346,7 @@ if (isProduction) {
       "/api/ws": (request: Request, server: Server<WSData>) => {
         vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
         const upgraded = server.upgrade(request, {
-          data: { username: null, traccarToken: null, allowedDeviceIds: new Set(), ownedDeviceIds: new Set() }
+          data: { username: null, traccarToken: null, allowedDeviceIds: new Set() }
         });
         vlog(`[WS] Upgrade result: ${upgraded}`);
         if (upgraded) return undefined;
@@ -400,7 +399,6 @@ if (isProduction) {
 
             ws.data.username = username;
             ws.data.traccarToken = traccarToken;
-            ws.data.ownedDeviceIds = ownedDeviceIds;
             ws.data.allowedDeviceIds = allowedDeviceIds;
 
             vlog(`[WS] Authentication successful for ${username}. Devices: ${allowedDeviceIds.size}`);
@@ -409,7 +407,7 @@ if (isProduction) {
               ws.subscribe(`device-${id}`);
             }
 
-            // First, get metadata to know which IDs are root entities
+            // Get entities and determine root IDs for filtering snapshots
             const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
             const ownedIds = Array.from(ownedDeviceIds);
             const entitiesWithOwner = Object.fromEntries(
@@ -428,15 +426,19 @@ if (isProduction) {
               { applySnapshotCutoff: true, snapshotCutoff: cutoff, entities: entitiesWithOwner }
             );
 
-            // For entities, we still need to send all entities (devices and groups) for the sidebar
-            // and include ownership flags resolved for this authenticated user.
+            // Send auth success with ownedDeviceIds (separate message)
+            ws.send(JSON.stringify({
+              type: "auth_success",
+              payload: { ownedDeviceIds: ownedIds }
+            }));
+
+            // Send initial state with entities and activity data (ownership in entities, no separate metadata)
             const payloadStr = JSON.stringify({
               type: "initial_state",
               payload: {
                 entities: entitiesWithOwner,
                 activePointsByDevice: filteredPoints,
                 eventsByDevice: filteredEvents,
-                metadata: { rootIds, ownedDeviceIds: ownedIds },
                 maptilerApiKey: config.maptilerApiKey,
               }
             });

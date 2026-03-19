@@ -16,6 +16,7 @@ export function useServerConnection() {
   const {
     auth,
     setInitialState,
+    setOwnedDeviceIds,
     updatePositions,
     updateConfig,
   } = useStore();
@@ -87,6 +88,9 @@ export function useServerConnection() {
           }
 
           switch (message.type) {
+            case 'auth_success':
+              setOwnedDeviceIds(message.payload.ownedDeviceIds);
+              break;
             case 'initial_state':
               setInitialState(message.payload);
               break;
@@ -143,7 +147,7 @@ export function useServerConnection() {
         wsRef.current = null;
       }
     };
-  }, [auth.isAuthenticated, setInitialState, updatePositions, updateConfig]);
+  }, [auth.isAuthenticated, setInitialState, setOwnedDeviceIds, updatePositions, updateConfig]);
 
   return { status };
 }

@@ -18,6 +18,7 @@ const initialState: StoreState = {
     isAuthenticated: false,
     isLoggingIn: false,
     loginError: null,
+    ownedDeviceIds: [],
   },
   ui: {
     selectedDeviceId: null,
@@ -26,10 +27,6 @@ const initialState: StoreState = {
   },
   activePointsByDevice: {},
   eventsByDevice: {},
-  metadata: {
-    rootIds: [],
-    ownedDeviceIds: [],
-  },
 };
 
 export const useStore = create<Store>()(
@@ -44,8 +41,13 @@ export const useStore = create<Store>()(
           entities: payload.entities,
           activePointsByDevice: payload.activePointsByDevice,
           eventsByDevice: payload.eventsByDevice,
-          metadata: payload.metadata,
           settings: { ...state.settings, maptilerApiKey: payload.maptilerApiKey }
+        }));
+      },
+
+      setOwnedDeviceIds: (ids) => {
+        set((state) => ({
+          auth: { ...state.auth, ownedDeviceIds: ids }
         }));
       },
 
@@ -79,7 +81,7 @@ export const useStore = create<Store>()(
       updateConfig: (payload) => {
         set(state => {
           const newEntities = { ...state.entities };
-          const ownedIdSet = new Set(state.metadata.ownedDeviceIds);
+          const ownedIdSet = new Set(state.auth.ownedDeviceIds);
           if (payload.devices !== null) {
             for (const [id, newDev] of numericEntries(payload.devices)) {
               newEntities[id] = {
@@ -358,6 +360,7 @@ export const useStore = create<Store>()(
               sessionToken: token,
             },
             auth: {
+              ...state.auth,
               isAuthenticated: true,
               isLoggingIn: false,
               loginError: null,
@@ -378,8 +381,10 @@ export const useStore = create<Store>()(
       logout: () => {
         set(state => ({
           auth: {
-            ...state.auth,
             isAuthenticated: false,
+            isLoggingIn: false,
+            loginError: null,
+            ownedDeviceIds: [],
           },
           settings: {
             ...state.settings,
@@ -420,7 +425,7 @@ export const useStore = create<Store>()(
       name: 'flux360-store',
       partialize: (state) => ({
         settings: state.settings,
-        auth: { isAuthenticated: state.auth.isAuthenticated, isLoggingIn: false, loginError: null }
+        auth: { isAuthenticated: state.auth.isAuthenticated, isLoggingIn: false, loginError: null, ownedDeviceIds: [] }
       }),
     }
   )

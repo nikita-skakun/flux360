@@ -146,19 +146,22 @@ export type EventsByDevice = z.infer<typeof EventsByDeviceSchema>;
 
 // --- WebSocket Protocol ---
 
+// Auth payload sent once at connection authentication
+export const AuthPayloadSchema = z.object({
+  ownedDeviceIds: z.array(z.number()),
+});
+export type AuthPayload = z.infer<typeof AuthPayloadSchema>;
+
 export const InitialStatePayloadSchema = z.object({
   entities: EntitiesSchema,
   activePointsByDevice: ActivePointsByDeviceSchema,
   eventsByDevice: EventsByDeviceSchema,
   maptilerApiKey: z.string(),
-  metadata: z.object({
-    rootIds: z.array(z.number()),
-    ownedDeviceIds: z.array(z.number()),
-  }),
 });
 export type InitialStatePayload = z.infer<typeof InitialStatePayloadSchema>;
 
 export const ServerMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("auth_success"), payload: AuthPayloadSchema, requestId: z.never().optional() }),
   z.object({ type: z.literal("initial_state"), payload: InitialStatePayloadSchema, requestId: z.never().optional() }),
   z.object({
     type: z.literal("positions_update"),

@@ -19,8 +19,6 @@ export function App() {
   const addDeviceToGroup = useStore(state => state.addDeviceToGroup);
 
   const entities = useStore(state => state.entities);
-  const metadata = useStore(state => state.metadata);
-
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const theme = useStore(state => state.settings.theme);
 
@@ -90,6 +88,15 @@ export function App() {
       }));
   }, [entities]);
 
+  const rootIds = useMemo(() => {
+    const memberIds = new Set<number>();
+    for (const entity of Object.values(entities)) {
+      if (entity.memberDeviceIds)
+        entity.memberDeviceIds.forEach(id => memberIds.add(id));
+    }
+    return Object.keys(entities).map(Number).filter(id => !memberIds.has(id));
+  }, [entities]);
+
   if (!isAuthenticated) {
     return <LoginPage />;
   }
@@ -104,7 +111,7 @@ export function App() {
       )}
       <DeviceListSidePanel
         entities={entities}
-        rootIds={metadata.rootIds}
+        rootIds={rootIds}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={(id) => {
           if (typeof id === "number") {
