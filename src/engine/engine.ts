@@ -5,6 +5,9 @@ import { vlog } from "@/util/logger";
 import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
 import type { MotionProfileConfig } from "./motionDetector";
 
+const MIN_CLUSTER_VARIANCE = 2.0;
+const MAX_CLUSTER_VARIANCE = 400.0;
+
 export class Engine {
   draft: EngineDraft | null = null;
   closed: EngineEvent[] = [];
@@ -279,9 +282,7 @@ export class Engine {
     const variance = sumDistSq / points.length;
 
     // Variance cap to prevent "mega-anchors" that swallow large jumps
-    const MIN_VARIANCE = 2.0;
-    const MAX_VARIANCE = 400.0;
-    return { mean, variance: Math.max(MIN_VARIANCE, Math.min(MAX_VARIANCE, variance)) };
+    return { mean, variance: Math.max(MIN_CLUSTER_VARIANCE, Math.min(MAX_CLUSTER_VARIANCE, variance)) };
   }
 
   private computeMahalanobis2(pos: Vec2, mean: Vec2, clusterVariance: number, pointAccuracy: number): number {
@@ -350,9 +351,28 @@ export class Engine {
       if (
         current?.type === 'motion' &&
         next?.type === 'stationary' &&
-        nextNext?.type === 'motion' &&
-        (next.end - next.start) < profile.maxMergeGapDuration
+        nextNext?.type === 'motion'
       ) {
+        const gapDuration = next.end - next.start;
+        const shortGap = gapDuration < profile.maxMergeGapDuration;
+
+        const bridgeDistance = haversineDistance(
+          fromWebMercator(current.endAnchor),
+          fromWebMercator(nextNext.startAnchor)
+        );
+
+        // If the stationary variance is saturated and both motions bridge the same anchor,
+        // treat this stop as low-confidence noise and allow a wider merge window.
+        const uncertainStationaryGap =
+          next.variance >= (MAX_CLUSTER_VARIANCE * 0.98) &&
+          bridgeDistance <= profile.maxStationaryRadius &&
+          gapDuration < (profile.maxMergeGapDuration * 3);
+
+        if (!(shortGap || uncertainStationaryGap)) {
+          i++;
+          continue;
+        }
+
         const mergedPath = [...current.path, ...nextNext.path];
         const merged: MotionEvent = {
           type: 'motion',
