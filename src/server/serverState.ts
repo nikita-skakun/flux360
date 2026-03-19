@@ -149,7 +149,6 @@ export class ServerState {
           list.push(p);
         }
       }
-      this.handlePositions([]);
     }
 
     vlog(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
@@ -170,14 +169,18 @@ export class ServerState {
     this.positionsAll.push(...pts);
     this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
 
+    const touchedIds = new Set<number>();
     for (const p of pts) {
       const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
       for (const id of ids) {
         let list = this.allPosById[id];
         if (!list) this.allPosById[id] = list = [];
         list.push(p);
-        list.sort((a, b) => a.timestamp - b.timestamp);
+        touchedIds.add(id);
       }
+    }
+    for (const id of touchedIds) {
+      this.allPosById[id]?.sort((a, b) => a.timestamp - b.timestamp);
     }
 
     // 3. Prune old data
@@ -228,8 +231,9 @@ export class ServerState {
       const engine = this.engines[id];
       const lastTs = engine?.lastTimestamp ?? 0;
       const history = this.allPosById[id] ?? [];
+      const batchKeys = new Set(batch.map(dedupeKey));
 
-      const trailing = history.filter(p => p.timestamp > lastTs && !batch.some(bp => dedupeKey(bp) === dedupeKey(p)));
+      const trailing = history.filter(p => p.timestamp > lastTs && !batchKeys.has(dedupeKey(p)));
       if (trailing.length) {
         const combined = [...batch, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
         posById[id] = combined;
