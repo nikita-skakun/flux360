@@ -38,4 +38,4 @@ dev-data
 
 # config
 config.json
-flux360.sqlite
+flux360.sqlite*

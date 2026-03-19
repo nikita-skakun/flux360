@@ -1,7 +1,6 @@
 import { humanDurationSince, useTimeAgo } from '@/util/time';
 import { List, useDynamicRowHeight } from 'react-window';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
-import { simplifyPath, smoothPath } from '@/util/pathSmoothing';
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { EngineEvent, MotionEvent } from '@/types';
 import type { RowComponentProps } from 'react-window';
@@ -16,13 +15,16 @@ export type TimelineEvent = {
   item: EngineEvent;
 };
 
+type TimelineRowEvent = TimelineEvent & {
+  isNewDay: boolean;
+  dayLabel: string;
+};
+
 type Props = {
   selectedDeviceId: number | null;
+  selectedEventId: string | null;
   eventsByDevice: Record<number, EngineEvent[]>;
   onSelectEvent: (event: TimelineEvent) => void;
-  selectedEventId: string | null;
-  smoothingIterations: number;
-  simplifyEpsilon: number;
 };
 
 const TimelineEventRow = React.memo(
@@ -33,24 +35,25 @@ const TimelineEventRow = React.memo(
     copiedId,
     onSelectEvent,
     onCopy,
-    smoothingIterations,
-    simplifyEpsilon,
   }: {
-    ev: {
-      id: string;
-      item: EngineEvent;
-      isNewDay: boolean;
-      dayLabel: string;
-    };
+    ev: TimelineRowEvent;
     isSelected: boolean;
     durationStr: string;
     copiedId: string | null;
     onSelectEvent: (event: TimelineEvent) => void;
     onCopy: (e: React.MouseEvent, ev: TimelineEvent) => void;
-    smoothingIterations: number;
-    simplifyEpsilon: number;
   }) => {
     const { item, isNewDay, dayLabel, id } = ev;
+    const isMotion = item.type === 'motion';
+    const isDraft = id.startsWith('draft-');
+    const startTime = new Date(item.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const endTime = isDraft
+      ? 'Present'
+      : new Date(item.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const rowClass = `flex flex-col p-2 rounded-md border transition-all cursor-pointer ${isSelected
+      ? 'bg-primary/2 border-primary shadow-sm'
+      : 'bg-background/50 border-border/50 hover:bg-background/80 hover:border-border'
+      }`;
 
     const handleSelect = useCallback(() => onSelectEvent({ id, item }), [id, item, onSelectEvent]);
     const handleCopyClick = useCallback(
@@ -71,10 +74,7 @@ const TimelineEventRow = React.memo(
         )}
         <div
           onClick={handleSelect}
-          className={`flex flex-col p-2 rounded-md border transition-all cursor-pointer ${isSelected
-            ? 'bg-primary/2 border-primary shadow-sm'
-            : 'bg-background/50 border-border/50 hover:bg-background/80 hover:border-border'
-            }`}
+          className={rowClass}
         >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5 font-medium text-sm">
@@ -97,14 +97,14 @@ const TimelineEventRow = React.memo(
           </div>
 
           <div className="text-xs text-muted-foreground flex justify-between items-center">
-            <span>{new Date(item.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - {ev.id.startsWith('draft-') ? 'Present' : new Date(item.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-            {item.type === 'motion' && (
+            <span>{startTime} - {endTime}</span>
+            {isMotion && (
               <span className="font-medium text-foreground/80">{Math.round(item.distance)}m</span>
             )}
           </div>
 
-          {item.type === 'motion' && (
-            <Sparkline event={item} smoothingIterations={smoothingIterations} simplifyEpsilon={simplifyEpsilon} />
+          {isMotion && (
+            <Sparkline event={item} />
           )}
         </div>
       </>
@@ -114,24 +114,15 @@ const TimelineEventRow = React.memo(
     prev.ev === next.ev &&
     prev.isSelected === next.isSelected &&
     prev.durationStr === next.durationStr &&
-    prev.copiedId === next.copiedId &&
-    prev.smoothingIterations === next.smoothingIterations &&
-    prev.simplifyEpsilon === next.simplifyEpsilon,
+    prev.copiedId === next.copiedId,
 );
 
 type TimelineRowProps = {
-  events: Array<{
-    id: string;
-    item: EngineEvent;
-    isNewDay: boolean;
-    dayLabel: string;
-  }>;
+  events: TimelineRowEvent[];
   selectedEventId: string | null;
   copiedId: string | null;
   onSelectEvent: (event: TimelineEvent) => void;
   onCopy: (e: React.MouseEvent, ev: TimelineEvent) => void;
-  smoothingIterations: number;
-  simplifyEpsilon: number;
 };
 
 type RowProps = RowComponentProps<TimelineRowProps> & {
@@ -152,9 +143,7 @@ const Row = ({ index, style, dynamicRowHeight, ...props }: RowProps): React.Reac
   const isSelected = props.selectedEventId === ev.id;
   const isCurrent = ev.id.startsWith('draft-');
   const draftDuration = useTimeAgo(ev.item.start, false, isCurrent);
-  const durationStr = isCurrent
-    ? draftDuration
-    : useMemo(() => humanDurationSince(ev.item.start, ev.item.end), [ev.item.start, ev.item.end]);
+  const durationStr = isCurrent ? draftDuration : humanDurationSince(ev.item.start, ev.item.end);
 
   return (
     <div ref={ref} style={style} className="px-1 py-1">
@@ -165,15 +154,13 @@ const Row = ({ index, style, dynamicRowHeight, ...props }: RowProps): React.Reac
         copiedId={props.copiedId}
         onSelectEvent={props.onSelectEvent}
         onCopy={props.onCopy}
-        smoothingIterations={props.smoothingIterations}
-        simplifyEpsilon={props.simplifyEpsilon}
       />
     </div>
   );
 };
 
 const Sparkline = React.memo(
-  ({ event, smoothingIterations, simplifyEpsilon }: { event: MotionEvent; smoothingIterations: number; simplifyEpsilon: number }) => {
+  ({ event }: { event: MotionEvent }) => {
     if (event.path.length < 2) return null;
 
     const data = useMemo(() => {
@@ -192,27 +179,28 @@ const Sparkline = React.memo(
 
       const flipY = (y: number) => bounds.minY + bounds.maxY - y;
 
-      const raw = smoothingIterations > 0 ? smoothPath(event.path, smoothingIterations) : event.path.map(p => p.geo);
-      const smoothed = simplifyEpsilon > 0 ? simplifyPath(raw, simplifyEpsilon) : raw;
+      const raw = event.path.map(p => p.geo);
+      const first = raw[0]!;
+      const last = raw[raw.length - 1]!;
 
       const maxPoints = 30;
-      const sampled = smoothed.length <= maxPoints ? smoothed : (() => {
+      const sampled = raw.length <= maxPoints ? raw : (() => {
         const out: Array<[number, number]> = [];
-        const step = (smoothed.length - 1) / (maxPoints - 1);
+        const step = (raw.length - 1) / (maxPoints - 1);
         for (let i = 0; i < maxPoints; i++) {
-          const idx = Math.min(smoothed.length - 1, Math.round(i * step));
-          if (!smoothed[idx]) continue;
-          out.push(smoothed[idx]);
+          const idx = Math.min(raw.length - 1, Math.round(i * step));
+          if (!raw[idx]) continue;
+          out.push(raw[idx]);
         }
         return out;
       })();
 
       const pointsStr = sampled.map(p => `${p[0]},${flipY(p[1])}`).join(' ');
 
-      return { vbMinX, vbMinY, vbW, vbH, pointsStr, smoothed, flipY };
-    }, [event, smoothingIterations, simplifyEpsilon]);
+      return { vbMinX, vbMinY, vbW, vbH, pointsStr, first, last, flipY };
+    }, [event]);
 
-    const { vbMinX, vbMinY, vbW, vbH, pointsStr, smoothed, flipY } = data;
+    const { vbMinX, vbMinY, vbW, vbH, pointsStr, first, last, flipY } = data;
 
     return (
       <svg
@@ -228,12 +216,12 @@ const Sparkline = React.memo(
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <circle cx={smoothed[0]?.[0] ?? 0} cy={flipY(smoothed[0]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
-        <circle cx={smoothed[smoothed.length - 1]?.[0] ?? 0} cy={flipY(smoothed[smoothed.length - 1]?.[1] ?? 0)} r={vbW * 0.08} fill="currentColor" />
+        <circle cx={first[0]} cy={flipY(first[1])} r={vbW * 0.08} fill="currentColor" opacity={0.6} />
+        <circle cx={last[0]} cy={flipY(last[1])} r={vbW * 0.08} fill="currentColor" />
       </svg>
     );
   },
-  (prev, next) => prev.event === next.event && prev.smoothingIterations === next.smoothingIterations && prev.simplifyEpsilon === next.simplifyEpsilon,
+  (prev, next) => prev.event === next.event,
 );
 
 export const TimelinePanel: React.FC<Props> = ({
@@ -241,8 +229,6 @@ export const TimelinePanel: React.FC<Props> = ({
   eventsByDevice,
   onSelectEvent,
   selectedEventId,
-  smoothingIterations,
-  simplifyEpsilon,
 }) => {
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [cutoff, setCutoff] = React.useState(() => Date.now() - 48 * 60 * 60 * 1000);
@@ -345,8 +331,6 @@ export const TimelinePanel: React.FC<Props> = ({
             copiedId,
             onSelectEvent,
             onCopy: handleCopy,
-            smoothingIterations,
-            simplifyEpsilon,
             dynamicRowHeight,
           }}
           overscanCount={0}

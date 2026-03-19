@@ -190,8 +190,6 @@ export function App() {
                 }
               }}
               selectedEventId={selectedTimelineEvent?.id ?? null}
-              smoothingIterations={smoothingIterations}
-              simplifyEpsilon={simplifyEpsilon}
             />
           </div>
         }
