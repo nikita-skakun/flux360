@@ -196,21 +196,17 @@ export class ServerState {
 
     for (const [id, list] of numericEntries(this.allPosById)) {
       const split = list.findIndex(p => p.timestamp > cutoff);
-      if (split === -1) {
-        delete this.allPosById[id];
-      } else if (split > 0) {
-        this.allPosById[id] = list.slice(split);
-      }
+      if (split === -1) delete this.allPosById[id];
+      else if (split > 0) this.allPosById[id] = list.slice(split);
     }
 
-    if (Math.random() < 0.05) {
-      db.run('DELETE FROM position_events WHERE timestamp < ?', [cutoff]);
-    }
+    if (Math.random() < 0.05) db.run('DELETE FROM position_events WHERE timestamp < ?', [cutoff]);
 
     // 4. Compute Engine State
-    const profiles: Record<number, MotionProfileName> = Object.fromEntries(
-      Array.from(numericEntries(this.devices), ([id, d]) => [id, d.effectiveMotionProfile] as const)
-    );
+    const profiles: Record<number, MotionProfileName> = {};
+    for (const [id, d] of numericEntries(this.devices)) {
+      profiles[id] = d.effectiveMotionProfile;
+    }
 
     const posById: Record<number, NormalizedPosition[]> = {};
     for (const p of pts) {
@@ -296,21 +292,19 @@ export class ServerState {
     const cpToDb: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
 
     for (const [id, engine] of numericEntries(this.engines)) {
-      if (!engine) continue;
-      if (engine.lastTimestamp) {
-        engine.pruneHistory(cpCutoff);
-        const checkpoints = this.engineCheckpoints[id] ?? [];
-        const lastCp = checkpoints[checkpoints.length - 1];
-        if (rawByDevice[id]?.length && (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS)) {
-          const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
-          checkpoints.push(cp);
-          this.engineCheckpoints[id] = checkpoints;
-          cpToDb.push({ id, cp });
+      if (!engine.lastTimestamp) continue;
+      engine.pruneHistory(cpCutoff);
+      const checkpoints = this.engineCheckpoints[id] ?? [];
+      const lastCp = checkpoints[checkpoints.length - 1];
+      if (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS) {
+        const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
+        checkpoints.push(cp);
+        this.engineCheckpoints[id] = checkpoints;
+        cpToDb.push({ id, cp });
 
-          if (checkpoints.length > MAX_CHECKPOINTS) {
-            const oldest = checkpoints.shift();
-            if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [id, oldest.timestamp]);
-          }
+        if (checkpoints.length > MAX_CHECKPOINTS) {
+          const oldest = checkpoints.shift();
+          if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [id, oldest.timestamp]);
         }
       }
     }
