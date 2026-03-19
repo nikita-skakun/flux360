@@ -366,7 +366,7 @@ if (isProduction) {
 
             const session = sessionStore.getSession(data.token);
             if (!session) {
-              ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
+              ws.send(JSON.stringify({ type: "error", message: "Session expired", requestId: null }));
               ws.close(1008, "Session expired");
               return;
             }
@@ -381,7 +381,7 @@ if (isProduction) {
             });
 
             if (!devicesRes.ok) {
-              ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
+              ws.send(JSON.stringify({ type: "error", message: "Session expired", requestId: null }));
               sessionStore.deleteSession(data.token);
               ws.close(1008, "Session expired");
               return;
@@ -548,7 +548,7 @@ if (isProduction) {
           }
         } catch (e) {
           if (e instanceof z.ZodError) {
-            ws.send(JSON.stringify({ type: "error", message: `Validation error: ${e.issues.map(err => err.message).join(", ")}` }));
+            ws.send(JSON.stringify({ type: "error", message: `Validation error: ${e.issues.map(err => err.message).join(", ")}`, requestId: null }));
           } else {
             console.error("Invalid WS message", e);
           }

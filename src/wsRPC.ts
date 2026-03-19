@@ -23,14 +23,12 @@ export function registerCallback(requestId: string, cb: (resp: unknown) => void)
 
 export function handleResponse(resp: unknown) {
   if (typeof resp !== 'object' || resp === null) return;
-  const { requestId } = resp as { requestId?: string };
-  if (typeof requestId === 'string' && requestId) {
-    const entry = pending.get(requestId);
-    if (entry) {
-      clearTimeout(entry.timer);
-      pending.delete(requestId);
-      entry.cb(resp);
-    }
+  const { requestId } = resp as { requestId: string };
+  const entry = pending.get(requestId);
+  if (entry) {
+    clearTimeout(entry.timer);
+    pending.delete(requestId);
+    entry.cb(resp);
   }
 }
 

@@ -74,16 +74,13 @@ export const StationaryEventSchema = z.object({
 });
 export type StationaryEvent = z.infer<typeof StationaryEventSchema>;
 
-export const MotionPathPointSchema = NormalizedPositionSchema;
-export type MotionPathPoint = z.infer<typeof MotionPathPointSchema>;
-
 export const MotionEventSchema = z.object({
   type: z.literal('motion'),
   start: z.number(),
   end: z.number(),
   startAnchor: Vec2Schema,
   endAnchor: Vec2Schema,
-  path: z.array(MotionPathPointSchema),
+  path: z.array(NormalizedPositionSchema),
   distance: z.number(),
   isDraft: z.boolean(),
   bounds: WorldBoundsSchema,
@@ -179,10 +176,10 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
     }),
     requestId: z.never().optional()
   }),
-  z.object({ type: z.literal("update_success"), deviceId: z.number(), requestId: z.string().optional() }),
-  z.object({ type: z.literal("create_success"), device: TraccarDeviceSchema, requestId: z.string().optional() }),
-  z.object({ type: z.literal("delete_success"), groupId: z.number(), requestId: z.string().optional() }),
-  z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().optional() }),
+  z.object({ type: z.literal("update_success"), deviceId: z.number(), requestId: z.string() }),
+  z.object({ type: z.literal("create_success"), device: TraccarDeviceSchema, requestId: z.string() }),
+  z.object({ type: z.literal("delete_success"), groupId: z.number(), requestId: z.string() }),
+  z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().nullable() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
@@ -196,10 +193,10 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
         name: z.string().optional(),
         emoji: z.string().optional(),
         color: z.string().nullable().optional(),
-        motionProfile: z.string().nullable().optional()
+        motionProfile: MotionProfileNameSchema.nullable().optional()
       })
     }),
-    requestId: z.string().optional()
+    requestId: z.string()
   }),
   z.object({
     type: z.literal("create_group"),
@@ -208,18 +205,18 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
       emoji: z.string(),
       memberDeviceIds: z.array(z.number())
     }),
-    requestId: z.string().optional()
+    requestId: z.string()
   }),
-  z.object({ type: z.literal("delete_group"), payload: z.object({ groupId: z.number() }), requestId: z.string().optional() }),
+  z.object({ type: z.literal("delete_group"), payload: z.object({ groupId: z.number() }), requestId: z.string() }),
   z.object({
     type: z.literal("add_device_to_group"),
     payload: z.object({ groupId: z.number(), deviceId: z.number() }),
-    requestId: z.string().optional()
+    requestId: z.string()
   }),
   z.object({
     type: z.literal("remove_device_from_group"),
     payload: z.object({ groupId: z.number(), deviceId: z.number() }),
-    requestId: z.string().optional()
+    requestId: z.string()
   }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
