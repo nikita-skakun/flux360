@@ -28,6 +28,7 @@ const initialState: StoreState = {
   eventsByDevice: {},
   metadata: {
     rootIds: [],
+    ownedDeviceIds: [],
   },
 };
 
@@ -78,11 +79,12 @@ export const useStore = create<Store>()(
       updateConfig: (payload) => {
         set(state => {
           const newEntities = { ...state.entities };
+          const ownedIdSet = new Set(state.metadata.ownedDeviceIds);
           if (payload.devices !== null) {
             for (const [id, newDev] of numericEntries(payload.devices)) {
               newEntities[id] = {
                 ...newDev,
-                isOwner: state.entities[id]?.isOwner ?? newDev.isOwner ?? false,
+                isOwner: state.entities[id]?.isOwner ?? newDev.isOwner ?? ownedIdSet.has(id),
               };
             }
           }
@@ -91,7 +93,7 @@ export const useStore = create<Store>()(
             for (const group of payload.groups) {
               newEntities[group.id] = {
                 ...group,
-                isOwner: true, // Groups created/edited are owned by self
+                isOwner: state.entities[group.id]?.isOwner ?? group.isOwner ?? ownedIdSet.has(group.id),
               };
             }
           }

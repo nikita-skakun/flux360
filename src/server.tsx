@@ -411,6 +411,13 @@ if (isProduction) {
 
             // First, get metadata to know which IDs are root entities
             const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
+            const ownedIds = Array.from(ownedDeviceIds);
+            const entitiesWithOwner = Object.fromEntries(
+              Object.entries(allEntities).map(([id, entity]) => {
+                const numericId = Number(id);
+                return [numericId, { ...entity, isOwner: ownedDeviceIds.has(numericId) }];
+              })
+            );
             const rootIdSet = new Set(rootIds);
             const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
 
@@ -418,18 +425,18 @@ if (isProduction) {
             const rootIdsFiltered = Array.from(allowedDeviceIds).filter(id => rootIdSet.has(id));
             const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(
               rootIdsFiltered,
-              { applySnapshotCutoff: true, snapshotCutoff: cutoff, entities: allEntities }
+              { applySnapshotCutoff: true, snapshotCutoff: cutoff, entities: entitiesWithOwner }
             );
 
             // For entities, we still need to send all entities (devices and groups) for the sidebar
-            // So we use allEntities from getMetadata
+            // and include ownership flags resolved for this authenticated user.
             const payloadStr = JSON.stringify({
               type: "initial_state",
               payload: {
-                entities: allEntities,
+                entities: entitiesWithOwner,
                 activePointsByDevice: filteredPoints,
                 eventsByDevice: filteredEvents,
-                metadata: { rootIds },
+                metadata: { rootIds, ownedDeviceIds: ownedIds },
                 maptilerApiKey: config.maptilerApiKey,
               }
             });

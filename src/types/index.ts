@@ -153,6 +153,7 @@ export const InitialStatePayloadSchema = z.object({
   maptilerApiKey: z.string(),
   metadata: z.object({
     rootIds: z.array(z.number()),
+    ownedDeviceIds: z.array(z.number()),
   }),
 });
 export type InitialStatePayload = z.infer<typeof InitialStatePayloadSchema>;

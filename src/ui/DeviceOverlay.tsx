@@ -39,16 +39,14 @@ function DeviceOverlayComponent({
 
   const points = selectedDeviceId != null ? activePointsByDevice[selectedDeviceId] ?? [] : [];
   const chosen = points.length > 0 ? points[points.length - 1] : null;
-  const chosenDeviceId = chosen?.device ?? null;
-
   const handleShare = React.useCallback(() => {
-    if (chosenDeviceId == null) return;
+    if (selectedDeviceId == null) return;
 
     const username = window.prompt("Enter username to share with:");
     if (!username) return;
 
     const sessionToken = useStore.getState().settings.sessionToken;
-    void fetch(`/api/devices/${chosenDeviceId}/share`, {
+    void fetch(`/api/devices/${selectedDeviceId}/share`, {
       method: "POST",
       body: JSON.stringify({ username }),
       headers: {
@@ -59,7 +57,7 @@ function DeviceOverlayComponent({
       if (r.ok) window.alert("Shared successfully!");
       else window.alert("Sharing failed.");
     });
-  }, [chosenDeviceId]);
+  }, [selectedDeviceId]);
 
   // Derive group-related info
   const { group, contributors, mostRecentSourceName } = useMemo(() => {
@@ -71,44 +69,35 @@ function DeviceOverlayComponent({
       return { group: null, contributors: [], mostRecentSourceName: null };
     }
 
-    const contribs = memberIds.map((id) => entities[id]?.name ?? `Device ${id}`);
+    const contribs = memberIds.map((id) => entities[id]?.name ?? "");
     const latestId = memberIds.reduce((latest, id) => {
       const time = entities[id]?.lastSeen ?? 0;
       const latestTime = latest ? (entities[latest]?.lastSeen ?? 0) : -1;
       return time > latestTime ? id : latest;
     }, null as number | null);
 
-    const latestName = latestId != null ? (entities[latestId]?.name ?? `Device ${latestId}`) : null;
+    const latestName = latestId != null ? (entities[latestId]?.name ?? null) : null;
 
     return { group: entity, contributors: contribs, mostRecentSourceName: latestName };
   }, [selectedDeviceId, entities]);
 
   const handleEdit = React.useCallback(() => {
-    if (chosenDeviceId == null) return;
-    setEditingTarget({ type: group ? "group" : "device", id: chosenDeviceId });
-  }, [chosenDeviceId, group, setEditingTarget]);
+    if (selectedDeviceId == null) return;
+    setEditingTarget({ type: group ? "group" : "device", id: selectedDeviceId });
+  }, [selectedDeviceId, group, setEditingTarget]);
 
   if (selectedDeviceId == null) return null;
   if (!chosen) return null;
 
   return (
     <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
-      <div className="flex items-start">
-        <div className="flex-1">
-          <div className="text-sm font-medium">
-            {group ? group.name : (entities[chosen.device]?.name ?? `Device ${chosen.device}`)}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1 h-8 flex items-center pr-1">
+          <div className="text-base font-semibold leading-tight truncate">
+            {group ? group.name : entities[chosen.device]?.name}
           </div>
-          {group && contributors.length > 0 && (
-            <div className="text-xs text-muted-foreground mt-1">
-              <span className="font-medium">Sources:</span> {contributors.join(", ")}
-              {mostRecentSourceName && <div className="text-muted-foreground/70 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
-              {(chosen).sourceDeviceId != null && <div className="text-muted-foreground/70 text-xs mt-0.5">Current source: {entities[(chosen).sourceDeviceId]?.name ?? `Device ${(chosen).sourceDeviceId}`}</div>}
-            </div>
-          )}
-          <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
-          <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={chosen.anchorStartTimestamp} addSuffix={false} /></div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           {isOwner && (
             <>
               <Button
@@ -145,6 +134,19 @@ function DeviceOverlayComponent({
           </Button>
         </div>
       </div>
+
+      <div className="mt-1.5">
+        {group && contributors.length > 0 && (
+          <div className="text-xs text-muted-foreground">
+            <span className="font-medium">Sources:</span> {contributors.join(", ")}
+            {mostRecentSourceName && <div className="text-muted-foreground/70 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
+            {(chosen).sourceDeviceId != null && <div className="text-muted-foreground/70 text-xs mt-0.5">Current source: {entities[(chosen).sourceDeviceId]?.name}</div>}
+          </div>
+        )}
+        <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
+        <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={chosen.anchorStartTimestamp} addSuffix={false} /></div>
+      </div>
+
       <div className="text-xs text-muted-foreground">Last updated: <DurationDisplay timestamp={entities[chosen.device]?.lastSeen ?? chosen.timestamp} addSuffix={false} /></div>
 
     </div>
