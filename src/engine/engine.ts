@@ -22,6 +22,10 @@ export class Engine {
     return MOTION_PROFILES[this.motionProfile];
   }
 
+  private distanceBetweenWebMercator(a: Vec2, b: Vec2): number {
+    return haversineDistance(fromWebMercator(a), fromWebMercator(b));
+  }
+
   processMeasurements(points: DevicePoint[]) {
     for (const p of points) {
       this.step(p);
@@ -44,19 +48,17 @@ export class Engine {
       return;
     }
 
-    if (this.draft.type === 'stationary') {
-      this.handleStationary(this.draft, p, profile);
-    } else {
-      this.handleMotion(this.draft, p, profile);
-    }
+    if (this.draft.type === 'stationary') this.handleStationary(this.draft, p, profile);
+    else this.handleMotion(this.draft, p, profile);
   }
 
   private handleStationary(draft: StationaryDraft, p: DevicePoint, profile: MotionProfileConfig) {
     const stats = this.computeStats(draft.recent);
     const m2 = this.computeMahalanobis2(p.mean, stats.mean, stats.variance, p.accuracy);
+    const stationaryStartGeo = fromWebMercator(draft.stationaryStartAnchor);
 
     // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
-    const distFromStart = haversineDistance(fromWebMercator(p.mean), fromWebMercator(draft.stationaryStartAnchor));
+    const distFromStart = this.distanceBetweenWebMercator(p.mean, draft.stationaryStartAnchor);
     const isFar = (distFromStart - p.accuracy) > HARD_BREAKOUT_DISTANCE;
 
     if (m2 < profile.stationaryMahalanobisThreshold && !isFar) {
@@ -64,69 +66,66 @@ export class Engine {
       draft.recent.push(p);
       if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
       draft.pending = []; // Reset hysteresis
-    } else {
-      // Potential motion
-      draft.pending.push(p);
+      return;
+    }
 
-      if (draft.pending.length >= PENDING_THRESHOLD) {
-        // Alignment Gate: Transition only if points are coherent
-        const directions: Vec2[] = draft.pending.map(pt => {
-          const dx = pt.mean[0] - stats.mean[0];
-          const dy = pt.mean[1] - stats.mean[1];
-          const mag = Math.hypot(dx, dy);
-          return mag > 0 ? [dx / mag, dy / mag] as Vec2 : [0, 0] as Vec2;
-        });
+    // Potential motion
+    draft.pending.push(p);
+    if (draft.pending.length < PENDING_THRESHOLD) return;
 
-        const isCoherent = this.checkCoherence(directions, profile.coherenceCosineThreshold);
-        const allPendingFar = draft.pending.every(pt => (haversineDistance(fromWebMercator(pt.mean), fromWebMercator(draft.stationaryStartAnchor)) - pt.accuracy) > HARD_BREAKOUT_DISTANCE);
+    // Alignment Gate: Transition only if points are coherent
+    const directions: Vec2[] = [];
+    let allPendingFar = true;
+    for (const pt of draft.pending) {
+      const dx = pt.mean[0] - stats.mean[0];
+      const dy = pt.mean[1] - stats.mean[1];
+      const mag = Math.hypot(dx, dy);
+      directions.push(mag > 0 ? [dx / mag, dy / mag] : [0, 0]);
+      if ((haversineDistance(fromWebMercator(pt.mean), stationaryStartGeo) - pt.accuracy) <= HARD_BREAKOUT_DISTANCE)
+        allPendingFar = false;
+    }
 
-        // In addition to coherence, the raw speed of the draft must be plausible.
-        const firstPending = draft.pending[0];
-        let isFastEnough = true;
-        if (firstPending && draft.pending.length > 1) {
-          const lastPending = draft.pending[draft.pending.length - 1]!;
-          const dist = haversineDistance(fromWebMercator(firstPending.mean), fromWebMercator(lastPending.mean));
+    // In addition to coherence, the raw speed of the draft must be plausible.
+    const firstPending = draft.pending[0];
+    let isFastEnough = true;
+    if (firstPending && draft.pending.length > 1) {
+      const lastPending = draft.pending[draft.pending.length - 1]!;
+      const dist = this.distanceBetweenWebMercator(firstPending.mean, lastPending.mean);
 
-          // If they've moved less than HARD_BREAKOUT, we demand a minimum speed to prevent slow drift
-          if (dist < HARD_BREAKOUT_DISTANCE) {
-            const timeSecs = (lastPending.timestamp - firstPending.timestamp) / 1000;
-            if (timeSecs > 0) {
-              const speed = dist / timeSecs;
-              isFastEnough = speed > (profile.minAverageVelocity * 0.25);
-            }
-          }
-        }
-
-        if (firstPending && (allPendingFar || (isCoherent && isFastEnough))) {
-          // Transition to Motion
-          const startTimestamp = firstPending.timestamp;
-          this.draft = {
-            type: 'motion',
-            start: startTimestamp,
-            stationaryCutoff: startTimestamp,
-            predecessor: draft,
-            startAnchor: stats.mean,
-            path: [...draft.pending],
-            recent: [draft.pending[draft.pending.length - 1] ?? firstPending]
-          };
-        } else {
-          // Mushy noise. Merge oldest pending into recent to prevent buffer bloat
-          const first = draft.pending.shift();
-          if (first) {
-            draft.recent.push(first);
-            if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
-
-            if (draft.recent.length >= 10) {
-              const newStats = this.computeStats(draft.recent);
-              const distToAnchor = haversineDistance(fromWebMercator(newStats.mean), fromWebMercator(draft.stationaryStartAnchor));
-              if (distToAnchor > profile.maxStationaryRadius) {
-                draft.stationaryStartAnchor = newStats.mean; // Update anchor to prevent drag
-              }
-            }
-          }
-        }
+      // If they've moved less than HARD_BREAKOUT, we demand a minimum speed to prevent slow drift
+      if (dist < HARD_BREAKOUT_DISTANCE) {
+        const timeSecs = (lastPending.timestamp - firstPending.timestamp) / 1000;
+        if (timeSecs > 0)
+          isFastEnough = (dist / timeSecs) > (profile.minAverageVelocity * 0.25);
       }
     }
+
+    if (firstPending && (allPendingFar || (this.checkCoherence(directions, profile.coherenceCosineThreshold) && isFastEnough))) {
+      // Transition to Motion
+      const startTimestamp = firstPending.timestamp;
+      this.draft = {
+        type: 'motion',
+        start: startTimestamp,
+        stationaryCutoff: startTimestamp,
+        predecessor: draft,
+        startAnchor: stats.mean,
+        path: [...draft.pending],
+        recent: [draft.pending[draft.pending.length - 1]!]
+      };
+      return;
+    }
+
+    // Mushy noise. Merge oldest pending into recent to prevent buffer bloat
+    const first = draft.pending.shift();
+    if (!first) return;
+
+    draft.recent.push(first);
+    if (draft.recent.length > ENGINE_WINDOW_SIZE) draft.recent.shift();
+    if (draft.recent.length < 10) return;
+
+    const newStats = this.computeStats(draft.recent);
+    const distToAnchor = this.distanceBetweenWebMercator(newStats.mean, draft.stationaryStartAnchor);
+    if (distToAnchor > profile.maxStationaryRadius) draft.stationaryStartAnchor = newStats.mean; // Update anchor to prevent drag
   }
 
   private handleMotion(draft: MotionDraft, p: DevicePoint, profile: MotionProfileConfig) {
@@ -135,30 +134,20 @@ export class Engine {
 
     // Cap settling window by count to handle sparse GPS data.
     // checkSettled's own duration check handles the time constraint.
-    while (draft.recent.length > SETTLING_WINDOW_CAP) {
-      draft.recent.shift();
-    }
+    if (draft.recent.length > SETTLING_WINDOW_CAP)
+      draft.recent.splice(0, draft.recent.length - SETTLING_WINDOW_CAP);
 
     const isSettled = this.checkSettled(draft, profile);
-
-    if (!isSettled) {
-      return;
-    }
+    if (!isSettled) return;
 
     // Settled! Decide if significant or noise
-    const firstRecent = draft.recent[0];
-    if (!firstRecent) {
-      return;
-    }
-    const settleStart = firstRecent.timestamp;
+    const settleStart = draft.recent[0]!.timestamp;
     const settleStats = this.computeStats(draft.recent);
     const totalDistance = this.computePathLength(draft.path.map(p => p.mean));
-    const startEndDist = haversineDistance(fromWebMercator(draft.startAnchor), fromWebMercator(settleStats.mean));
+    const startEndDist = this.distanceBetweenWebMercator(draft.startAnchor, settleStats.mean);
     const maxDev = this.maxDeviation(draft.path, draft.startAnchor);
 
-    const lastRecent = draft.recent[draft.recent.length - 1];
-    const settleEnd = lastRecent ? lastRecent.timestamp : p.timestamp;
-    const settleDurationSeconds = (settleEnd - draft.start) / 1000;
+    const settleDurationSeconds = (draft.recent[draft.recent.length - 1]!.timestamp - draft.start) / 1000;
     const avgRoadSpeed = settleDurationSeconds > 0 ? totalDistance / settleDurationSeconds : 0;
     const efficiency = totalDistance > 0 ? startEndDist / totalDistance : 0;
 
@@ -236,7 +225,7 @@ export class Engine {
       // We take the settling window as the new "stable" cluster
       predecessor.recent = [...draft.recent];
       predecessor.pending = [];
-      predecessor.stationaryStartAnchor = settleStats.mean; // Update anchor to prevent drag!
+      predecessor.stationaryStartAnchor = settleStats.mean; // Update anchor to prevent drag
 
       this.draft = predecessor;
     }
@@ -253,7 +242,10 @@ export class Engine {
     const minVariance = Math.pow(profile.maxStationaryRadius / 3, 2); // 1-sigma floor
     const effectiveVariance = Math.max(stats.variance, minVariance);
 
-    return draft.recent.every(p => this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance, p.accuracy) <= profile.motionSettleMahalanobisThreshold);
+    for (const p of draft.recent)
+      if (this.computeMahalanobis2(p.mean, stats.mean, effectiveVariance, p.accuracy) > profile.motionSettleMahalanobisThreshold)
+        return false;
+    return true;
   }
 
   private checkCoherence(directions: Vec2[], threshold: number): boolean {
@@ -270,42 +262,47 @@ export class Engine {
   public computeStats(points: DevicePoint[]): { mean: Vec2; variance: number } {
     if (points.length === 0) return { mean: [0, 0], variance: 1 };
 
-    const sum = points.reduce((acc, p) => [acc[0] + p.mean[0], acc[1] + p.mean[1]] as Vec2, [0, 0] as Vec2);
-    const mean: Vec2 = [sum[0] / points.length, sum[1] / points.length];
+    let sumX = 0, sumY = 0;
+    for (const point of points) {
+      sumX += point.mean[0];
+      sumY += point.mean[1];
+    }
 
-    const sumDistSq = points.reduce((acc, p) => {
-      const dx = p.mean[0] - mean[0];
-      const dy = p.mean[1] - mean[1];
-      return acc + (dx * dx + dy * dy);
-    }, 0);
+    const mean: Vec2 = [sumX / points.length, sumY / points.length];
 
-    const variance = sumDistSq / points.length;
+    let sumDistSq = 0;
+    for (const point of points) {
+      const dx = point.mean[0] - mean[0];
+      const dy = point.mean[1] - mean[1];
+      sumDistSq += dx * dx + dy * dy;
+    }
 
     // Variance cap to prevent "mega-anchors" that swallow large jumps
-    return { mean, variance: Math.max(MIN_CLUSTER_VARIANCE, Math.min(MAX_CLUSTER_VARIANCE, variance)) };
+    return { mean, variance: Math.max(MIN_CLUSTER_VARIANCE, Math.min(MAX_CLUSTER_VARIANCE, sumDistSq / points.length)) };
   }
 
   private computeMahalanobis2(pos: Vec2, mean: Vec2, clusterVariance: number, pointAccuracy: number): number {
     const dx = pos[0] - mean[0];
     const dy = pos[1] - mean[1];
     const latRad = 2 * Math.atan(Math.exp(pos[1] / WORLD_R)) - Math.PI / 2;
-
     return (dx * dx + dy * dy) / (clusterVariance + (pointAccuracy / Math.cos(latRad)) ** 2);
   }
 
   public computePathLength(path: Vec2[]): number {
-    return path.slice(1).reduce((acc, b, i) => {
-      const a = path[i]!;
-      return acc + haversineDistance(fromWebMercator(a), fromWebMercator(b));
-    }, 0);
+    let total = 0;
+    for (let i = 1; i < path.length; i++)
+      total += this.distanceBetweenWebMercator(path[i - 1]!, path[i]!);
+    return total;
   }
 
   private maxDeviation(path: DevicePoint[], anchor: Vec2): number {
-    const maxD2 = path.reduce((max, p) => {
-      const dx = p.mean[0] - anchor[0];
-      const dy = p.mean[1] - anchor[1];
-      return Math.max(max, dx * dx + dy * dy);
-    }, 0);
+    let maxD2 = 0;
+    for (const point of path) {
+      const dx = point.mean[0] - anchor[0];
+      const dy = point.mean[1] - anchor[1];
+      const distSq = dx * dx + dy * dy;
+      if (distSq > maxD2) maxD2 = distSq;
+    }
     return Math.sqrt(maxD2);
   }
 
@@ -348,18 +345,9 @@ export class Engine {
       const next = this.closed[i + 1];
       const nextNext = this.closed[i + 2];
 
-      if (
-        current?.type === 'motion' &&
-        next?.type === 'stationary' &&
-        nextNext?.type === 'motion'
-      ) {
+      if (current?.type === 'motion' && next?.type === 'stationary' && nextNext?.type === 'motion') {
         const gapDuration = next.end - next.start;
-        const shortGap = gapDuration < profile.maxMergeGapDuration;
-
-        const bridgeDistance = haversineDistance(
-          fromWebMercator(current.endAnchor),
-          fromWebMercator(nextNext.startAnchor)
-        );
+        const bridgeDistance = this.distanceBetweenWebMercator(current.endAnchor, nextNext.startAnchor);
 
         // If the stationary variance is saturated and both motions bridge the same anchor,
         // treat this stop as low-confidence noise and allow a wider merge window.
@@ -368,7 +356,7 @@ export class Engine {
           bridgeDistance <= profile.maxStationaryRadius &&
           gapDuration < (profile.maxMergeGapDuration * 3);
 
-        if (!(shortGap || uncertainStationaryGap)) {
+        if (!(gapDuration < profile.maxMergeGapDuration || uncertainStationaryGap)) {
           i++;
           continue;
         }
@@ -381,11 +369,10 @@ export class Engine {
           startAnchor: current.startAnchor,
           endAnchor: nextNext.endAnchor,
           path: mergedPath,
-          distance: 0,
+          distance: this.computePathLength(mergedPath.map(p => p.geo)),
           isDraft: false,
           bounds: computeBounds(mergedPath.map(p => p.geo))
         };
-        merged.distance = this.computePathLength(merged.path.map(p => p.geo));
         this.closed.splice(i, 3, merged);
       } else {
         i++;
