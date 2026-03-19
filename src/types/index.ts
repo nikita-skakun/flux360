@@ -192,8 +192,8 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
       updates: z.object({
         name: z.string().optional(),
         emoji: z.string().optional(),
-        color: z.string().nullable().optional(),
-        motionProfile: MotionProfileNameSchema.nullable().optional()
+        color: z.string().optional(),
+        motionProfile: MotionProfileNameSchema.optional()
       })
     }),
     requestId: z.string()

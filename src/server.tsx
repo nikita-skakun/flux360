@@ -16,6 +16,14 @@ import type { Server, ServerWebSocket } from "bun";
 
 const isProduction = process.env.NODE_ENV === "production";
 
+// Schema definitions
+const LoginSchema = z.object({
+  username: z.string().min(1, "Username is required"),
+  password: z.string().min(1, "Password is required"),
+});
+const DeviceIdSchema = z.object({ id: z.coerce.number() });
+const UsernameSchema = z.object({ username: z.string().min(1) });
+
 interface WSData {
   username: string | null;
   traccarToken: string | null;
@@ -46,20 +54,17 @@ const serverState = new ServerState(config.historyDays);
 // Helper to collect snapshots and events for a set of device IDs
 function collectDeviceData(
   ids: Iterable<number>,
-  options: {
-    applySnapshotCutoff?: boolean;
-    snapshotCutoff?: number;
-    entities?: Record<number, AppDevice>;
-  } = {}
+  applySnapshotCutoff: boolean,
+  snapshotCutoff: number,
+  entities: Record<number, AppDevice>
 ): { activePoints: Record<number, DevicePoint[]>; events: Record<number, EngineEvent[]> } {
-  const { applySnapshotCutoff = false, snapshotCutoff = 0, entities } = options;
   const activePoints: Record<number, DevicePoint[]> = {};
   const events: Record<number, EngineEvent[]> = {};
 
   for (const id of ids) {
     if (serverState.activePointsByDevice[id]) {
       const include = applySnapshotCutoff
-        ? entities?.[id]?.lastSeen != null && entities?.[id]!.lastSeen > snapshotCutoff
+        ? entities[id]?.lastSeen != null && entities[id]!.lastSeen > snapshotCutoff
         : true;
       if (include) {
         activePoints[id] = serverState.activePointsByDevice[id];
@@ -92,7 +97,7 @@ function broadcastUpdate(server: Server<WSData>, deviceIds?: number[]) {
     idsToSync = Array.from(allIds).filter(id => rootIds.includes(id));
   }
 
-  const { activePoints: activePointsPayload, events: eventsPayload } = collectDeviceData(idsToSync);
+  const { activePoints: activePointsPayload, events: eventsPayload } = collectDeviceData(idsToSync, false, 0, {});
 
   // Only send if there's actual data
   if (Object.keys(activePointsPayload).length === 0 && Object.keys(eventsPayload).length === 0) {
@@ -225,22 +230,15 @@ if (isProduction) {
   serverInst = serve<WSData>({
     port,
     async fetch(request) {
-      const url = new URL(request.url);
-      const pathname = url.pathname;
+      const pathname = new URL(request.url).pathname;
 
       // Try file in dist
-      const filePath = `dist${pathname}`;
-      const file = Bun.file(filePath);
-      if (await file.exists()) {
-        return new Response(file);
-      }
+      let file = Bun.file(`dist${pathname}`);
+      if (await file.exists()) return new Response(file);
 
       // Try directory index
-      const dirPath = `dist${pathname}/index.html`;
-      const dirFile = Bun.file(dirPath);
-      if (await dirFile.exists()) {
-        return new Response(dirFile);
-      }
+      file = Bun.file(`dist${pathname}/index.html`);
+      if (await file.exists()) return new Response(file);
 
       // SPA fallback
       return new Response(Bun.file("dist/index.html"));
@@ -253,27 +251,18 @@ if (isProduction) {
     routes: {
       "/api/login": async (request: Request) => {
         try {
-          const LoginSchema = z.object({
-            username: z.string().min(1, "Username is required"),
-            password: z.string().min(1, "Password is required"),
-          });
-          const rawData = await request.json();
-          const { username: inputUsername, password } = LoginSchema.parse(rawData);
-
+          const { username: inputUsername, password } = LoginSchema.parse(await request.json());
           const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
-          const sessionUrl = `${apiBase}/session`;
 
           try {
             const params = new URLSearchParams({ email: inputUsername, password });
-            const sessionRes = await fetch(sessionUrl, {
+            const sessionRes = await fetch(`${apiBase}/session`, {
               method: "POST",
               headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
               body: params.toString()
             });
 
-            if (!sessionRes.ok) {
-              return new Response("Invalid credentials", { status: 401 });
-            }
+            if (!sessionRes.ok) return new Response("Invalid credentials", { status: 401 });
 
             // Traccar returns the user object on successful session creation
             const user = await sessionRes.json();
@@ -300,8 +289,8 @@ if (isProduction) {
 
         try {
           const params = (request as unknown as { params: { id: string } }).params;
-          const { id: deviceId } = z.object({ id: z.coerce.number() }).parse(params);
-          const { username } = z.object({ username: z.string().min(1) }).parse(await request.json());
+          const { id: deviceId } = DeviceIdSchema.parse(params);
+          const { username } = UsernameSchema.parse(await request.json());
 
           // Verify ownership via Traccar
           if (!userInfo.ownedDeviceIds.includes(deviceId)) {
@@ -409,27 +398,21 @@ if (isProduction) {
 
             // Get entities and determine root IDs for filtering snapshots
             const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
-            const ownedIds = Array.from(ownedDeviceIds);
             const entitiesWithOwner = Object.fromEntries(
               Object.entries(allEntities).map(([id, entity]) => {
                 const numericId = Number(id);
                 return [numericId, { ...entity, isOwner: ownedDeviceIds.has(numericId) }];
               })
             );
-            const rootIdSet = new Set(rootIds);
             const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
 
             // Only include snapshots for root entities that have been seen within the last 48 hours
-            const rootIdsFiltered = Array.from(allowedDeviceIds).filter(id => rootIdSet.has(id));
-            const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(
-              rootIdsFiltered,
-              { applySnapshotCutoff: true, snapshotCutoff: cutoff, entities: entitiesWithOwner }
-            );
+            const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(Array.from(allowedDeviceIds).filter(id => rootIds.includes(id)), true, cutoff, entitiesWithOwner);
 
             // Send auth success with ownedDeviceIds (separate message)
             ws.send(JSON.stringify({
               type: "auth_success",
-              payload: { ownedDeviceIds: ownedIds }
+              payload: { ownedDeviceIds: Array.from(ownedDeviceIds) }
             }));
 
             // Send initial state with entities and activity data (ownership in entities, no separate metadata)
