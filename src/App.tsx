@@ -7,7 +7,7 @@ import { MapView } from "./ui/MapView";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { TimelinePanel } from "./ui/TimelinePanel";
 import { UnifiedEditModal } from "./ui/UnifiedEditModal";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useServerConnection } from "./hooks/useServerConnection";
 import { useStore } from "./store";
 import type { MapViewHandle } from "./ui/MapView";
@@ -24,37 +24,25 @@ export function App() {
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const theme = useStore(state => state.settings.theme);
 
-  // Handle theme switching with support for 'system', 'light', and 'dark'
   const isDark = useMemo(() => {
     if (theme === 'dark') return true;
     if (theme === 'light') return false;
-    // System mode - check media query
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   }, [theme]);
 
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDark]);
+    const updateDarkMode = () => {
+      const isDarkNow = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.classList.toggle('dark', isDarkNow);
+    };
 
-  // Listen for system theme changes when in system mode
-  useEffect(() => {
+    updateDarkMode();
+
     if (theme !== 'system') return;
 
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (e.matches) {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-    };
-
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
+    mediaQuery.addEventListener('change', updateDarkMode);
+    return () => mediaQuery.removeEventListener('change', updateDarkMode);
   }, [theme]);
 
   const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
@@ -69,7 +57,6 @@ export function App() {
   const logout = useStore((state) => state.logout);
 
   const [selectedTimelineEvent, setSelectedTimelineEvent] = useState<TimelineEvent | null>(null);
-  const closeSelectedTimelineEvent = useCallback(() => setSelectedTimelineEvent(null), [setSelectedTimelineEvent]);
 
   useServerConnection();
 
@@ -86,7 +73,6 @@ export function App() {
       .flat()
       .filter((comp) => entities[comp.device] != null);
   }, [activePointsByDevice, entities]);
-
 
   // Clear selected motion segment when device changes
   useEffect(() => {
@@ -113,7 +99,7 @@ export function App() {
       {selectedTimelineEvent && (
         <HistoryObservationBar
           event={selectedTimelineEvent}
-          onClose={closeSelectedTimelineEvent}
+          onClose={() => setSelectedTimelineEvent(null)}
         />
       )}
       <DeviceListSidePanel
