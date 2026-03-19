@@ -9,9 +9,9 @@ export function useServerConnection() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    const { auth, setInitialState, setOwnedDeviceIds, updatePositions, updateConfig } = useStore();
+  const { auth, setInitialState, setOwnedDeviceIds, updatePositions, updateConfig } = useStore();
 
+  useEffect(() => {
     if (!auth.isAuthenticated) {
       if (wsRef.current) {
         wsRef.current.close();
@@ -115,5 +115,5 @@ export function useServerConnection() {
         wsRef.current = null;
       }
     };
-  }, []);
+  }, [auth.isAuthenticated, setInitialState, setOwnedDeviceIds, updatePositions, updateConfig]);
 }
