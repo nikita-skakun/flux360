@@ -42,6 +42,32 @@ export function rgbaString(color: Color, a: number = 1): string {
   return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
+const clampChannel = (value: number): number =>
+  Math.max(0, Math.min(255, Math.round(value)));
+
 export function rgbToHex(r: number, g: number, b: number): string {
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+  return `#${clampChannel(r).toString(16).padStart(2, "0")}${clampChannel(g).toString(16).padStart(2, "0")}${clampChannel(b).toString(16).padStart(2, "0")}`;
+}
+
+export function lerpColor(a: Color, b: Color, t: number): Color {
+  const clamped = Math.max(0, Math.min(1, t));
+  return [
+    a[0] + (b[0] - a[0]) * clamped,
+    a[1] + (b[1] - a[1]) * clamped,
+    a[2] + (b[2] - a[2]) * clamped,
+  ];
+}
+
+export function colorForDeltaSeconds(deltaSec: number): string {
+  const GREEN = parseHexColor('#22c55e');
+  const BLUE = parseHexColor('#2563eb');
+  const YELLOW = parseHexColor('#eab308');
+  const RED = parseHexColor('#ef4444');
+
+  if (!GREEN || !BLUE || !YELLOW || !RED) return '#ef4444';
+  if (deltaSec <= 30) return rgbToHex(...lerpColor(GREEN, BLUE, deltaSec / 30));
+  if (deltaSec <= 60) return rgbToHex(...lerpColor(BLUE, YELLOW, (deltaSec - 30) / 30));
+  if (deltaSec <= 180) return rgbToHex(...lerpColor(YELLOW, RED, (deltaSec - 60) / 120));
+
+  return '#ef4444';
 }

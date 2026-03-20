@@ -7,6 +7,7 @@
     "dev": "bun --hot src/server.tsx",
     "export": "bun src/scripts/collectRawFromTrack.ts",
     "smooth-test": "bun src/scripts/smoothCompare.ts",
+    "debug-motion": "bun src/scripts/debugMotionBestFit.ts",
     "lint": "eslint src/**/*.ts src/**/*.tsx",
     "typecheck": "tsc --noEmit"
   },

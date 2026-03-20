@@ -1,12 +1,12 @@
 import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { CLUSTER_DISTANCE_PX, computeClusters } from "@/util/clustering";
 import { ClusterPopup } from "./map/ClusterPopup";
+import { colorForDeltaSeconds, getColorForDevice } from "@/util/color";
+import { computeBestFitMotionPath } from "@/util/motionBestFit";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
-import { getColorForDevice } from "@/util/color";
-import { smoothPath, simplifyPath } from "@/util/pathSmoothing";
 import { z } from "zod";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
@@ -103,11 +103,21 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     flyToBounds,
   }));
 
-  const motionPathCacheRef = useRef<Map<string, Vec2[]>>(new Map());
+  const bestFitPathCacheRef = useRef<Map<string, Vec2[]>>(new Map());
 
-  // Reset cached smoothed paths when smoothing configuration changes
+  const buildAccuracyCircleCoords = (center: Vec2, radius: number, steps = 64): Vec2[] => {
+    return Array.from({ length: steps + 1 }, (_, j) => {
+      const angle = (j * 2 * Math.PI) / steps;
+      return fromWebMercator([
+        center[0] + radius * Math.cos(angle),
+        center[1] + radius * Math.sin(angle),
+      ]);
+    });
+  };
+
+  // Reset cached best-fit paths when render configuration changes
   useEffect(() => {
-    motionPathCacheRef.current.clear();
+    bestFitPathCacheRef.current.clear();
   }, [smoothingIterations, simplifyEpsilon]);
 
   const updateLayers = useCallback(() => {
@@ -162,9 +172,8 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
     drawItems.forEach((item, i) => {
       const c = activePoints[i]!;
-      const isClustered = clusteredIdxs.has(i);
 
-      if (isClustered) {
+      if (clusteredIdxs.has(i)) {
         dotsFeatures.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: c.geo },
@@ -174,7 +183,8 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         const imageKey = `${item.iconText}-${item.colorHex}-${darkMode ? 'dark' : 'light'}`;
         if (!map.hasImage(imageKey)) {
           const pinCanvas = document.createElement("canvas");
-          pinCanvas.width = 48; pinCanvas.height = 48;
+          pinCanvas.width = 48;
+          pinCanvas.height = 48;
           const pctx = pinCanvas.getContext("2d")!;
           drawPin(pctx, 24, 36, PIN_R, item.iconText, item.color as Color, darkMode);
           const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
@@ -188,16 +198,10 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       }
 
       // Always draw accuracy circle for selected device regardless of cluster state
-      if (c.device === selectedDeviceId && c.accuracy > 0) {
-        const [cx, cy] = c.mean;
-        const pts = 64;
-        const coords = Array.from({ length: pts + 1 }, (_, j) => {
-          const angle = (j * 2 * Math.PI) / pts;
-          return fromWebMercator([cx + c.accuracy * Math.cos(angle), cy + c.accuracy * Math.sin(angle)]);
-        });
+      if (c.device === selectedDeviceId) {
         accuracyFeatures.push({
           type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [coords] },
+          geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(c.mean, c.accuracy)] },
           properties: { color: `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})` }
         });
       }
@@ -355,36 +359,44 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const historyFeatures: Feature<Polygon | LineString>[] = [];
     if (selectedHistoryItem) {
       if (selectedHistoryItem.type === 'stationary') {
-        const a = selectedHistoryItem;
-        const radius = getRadiusFromVariance(a.variance);
-        const pts = 64;
-        const coords: Vec2[] = [];
-        for (let j = 0; j <= pts; j++) {
-          const angle = (j * 2 * Math.PI) / pts;
-          coords.push(fromWebMercator([a.mean[0] + radius * Math.cos(angle), a.mean[1] + radius * Math.sin(angle)]));
-        }
+        const s = selectedHistoryItem;
         historyFeatures.push({
           type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [coords] },
+          geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(s.mean, getRadiusFromVariance(s.variance))] },
           properties: { isAnchor: true },
         });
       } else {
-        const s = selectedHistoryItem;
-        if (s.path && s.path.length > 1) {
-          const key = `motion-${s.start}-${s.end}-${s.path.length}-${s.path[0]?.timestamp ?? 0}-${s.path[s.path.length - 1]?.timestamp ?? 0}-it${smoothingIterations}-sp${simplifyEpsilon}`;
-          const cached = motionPathCacheRef.current.get(key);
-          const smoothedOrCached = cached ?? (smoothingIterations > 0 ? smoothPath(s.path, smoothingIterations) : s.path.map(p => p.geo));
-          const smoothed = simplifyEpsilon > 0 ? simplifyPath(smoothedOrCached, simplifyEpsilon) : smoothedOrCached;
+        const m = selectedHistoryItem;
+        if (m.path && m.path.length > 1) {
+          const key = `motion-${m.start}-${m.end}`;
+          const cached = bestFitPathCacheRef.current.get(key);
+          const bestFitPath = cached ?? computeBestFitMotionPath(m.path);
 
-          if (!cached && !s.isDraft) {
-            motionPathCacheRef.current.set(key, smoothed);
-          }
+          if (!cached && !m.isDraft) bestFitPathCacheRef.current.set(key, bestFitPath);
 
           historyFeatures.push({
             type: 'Feature',
-            geometry: { type: 'LineString', coordinates: smoothed.map(fromWebMercator) },
-            properties: { isAnchor: false },
+            geometry: { type: 'LineString', coordinates: m.path.map(p => fromWebMercator(p.geo)) },
+            properties: { isAnchor: false, pathKind: 'raw' },
           });
+
+          historyFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: bestFitPath.map(fromWebMercator) },
+            properties: { isAnchor: false, pathKind: 'bestfit' },
+          });
+
+          // Add accuracy circles for each point in motion path, colorized by delta to next point.
+          for (let i = 0; i < m.path.length; i++) {
+            const p = m.path[i]!;
+            const next = m.path[i + 1];
+            const deltaColor = colorForDeltaSeconds(next ? Math.max(0, (next.timestamp - p.timestamp) / 1000) : 0);
+            historyFeatures.push({
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(p.geo, p.accuracy)] },
+              properties: { isAnchor: false, pathKind: 'accuracy', color: deltaColor },
+            });
+          }
         }
       }
     }
@@ -413,14 +425,47 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
           }
         }, 'individuals-layer');
         map.addLayer({
-          id: 'history-path-layer',
+          id: 'history-raw-path-layer',
           type: 'line',
           source: 'history-source',
-          filter: ['==', 'isAnchor', false],
+          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'raw']],
+          paint: {
+            'line-color': '#94a3b8',
+            'line-width': 3,
+            'line-opacity': 0.95,
+            'line-dasharray': [2, 2],
+          }
+        }, 'individuals-layer');
+        map.addLayer({
+          id: 'history-bestfit-path-layer',
+          type: 'line',
+          source: 'history-source',
+          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'bestfit']],
           paint: {
             'line-color': '#eab308',
             'line-width': 4,
-            'line-dasharray': [2, 2],
+            'line-opacity': 0.95,
+          }
+        }, 'individuals-layer');
+        map.addLayer({
+          id: 'history-accuracy-circles-layer',
+          type: 'fill',
+          source: 'history-source',
+          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'accuracy']],
+          paint: {
+            'fill-color': ['get', 'color'],
+            'fill-opacity': 0.1,
+          }
+        }, 'individuals-layer');
+        map.addLayer({
+          id: 'history-accuracy-circles-stroke-layer',
+          type: 'line',
+          source: 'history-source',
+          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'accuracy']],
+          paint: {
+            'line-color': ['get', 'color'],
+            'line-width': 1,
+            'line-opacity': 0.3,
           }
         }, 'individuals-layer');
       } else {
@@ -513,11 +558,11 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   // Animate motion segment path (marching ants effect)
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.getLayer('history-path-layer')) return;
+    if (!map?.getLayer('history-raw-path-layer')) return;
 
     const isMotionSegment = selectedHistoryItem?.type === 'motion';
     if (!isMotionSegment) {
-      map.setPaintProperty('history-path-layer', 'line-dasharray', [2, 2]);
+      map.setPaintProperty('history-raw-path-layer', 'line-dasharray', [2, 2]);
       return;
     }
 
@@ -543,9 +588,9 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const tick = () => {
       const map = mapRef.current;
       const step = Math.floor(Date.now() / 50) % dashArraySequence.length;
-      if (running && map?.getLayer('history-path-layer') && map.getStyle() && step !== lastStep) {
+      if (running && map?.getLayer('history-raw-path-layer') && map.getStyle() && step !== lastStep) {
         lastStep = step;
-        map.setPaintProperty('history-path-layer', 'line-dasharray', dashArraySequence[step] as [number, number, number]);
+        map.setPaintProperty('history-raw-path-layer', 'line-dasharray', dashArraySequence[step] as [number, number, number]);
       }
       window.requestAnimationFrame(tick);
     };

@@ -1,5 +1,5 @@
 import { fromWebMercator, WORLD_R } from "@/util/webMercator";
-import { haversineDistance, computeBounds } from "@/util/geo";
+import { haversineDistance, computeBounds, getRadiusFromVariance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
 import { vlog } from "@/util/logger";
 import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
@@ -174,6 +174,8 @@ export class Engine {
     if (!insignificant) {
       // COMMIT: Close predecessor and this motion
       const predStats = this.computeStats(draft.predecessor.recent);
+      const startAnchorAccuracy = getRadiusFromVariance(predStats.variance);
+      const endAnchorAccuracy = getRadiusFromVariance(settleStats.variance);
 
       // Trim settling jitter: remove points that occur after the settlement window started
       const trimmedPath = draft.path.filter(pt => pt.timestamp < settleStart);
@@ -183,9 +185,9 @@ export class Engine {
       if (deviceId === undefined) { throw new Error('Engine: unable to determine deviceId for motion path'); }
 
       const path = [
-        { device: deviceId, geo: draft.startAnchor, accuracy: 1, timestamp: draft.start }, // Anchor: high certainty
+        { device: deviceId, geo: draft.startAnchor, accuracy: startAnchorAccuracy, timestamp: draft.start },
         ...trimmedPath.map(pt => ({ device: pt.device, geo: pt.mean, accuracy: pt.accuracy, timestamp: pt.timestamp })),
-        { device: deviceId, geo: settleStats.mean, accuracy: 1, timestamp: settleStart },  // Anchor: high certainty
+        { device: deviceId, geo: settleStats.mean, accuracy: endAnchorAccuracy, timestamp: settleStart },
       ];
 
       this.closed.push({
