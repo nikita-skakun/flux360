@@ -379,18 +379,11 @@ export const useStore = create<Store>()(
       },
 
       logout: () => {
-        set(state => ({
-          auth: {
-            isAuthenticated: false,
-            isLoggingIn: false,
-            loginError: null,
-            ownedDeviceIds: [],
-          },
-          settings: {
-            ...state.settings,
-            sessionToken: null,
-          }
-        }));
+        set(initialState);
+
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem('flux360-store');
+        }
       },
 
       setSelectedDeviceId: (id: number | null) => {

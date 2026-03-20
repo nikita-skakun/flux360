@@ -20,8 +20,13 @@ const render = () => {
 };
 
 // Explicitly load icon fonts before first render so ligatures work immediately.
+// Wait for @font-face rules to be loaded first (from index.css imports), then request fonts.
 // Falls back to rendering anyway if fonts fail (e.g. offline).
-Promise.all([
-  document.fonts.load('1em "Material Symbols Outlined"'),
-  document.fonts.load('1em "Material Icons"'),
-]).finally(render);
+Promise.resolve(document.fonts.ready)
+  .then(() =>
+    Promise.allSettled([
+      document.fonts.load('1em "Material Symbols Outlined"'),
+      document.fonts.load('1em "Material Icons"'),
+    ])
+  )
+  .finally(render);
