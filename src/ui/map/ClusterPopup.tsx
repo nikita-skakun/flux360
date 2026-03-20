@@ -19,6 +19,7 @@ export const ClusterPopup = React.memo(({
   darkMode, entities
 }: ClusterPopupProps) => {
   const CLUSTER_ANIM_MS = 150;
+  const ITEM_STAGGER_MS = 60;
 
   const backdropStyle: React.CSSProperties = {
     position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
@@ -72,14 +73,19 @@ export const ClusterPopup = React.memo(({
             const colorStr = `rgb(${col[0]}, ${col[1]}, ${col[2]})`;
             const borderColorStr = `rgba(${col[0]}, ${col[1]}, ${col[2]}, 0.7)`;
 
-            const enterDelay = i * 20;
-            const exitDelay = (n - i - 1) * 15;
-            let itemOpacity = 1;
+            const enterDelay = i * ITEM_STAGGER_MS;
+            let itemOpacity = 0;
             let itemScale = 1;
-            let delay = 200;
-            if (animationState === 'entering') { itemOpacity = 0; itemScale = 0.6; delay = enterDelay; }
-            else if (animationState === 'visible') { itemOpacity = 1; itemScale = 1; delay = 30 + enterDelay; }
-            else if (animationState === 'exiting') { itemOpacity = 0; itemScale = 0.85; delay = exitDelay; }
+            let delay = enterDelay;
+            if (animationState === 'entering') {
+              itemScale = 0.6;
+            } else if (animationState === 'visible') {
+              itemOpacity = 1;
+              itemScale = 1;
+            } else if (animationState === 'exiting') {
+              itemScale = 0.85;
+              delay = (n - i - 1) * ITEM_STAGGER_MS;
+            }
 
             const innerStyle: React.CSSProperties = {
               transform: `scale(${itemScale})`,

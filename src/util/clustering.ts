@@ -3,16 +3,13 @@ export type Cluster = { items: DrawItem[]; x: number; y: number; size: number; r
 
 export const CLUSTER_DISTANCE_PX = 36;
 
-export function clusterRadius(size: number) {
-  return Math.max(8, Math.ceil(6 + Math.sqrt(size) * 6));
-}
-
 // Encode (cellX, cellY) as a single integer key — avoids string allocation in hot loops.
 const cellKey = (cx: number, cy: number) => ((cx & 0xffff) << 16) | (cy & 0xffff);
 const getOrSet = <K, V>(m: Map<K, V>, k: K, v: V): V => {
   const e = m.get(k);
   if (e !== undefined) return e;
-  m.set(k, v); return v;
+  m.set(k, v);
+  return v;
 };
 
 export function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_PX): Cluster[] {
@@ -45,25 +42,31 @@ export function computeClusters(items: DrawItem[], threshold = CLUSTER_DISTANCE_
         const cell = grid.get(cellKey(cx + dx, cy + dy));
         if (cell === undefined) continue;
         for (const j of cell) {
-          if (j <= i) continue;
-          const other = items[j];
-          if (other !== undefined) {
-            const dx = item.x - other.x;
-            const dy = item.y - other.y;
-            if (dx * dx + dy * dy <= thresholdSq) union(i, j);
-          }
+          if (j <= i || !items[j]) continue;
+          const dx = item.x - items[j].x;
+          const dy = item.y - items[j].y;
+          if (dx * dx + dy * dy <= thresholdSq) union(i, j);
         }
       }
     }
   }
 
   const groups = new Map<number, DrawItem[]>();
-  for (let i = 0; i < n; i++) { const item = items[i]; if (item !== undefined) getOrSet(groups, find(i), []).push(item); }
+  for (let i = 0; i < n; i++) {
+    const item = items[i];
+    if (item !== undefined) getOrSet(groups, find(i), []).push(item);
+  }
 
   return Array.from(groups.values(), clusterItems => {
     let sumX = 0, sumY = 0;
     for (const it of clusterItems) { sumX += it.x; sumY += it.y; }
     const len = clusterItems.length;
-    return { items: clusterItems, x: sumX / len, y: sumY / len, size: len, radius: clusterRadius(len) };
+    return {
+      items: clusterItems,
+      x: sumX / len,
+      y: sumY / len,
+      size: len,
+      radius: Math.max(8, Math.ceil(6 + Math.sqrt(len) * 6))
+    };
   });
 }

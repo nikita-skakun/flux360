@@ -51,7 +51,14 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   const onSelectDeviceRef = useRef(onSelectDevice);
   const hasFittedInitially = useRef(false);
 
-  const [clusterPopup, setClusterPopup] = useState<{ x: number, y: number, items: DevicePoint[] } | null>(null);
+  type ClusterPopupState = {
+    x: number;
+    y: number;
+    items: DevicePoint[];
+    animationState: 'entering' | 'visible' | 'exiting';
+  };
+
+  const [clusterPopup, setClusterPopup] = useState<ClusterPopupState | null>(null);
 
   useEffect(() => {
     activePointsRef.current = activePoints;
@@ -64,6 +71,24 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
+
+  const closeClusterPopup = useCallback(() => {
+    setClusterPopup((prev) => (prev ? { ...prev, animationState: 'exiting' } : null));
+  }, []);
+
+  useEffect(() => {
+    if (!clusterPopup || clusterPopup.animationState !== 'entering') return;
+    const timer = window.setTimeout(() => {
+      setClusterPopup((prev) => (prev && prev.animationState === 'entering' ? { ...prev, animationState: 'visible' } : prev));
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [clusterPopup]);
+
+  useEffect(() => {
+    if (!clusterPopup || clusterPopup.animationState !== 'exiting') return;
+    const timer = window.setTimeout(() => setClusterPopup(null), 150);
+    return () => window.clearTimeout(timer);
+  }, [clusterPopup]);
 
   const flyToDevice = useCallback((id: number) => {
     const map = mapRef.current;
@@ -637,7 +662,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         const items: DevicePoint[] = memberIds
           .map(deviceId => activePointsRef.current.find(c => c.device === deviceId))
           .filter((c): c is DevicePoint => !!c);
-        setClusterPopup({ x: screen.x, y: screen.y, items });
+        setClusterPopup({ x: screen.x, y: screen.y, items, animationState: 'entering' });
       }
     };
 
@@ -645,7 +670,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (e.defaultPrevented) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer', 'clusters-layer'] });
       if (!features.length) {
-        setClusterPopup(null);
+        closeClusterPopup();
       }
     };
 
@@ -730,17 +755,18 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
             x={clusterPopup.x}
             y={clusterPopup.y}
             items={clusterPopup.items}
-            animationState="visible"
-            onClose={() => setClusterPopup(null)}
+            animationState={clusterPopup.animationState}
+            onClose={closeClusterPopup}
             onSelectDevice={(id) => {
               onSelectDevice(id);
-              setClusterPopup(null);
+              closeClusterPopup();
             }}
             darkMode={darkMode}
             entities={entities}
           />
         </div>
-      )}    </div>
+      )}
+    </div>
   );
 });
 
