@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Pencil, UserPlus, X } from "lucide-react";
 import { useStore } from "@/store";
@@ -142,28 +142,44 @@ function DeviceOverlayComponent({
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>Share Device</DialogTitle>
+                    <DialogDescription>
+                      Enter a Traccar username or email to grant access to this device.
+                    </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-3">
+                  <form
+                    className="space-y-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void handleShare();
+                    }}
+                  >
                     <label className="text-sm font-medium" htmlFor="share-username">
                       Username
                     </label>
                     <Input
                       id="share-username"
+                      name="shareTarget"
                       value={shareState.username}
                       onChange={(e) => setShareState((prev) => ({ ...prev, username: e.target.value }))}
                       placeholder="Enter username"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
+                      data-bwignore="true"
+                      data-lpignore="true"
+                      data-form-type="other"
                       disabled={shareState.isSharing}
                     />
                     {shareState.error && <div className="text-sm text-destructive">{shareState.error}</div>}
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={closeShareDialog} disabled={shareState.isSharing}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleShare} disabled={shareState.isSharing}>
-                      {shareState.isSharing ? "Sharing…" : "Share"}
-                    </Button>
-                  </DialogFooter>
+                    <DialogFooter>
+                      <Button type="button" variant="outline" onClick={closeShareDialog} disabled={shareState.isSharing}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={shareState.isSharing}>
+                        {shareState.isSharing ? "Sharing…" : "Share"}
+                      </Button>
+                    </DialogFooter>
+                  </form>
                 </DialogContent>
               </Dialog>
               <Button

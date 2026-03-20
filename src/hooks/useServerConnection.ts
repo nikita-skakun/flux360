@@ -5,18 +5,26 @@ import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
 import type { ClientMessage } from '@/types';
 
+const AUTH_RETRY_DELAY_MS = 500;
+const RECONNECT_DELAY_MS = 5000;
+
 export function useServerConnection() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // -1 means auth succeeded for current socket, >=0 counts pre-auth closes.
+  const preAuthRetryCountRef = useRef(0);
 
   const { auth, setInitialState, setOwnedDeviceIds, updatePositions, updateConfig } = useStore();
 
   useEffect(() => {
     if (!auth.isAuthenticated) {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
+      wsRef.current?.close();
+      wsRef.current = null;
+      preAuthRetryCountRef.current = 0;
       return;
     }
 
@@ -25,13 +33,15 @@ export function useServerConnection() {
       const wsUrl = `${protocol}//${window.location.host}/api/ws`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
+      preAuthRetryCountRef.current = 0;
 
       ws.onopen = () => {
         setWebSocket(ws);
 
         const currentToken = useStore.getState().settings.sessionToken;
         if (!currentToken) {
-          console.error("No session token found");
+          console.error('No session token found');
+          useStore.getState().logout();
           return;
         }
         const authMessage: ClientMessage = {
@@ -65,6 +75,7 @@ export function useServerConnection() {
 
           switch (message.type) {
             case 'auth_success':
+              preAuthRetryCountRef.current = -1;
               setOwnedDeviceIds(message.payload.ownedDeviceIds);
               break;
             case 'initial_state':
@@ -93,8 +104,25 @@ export function useServerConnection() {
           return;
         }
 
-        if (useStore.getState().auth.isAuthenticated)
-          reconnectTimeoutRef.current = setTimeout(connect, 5000);
+        if (!useStore.getState().auth.isAuthenticated) return;
+
+        // If the socket closes before auth succeeds, retry quickly once.
+        // A second pre-auth close likely means invalid/expired session.
+        if (preAuthRetryCountRef.current >= 0 && preAuthRetryCountRef.current < 2) {
+          preAuthRetryCountRef.current += 1;
+          reconnectTimeoutRef.current = setTimeout(connect, AUTH_RETRY_DELAY_MS);
+          return;
+        }
+
+        if (preAuthRetryCountRef.current === 2) {
+          preAuthRetryCountRef.current += 1;
+          console.error('Authentication handshake failed repeatedly. Logging out...');
+          useStore.getState().logout();
+          return;
+        }
+
+        preAuthRetryCountRef.current = -1;
+        reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
       };
 
       ws.onerror = (error) => {
@@ -109,6 +137,7 @@ export function useServerConnection() {
     return () => {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (wsRef.current) {
         wsRef.current.close();

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useStore } from "@/store";
 import { X, Share2 } from "lucide-react";
 import React, { useEffect, useState } from "react";
@@ -83,6 +83,9 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
             {ICON_SHARE}
             Shared Devices
           </DialogTitle>
+          <DialogDescription>
+            Review devices you shared and remove access if needed.
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
