@@ -1,8 +1,10 @@
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Pencil, UserPlus, X } from "lucide-react";
 import { useStore } from "@/store";
 import { useTimeAgo } from "@/util/time";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import type { AppDevice, DevicePoint } from "@/types";
 
 const ICON_PENCIL = <Pencil className="h-4 w-4" />;
@@ -37,27 +39,53 @@ function DeviceOverlayComponent({
 }: Props) {
   const handleClose = React.useCallback(() => setSelectedDeviceId(null), [setSelectedDeviceId]);
 
+  const [shareState, setShareState] = useState({
+    isOpen: false,
+    username: "",
+    error: null as string | null,
+    isSharing: false,
+  });
+
   const points = selectedDeviceId != null ? activePointsByDevice[selectedDeviceId] ?? [] : [];
   const chosen = points.length > 0 ? points[points.length - 1] : null;
-  const handleShare = React.useCallback(() => {
-    if (selectedDeviceId == null) return;
 
-    const username = window.prompt("Enter username to share with:");
-    if (!username) return;
+  const handleShareClick = React.useCallback(() => {
+    setShareState({ isOpen: true, username: "", error: null, isSharing: false });
+  }, []);
+
+  const closeShareDialog = React.useCallback(() => {
+    setShareState({ isOpen: false, username: "", error: null, isSharing: false });
+  }, []);
+
+  const handleShare = React.useCallback(async () => {
+    if (selectedDeviceId == null) return;
+    if (!shareState.username.trim()) {
+      setShareState((prev) => ({ ...prev, error: "Please enter a username." }));
+      return;
+    }
+
+    setShareState((prev) => ({ ...prev, isSharing: true, error: null }));
 
     const sessionToken = useStore.getState().settings.sessionToken;
-    void fetch(`/api/devices/${selectedDeviceId}/share`, {
-      method: "POST",
-      body: JSON.stringify({ username }),
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${sessionToken}`,
-      },
-    }).then((r) => {
-      if (r.ok) window.alert("Shared successfully!");
-      else window.alert("Sharing failed.");
-    });
-  }, [selectedDeviceId]);
+
+    try {
+      const r = await fetch(`/api/devices/${selectedDeviceId}/share`, {
+        method: "POST",
+        body: JSON.stringify({ username: shareState.username.trim() }),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${sessionToken}`,
+        },
+      });
+
+      if (!r.ok) throw new Error(await r.text());
+      closeShareDialog();
+    } catch (err) {
+      setShareState((prev) => ({ ...prev, error: err instanceof Error ? err.message : "Sharing failed." }));
+    } finally {
+      setShareState((prev) => ({ ...prev, isSharing: false }));
+    }
+  }, [selectedDeviceId, shareState.username, closeShareDialog]);
 
   // Derive group-related info
   const { group, contributors, mostRecentSourceName } = useMemo(() => {
@@ -106,10 +134,38 @@ function DeviceOverlayComponent({
                 aria-label="Share device"
                 title="Share Device"
                 className="h-8 w-8 text-primary"
-                onClick={handleShare}
+                onClick={handleShareClick}
               >
                 {ICON_USER_PLUS}
               </Button>
+              <Dialog open={shareState.isOpen} onOpenChange={(open) => { if (!open) closeShareDialog(); }}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Share Device</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <label className="text-sm font-medium" htmlFor="share-username">
+                      Username
+                    </label>
+                    <Input
+                      id="share-username"
+                      value={shareState.username}
+                      onChange={(e) => setShareState((prev) => ({ ...prev, username: e.target.value }))}
+                      placeholder="Enter username"
+                      disabled={shareState.isSharing}
+                    />
+                    {shareState.error && <div className="text-sm text-destructive">{shareState.error}</div>}
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={closeShareDialog} disabled={shareState.isSharing}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleShare} disabled={shareState.isSharing}>
+                      {shareState.isSharing ? "Sharing…" : "Share"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               <Button
                 variant="ghost"
                 size="icon"
