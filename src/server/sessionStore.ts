@@ -17,9 +17,9 @@ export const sessionStore = {
     return token;
   },
 
-  getSession(token: string): Session | undefined {
+  getSession(token: string): Session | null {
     const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token);
-    if (!row) return undefined;
+    if (!row) return null;
 
     let session: Session;
     try {
@@ -27,13 +27,13 @@ export const sessionStore = {
     } catch (err) {
       console.error("Invalid session in database:", err);
       db.run(`DELETE FROM user_tokens WHERE token = ?`, [token]);
-      return undefined;
+      return null;
     }
 
     const now = Date.now();
     if (now - session.lastActive > SESSION_TTL) {
       db.run(`DELETE FROM user_tokens WHERE token = ?`, [token]);
-      return undefined;
+      return null;
     }
 
     // Update last_active
