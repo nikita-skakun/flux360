@@ -1,6 +1,6 @@
 import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { CLUSTER_DISTANCE_PX, computeClusters } from "@/util/clustering";
-import { ClusterPopup } from "./map/ClusterPopup";
+import { ClusterPopup } from "./ClusterPopup";
 import { colorForDeltaSeconds, getColorForDevice } from "@/util/color";
 import { computeBestFitMotionPath } from "@/util/motionBestFit";
 import { distance, getRadiusFromVariance } from "@/util/geo";
