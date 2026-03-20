@@ -59,8 +59,6 @@ export function App() {
   useServerConnection();
 
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
-  const [smoothingIterations, setSmoothingIterations] = useState(0);
-  const [simplifyEpsilon, setSimplifyEpsilon] = useState(0);
 
   const activePointsByDevice = useStore(state => state.activePointsByDevice);
   const eventsByDevice = useStore(state => state.eventsByDevice);
@@ -141,16 +139,10 @@ export function App() {
         maptilerApiKey={maptilerApiKey}
         darkMode={isDark}
         pulsingDeviceIds={pulsingDeviceIds}
-        smoothingIterations={smoothingIterations}
-        simplifyEpsilon={simplifyEpsilon}
         selectedHistoryItem={selectedTimelineEvent?.item ?? null}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
-              smoothingIterations={smoothingIterations}
-              onSmoothingIterationsChange={setSmoothingIterations}
-              simplifyEpsilon={simplifyEpsilon}
-              onSimplifyEpsilonChange={setSimplifyEpsilon}
               onLogout={logout}
             />
 

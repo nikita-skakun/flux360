@@ -29,10 +29,7 @@ type Props = {
   darkMode: boolean;
   pulsingDeviceIds: number[];
   selectedHistoryItem: EngineEvent | null;
-  smoothingIterations: number;
-  simplifyEpsilon: number;
 };
-
 const STYLE_LIGHT = MapStyle.DATAVIZ;
 const STYLE_DARK = "019d01fb-0333-7f54-9107-395c4e551160";
 
@@ -46,8 +43,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   darkMode,
   pulsingDeviceIds = [],
   selectedHistoryItem = null,
-  smoothingIterations,
-  simplifyEpsilon,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -115,10 +110,10 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     });
   };
 
-  // Reset cached best-fit paths when render configuration changes
+  // Reset cached best-fit paths when selected history path changes
   useEffect(() => {
     bestFitPathCacheRef.current.clear();
-  }, [smoothingIterations, simplifyEpsilon]);
+  }, [selectedHistoryItem]);
 
   const updateLayers = useCallback(() => {
     const map = mapRef.current;
@@ -469,13 +464,13 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
           }
         }, 'individuals-layer');
       } else {
-        (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: historyFeatures as unknown as Feature[] });
+        (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: historyFeatures as Feature[] });
       }
     } catch (e: unknown) {
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem, smoothingIterations, simplifyEpsilon]);
+  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem]);
 
   const listenersAttached = useRef(false);
 
