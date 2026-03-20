@@ -332,6 +332,32 @@ if (isProduction) {
           return new Response("Invalid request", { status: 400 });
         }
       },
+      "/api/devices/shares": async (request: Request) => {
+        if (request.method !== "GET") return new Response("Method not allowed", { status: 405 });
+        const userInfo = await verifyTraccarSession(request);
+        if (!userInfo) return new Response("Unauthorized", { status: 401 });
+
+        try {
+          // Get all shares created BY this user
+          const allShares = db.query(
+            `SELECT device_id, shared_with_username FROM device_shares
+               WHERE shared_by_username = ?`
+          ).all(userInfo.username) as { device_id: number; shared_with_username: string }[];
+
+          // Filter to only owned devices and get device names from serverState
+          const sharesList = allShares
+            .filter(s => userInfo.ownedDeviceIds.includes(s.device_id))
+            .map(s => ({
+              deviceId: s.device_id,
+              deviceName: serverState.devices[s.device_id]?.name ?? `Device ${s.device_id}`,
+              sharedWith: s.shared_with_username
+            }));
+
+          return Response.json({ shares: sharesList });
+        } catch (e) {
+          return new Response("Invalid request", { status: 400 });
+        }
+      },
       "/api/ws": (request: Request, server: Server<WSData>) => {
         vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
         const upgraded = server.upgrade(request, {
