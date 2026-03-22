@@ -23,6 +23,28 @@ const LoginSchema = z.object({
 });
 const DeviceIdSchema = z.object({ id: z.coerce.number() });
 const UsernameSchema = z.object({ username: z.string().min(1) });
+const TraccarUserSchema = z.object({
+  login: z.string().min(1),
+  email: z.string().optional()
+});
+
+let traccarUsersCache: Array<z.infer<typeof TraccarUserSchema>> = [];
+
+function refreshTraccarUsersCache(authToken: string, reason: string): void {
+  const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
+  fetch(`${apiBase}/users`, {
+    headers: { "Authorization": `Bearer ${authToken}`, "Accept": "application/json" }
+  })
+    .then(async (usersRes) => {
+      if (!usersRes.ok) throw new Error(`Failed to fetch users for cache refresh: ${usersRes.status} ${usersRes.statusText}`);
+
+      traccarUsersCache = z.array(TraccarUserSchema).parse(await usersRes.json());
+      vlog(`[Users Cache] Refreshed (${reason}): count=${traccarUsersCache.length}`);
+    })
+    .catch((e) => {
+      console.error(`[Users Cache] Background refresh error (${reason}):`, e);
+    });
+}
 
 interface WSData {
   username: string | null;
@@ -265,14 +287,13 @@ if (isProduction) {
             if (!sessionRes.ok) return new Response("Invalid credentials", { status: 401 });
 
             // Traccar returns the user object on successful session creation
-            const user = await sessionRes.json();
-            // We'll use the canonical email/username returned by Traccar or fallback to input
-            const identifier = user.email || inputUsername;
+            const user = TraccarUserSchema.parse(await sessionRes.json());
+            const traccarToken = await tokenManager.getOrCreateTraccarPermanentToken(user.login, password);
+            refreshTraccarUsersCache(traccarToken, `login:${user.login}`);
 
-            const traccarToken = await tokenManager.getOrCreateTraccarPermanentToken(identifier, password);
-            const token = sessionStore.createSession(identifier, traccarToken);
-            return Response.json({ token });
-          } catch {
+            return Response.json({ token: sessionStore.createSession(user.login, traccarToken) });
+          } catch (e) {
+            if (e instanceof z.ZodError) console.error("[Traccar Login] /api/login invalid response format:", e.issues);
             return new Response("Login failed", { status: 500 });
           }
         } catch (e) {
@@ -297,11 +318,15 @@ if (isProduction) {
             return new Response("Forbidden: You do not own this device", { status: 403 });
           }
 
-          db.query("INSERT OR REPLACE INTO device_shares (device_id, shared_with_username, shared_by_username) VALUES (?, ?, ?)")
-            .run(deviceId, username, userInfo.username);
+          const targetUser = traccarUsersCache.find(u => u.login === username);
+          if (!targetUser) return new Response("User not found", { status: 404 });
+
+          db.query("INSERT OR IGNORE INTO device_shares (device_id, shared_with_username, shared_by_username, shared_at) VALUES (?, ?, ?, ?)")
+            .run(deviceId, targetUser.login, userInfo.username, Date.now());
 
           return Response.json({ success: true });
         } catch (e) {
+          console.error("Share route error:", e);
           return new Response("Invalid request", { status: 400 });
         }
       },
@@ -316,19 +341,17 @@ if (isProduction) {
             username: z.string().min(1)
           }).parse(params);
 
-          // Verify ownership or self-removal
           const isOwner = userInfo.ownedDeviceIds.includes(deviceId);
           const isTarget = userInfo.username === targetUsername;
 
-          if (!isOwner && !isTarget) {
-            return new Response("Forbidden", { status: 403 });
-          }
+          if (!isOwner && !isTarget) return new Response("Forbidden", { status: 403 });
 
           db.query("DELETE FROM device_shares WHERE device_id = ? AND shared_with_username = ?")
             .run(deviceId, targetUsername);
 
           return Response.json({ success: true });
         } catch (e) {
+          console.error("Share delete route error:", e);
           return new Response("Invalid request", { status: 400 });
         }
       },
@@ -338,23 +361,22 @@ if (isProduction) {
         if (!userInfo) return new Response("Unauthorized", { status: 401 });
 
         try {
-          // Get all shares created BY this user
           const allShares = db.query(
-            `SELECT device_id, shared_with_username FROM device_shares
-               WHERE shared_by_username = ?`
-          ).all(userInfo.username) as { device_id: number; shared_with_username: string }[];
+            `SELECT device_id, shared_with_username, shared_at FROM device_shares WHERE shared_by_username = ?`
+          ).all(userInfo.username) as { device_id: number; shared_with_username: string; shared_at: number }[];
 
-          // Filter to only owned devices and get device names from serverState
           const sharesList = allShares
             .filter(s => userInfo.ownedDeviceIds.includes(s.device_id))
             .map(s => ({
               deviceId: s.device_id,
               deviceName: serverState.devices[s.device_id]?.name ?? `Device ${s.device_id}`,
-              sharedWith: s.shared_with_username
+              sharedWith: s.shared_with_username,
+              sharedAt: s.shared_at,
             }));
 
           return Response.json({ shares: sharesList });
         } catch (e) {
+          console.error("Shares route error:", e);
           return new Response("Invalid request", { status: 400 });
         }
       },
@@ -408,7 +430,7 @@ if (isProduction) {
             // Update server state with device metadata so getMetadata() computes correct rootIds
             serverState.handleDevices(devices);
 
-            // Add shared devices
+            // Add shared devices by looking up shares for this user's Traccar ID
             const shared = db.query("SELECT device_id FROM device_shares WHERE shared_with_username = ?").all(username) as { device_id: number }[];
             const allowedDeviceIds = new Set([...ownedDeviceIds, ...shared.map(s => s.device_id)]);
 
@@ -433,7 +455,7 @@ if (isProduction) {
             const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
 
             // Only include snapshots for root entities that have been seen within the last 48 hours
-            const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(Array.from(allowedDeviceIds).filter(id => rootIds.includes(id)), true, cutoff, entitiesWithOwner);
+            const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(rootIds, true, cutoff, entitiesWithOwner);
 
             // Send auth success with ownedDeviceIds (separate message)
             ws.send(JSON.stringify({
@@ -579,6 +601,7 @@ if (isProduction) {
 
 // Start Traccar admin connection if config is ready
 if (currentBaseUrl && currentToken) {
+  refreshTraccarUsersCache(currentToken, "startup");
   initTraccarClient(serverInst, currentBaseUrl, config.traccarSecure, currentToken);
 }
 

@@ -113,8 +113,12 @@ export class ServerState {
       })
       .filter((d): d is NonNullable<typeof d> => d !== null);
 
-    this.devices = Object.fromEntries(processed.map(d => [d.id, d.base]));
-    this.groups = processed.map(d => d.group).filter((g): g is AppDevice => g !== null);
+    // Merge new devices/groups instead of replacing—preserves existing state
+    // and ensures shared devices stay visible when partial device lists are synced
+    this.devices = { ...this.devices, ...Object.fromEntries(processed.map(d => [d.id, d.base])) };
+
+    const newGroups = processed.map(d => d.group).filter((g): g is AppDevice => g !== null);
+    this.groups = [...this.groups.filter(g => !newGroups.some(ng => ng.id === g.id)), ...newGroups];
 
     for (const group of this.groups) {
       if (group.memberDeviceIds) {
@@ -340,21 +344,26 @@ export class ServerState {
       entities[id] = dev;
     }
 
-    // 2. Process groups: track hierarchy
+    // 2. Process directly allowed groups and include only their members.
+    // This keeps shared-group visibility stable without exposing unrelated devices.
     for (const group of this.groups) {
       if (!allowedDeviceIds.has(group.id)) continue;
 
       if (group.memberDeviceIds) {
         for (const mId of group.memberDeviceIds) {
           groupMemberIds.add(mId);
+
+          if (this.devices[mId]) entities[mId] = this.devices[mId];
         }
       }
 
       entities[group.id] = group;
     }
 
-    // 3. Identify root entities (not inside any group)
-    const rootIds = Array.from(allowedDeviceIds).filter(id => !groupMemberIds.has(id));
+    // 3. Identify root entities (not inside any directly allowed group)
+    const rootIds = Object.keys(entities)
+      .map(Number)
+      .filter(id => !groupMemberIds.has(id));
 
     return {
       entities,

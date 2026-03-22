@@ -11,6 +11,7 @@ type Share = {
   deviceId: number;
   deviceName: string;
   sharedWith: string;
+  sharedAt: number;
 };
 
 type Props = {
@@ -109,6 +110,9 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-sm">{share.deviceName}</div>
                     <div className="text-xs text-muted-foreground">Shared with: {share.sharedWith}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Shared at: {new Date(share.sharedAt).toLocaleString()}
+                    </div>
                   </div>
                   <Button
                     variant="ghost"

@@ -27,7 +27,7 @@ db.run(`
     device_id INTEGER NOT NULL,
     shared_with_username TEXT NOT NULL,
     shared_by_username TEXT NOT NULL,
-    created_at INTEGER DEFAULT (cast(strftime('%s', 'now') as int)),
+    shared_at INTEGER NOT NULL,
     PRIMARY KEY (device_id, shared_with_username)
   );
   
