@@ -1,7 +1,6 @@
-import { EPSILON, distancePointToSegment } from "@/util/vec2";
+import { EPSILON, distancePointToSegment, sub, dot, length } from "@/util/vec2";
 import type { NormalizedPosition, Vec2 } from "@/types";
 
-const COVERAGE_LINEAR_PASSES = 2;
 const BASE_SLACK_METERS = 0.2;
 const MIN_ANCHOR_ALLOWED_DEVIATION = 1;
 const DENSE_DELTA_MS = 15_000;
@@ -9,6 +8,21 @@ const SUPPORT_CAP_MS = 180_000;
 const TIME_WEIGHT_SCALE_MS = 60_000;
 
 const baseAccuracyWeight = (radius: number): number => 50 / (50 + Math.max(0, radius));
+
+// Calculate the angle (in degrees) between three points
+const calculateTurnAngleDeg = (prev: Vec2, curr: Vec2, next: Vec2): number => {
+  const v1 = sub(curr, prev);
+  const v2 = sub(next, curr);
+  const len1 = length(v1);
+  const len2 = length(v2);
+
+  if (len1 < EPSILON || len2 < EPSILON) return 0;
+
+  const cosAngle = dot(v1, v2) / (len1 * len2);
+  const clampedCos = Math.max(-1, Math.min(1, cosAngle));
+  const angleDeg = Math.acos(clampedCos) * (180 / Math.PI);
+  return Math.min(180, angleDeg);
+};
 
 type MotionAnchor = {
   center: Vec2;
@@ -22,6 +36,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
   if (path.length < 2) return path.map(p => p.geo);
 
   const n = path.length;
+  const endpoints: Vec2[] = [[path[0]!.geo[0], path[0]!.geo[1]], [path[n - 1]!.geo[0], path[n - 1]!.geo[1]]];
   const anchors: MotionAnchor[] = [];
 
   const flushRun = (start: number, end: number): void => {
@@ -39,7 +54,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
       const prev = i > 0 ? path[i - 1] : null;
       const next = i < n - 1 ? path[i + 1] : null;
       const rawPrev = prev ? (p.timestamp - prev.timestamp) : (next ? (next.timestamp - p.timestamp) : 0);
-      const rawNext = next ? (p.timestamp - next.timestamp) : rawPrev;
+      const rawNext = next ? (next.timestamp - p.timestamp) : rawPrev;
       const dtPrev = Math.max(0, Math.min(SUPPORT_CAP_MS, Number.isFinite(rawPrev) ? rawPrev : 0));
       const dtNext = Math.max(0, Math.min(SUPPORT_CAP_MS, Number.isFinite(rawNext) ? rawNext : 0));
 
@@ -85,7 +100,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
 
   if (n > 1) flushRun(n - 1, n - 1);
 
-  if (anchors.length < 2) return [[path[0]!.geo[0], path[0]!.geo[1]], [path[n - 1]!.geo[0], path[n - 1]!.geo[1]]];
+  if (anchors.length < 2) return endpoints;
 
   const greedy: Vec2[] = [[anchors[0]!.center[0], anchors[0]!.center[1]]];
   let current = 0;
@@ -136,47 +151,71 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
 
   // Inline coverage enforcement using monotonic segment cursor.
   if (greedy.length >= 2) {
-    for (let pass = 0; pass < COVERAGE_LINEAR_PASSES; pass++) {
-      let insertedAny = false;
-      let segCursor = 0;
+    let segCursor = 0;
 
-      for (let i = 0; i < n; i++) {
-        if (greedy.length < 2) break;
+    for (let i = 0; i < n; i++) {
+      if (greedy.length < 2) break;
 
-        const center = path[i]!.geo;
-        const radius = Math.max(0, path[i]!.accuracy);
-        segCursor = Math.min(segCursor, greedy.length - 2);
+      const point = path[i]!;
+      const radius = Math.max(0, point.accuracy);
+      segCursor = Math.min(segCursor, greedy.length - 2);
 
-        while (segCursor < greedy.length - 2) {
-          const currDist = distancePointToSegment(center, greedy[segCursor]!, greedy[segCursor + 1]!);
-          const nextDist = distancePointToSegment(center, greedy[segCursor + 1]!, greedy[segCursor + 2]!);
-          if (nextDist <= currDist) segCursor++;
-          else break;
-        }
-
-        const dist = distancePointToSegment(center, greedy[segCursor]!, greedy[segCursor + 1]!);
-        if (dist > radius + EPSILON) {
-          greedy.splice(segCursor + 1, 0, [center[0], center[1]]);
-          segCursor++;
-          insertedAny = true;
-        }
+      while (segCursor < greedy.length - 2) {
+        const currDist = distancePointToSegment(point.geo, greedy[segCursor]!, greedy[segCursor + 1]!);
+        const nextDist = distancePointToSegment(point.geo, greedy[segCursor + 1]!, greedy[segCursor + 2]!);
+        if (nextDist <= currDist) segCursor++;
+        else break;
       }
 
-      if (!insertedAny) break;
+      const dist = distancePointToSegment(point.geo, greedy[segCursor]!, greedy[segCursor + 1]!);
+      if (dist > radius + EPSILON) {
+        const prev = greedy[segCursor]!;
+        const next = greedy[segCursor + 1]!;
+
+        // Check if inserting this point would create an unreasonably sharp turn
+        // (less than threshold) - if so, skip it unless the coverage deficit is huge
+        const turnAngleDeg = calculateTurnAngleDeg(prev, point.geo, next);
+        const coverageDeficit = Math.max(0, dist - radius);
+
+        // Only skip insertion if:
+        // 1. Turn angle is very sharp (acute), AND
+        // 2. Coverage deficit is small relative to accuracy
+        const isSharpTurn = turnAngleDeg < 120;
+        const isSmallDeficit = coverageDeficit < radius * 0.5;
+
+        if (!(isSharpTurn && isSmallDeficit)) {
+          greedy.splice(segCursor + 1, 0, [point.geo[0], point.geo[1]]);
+          segCursor++;
+        }
+      }
     }
   }
 
-  if (greedy.length < 2) return [[path[0]!.geo[0], path[0]!.geo[1]], [path[n - 1]!.geo[0], path[n - 1]!.geo[1]]];
+  if (greedy.length < 2) return endpoints;
 
-  // Final deterministic de-duplication of adjacent near-identical vertices.
-  const compact: Vec2[] = [greedy[0]!];
+  // Simplification: Remove collinear points and merge very small consecutive turns
+  const simplified: Vec2[] = [greedy[0]!];
+
   for (let i = 1; i < greedy.length; i++) {
-    const prev = compact[compact.length - 1]!;
+    const prev = simplified[simplified.length - 1]!;
     const curr = greedy[i]!;
+
+    // Always keep distinct points
     const dx = curr[0] - prev[0];
     const dy = curr[1] - prev[1];
-    if ((dx * dx) + (dy * dy) > (EPSILON * EPSILON)) compact.push(curr);
+    if ((dx * dx) + (dy * dy) < EPSILON * EPSILON) continue;
+
+    // Check if collinear with next point
+    if (i + 1 < greedy.length) {
+      const next = greedy[i + 1]!;
+      const turnAngleDeg = calculateTurnAngleDeg(prev, curr, next);
+
+      // Skip this point if it's collinear (0°) or creates a tiny insignificant turn
+      if (turnAngleDeg < 8) continue;
+    }
+
+    simplified.push(curr);
   }
 
-  return compact.length >= 2 ? compact : [[path[0]!.geo[0], path[0]!.geo[1]], [path[n - 1]!.geo[0], path[n - 1]!.geo[1]]];
+  return simplified.length >= 2 ? simplified : endpoints;
 }
