@@ -41,7 +41,7 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     maxStationaryRadius: 20,
     minAverageVelocity: 0.8,
     minEfficiency: 0.5,
-    maxMergeGapDuration: 5 * 60 * 1000,
+    maxMergeGapDuration: 15 * 60 * 1000,
   },
   car: {
     stationaryMahalanobisThreshold: 25.0,
@@ -52,6 +52,6 @@ export const MOTION_PROFILES: Record<MotionProfileName, MotionProfileConfig> = {
     maxStationaryRadius: 25,
     minAverageVelocity: 2.5,
     minEfficiency: 0.6,
-    maxMergeGapDuration: 5 * 60 * 1000,
+    maxMergeGapDuration: 15 * 60 * 1000,
   },
 };
