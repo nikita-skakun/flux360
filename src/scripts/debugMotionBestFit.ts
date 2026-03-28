@@ -119,9 +119,6 @@ async function main() {
 
   const report = {
     summary: {
-      points: ev.path.length,
-      rawPointCount: rawPath.length,
-      bestFitPointCount: fitPath.length,
       sharpThresholdDeg: sharpThreshold,
       raw: {
         sharpTurns: countSharpTurns(rawTurns, sharpThreshold),

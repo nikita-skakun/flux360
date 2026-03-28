@@ -1,4 +1,4 @@
-import { EPSILON, distancePointToSegment, sub, dot, length } from "@/util/vec2";
+import { EPSILON, distancePointToSegment, sub, dot, length, nearestPointOnPolyline } from "@/util/vec2";
 import type { NormalizedPosition, Vec2 } from "@/types";
 
 const BASE_SLACK_METERS = 0.2;
@@ -180,10 +180,11 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
         // Only skip insertion if:
         // 1. Turn angle is very sharp (acute), AND
         // 2. Coverage deficit is small relative to accuracy
-        const isSharpTurn = turnAngleDeg < 120;
+        // Note: turnAngleDeg 0 is straight, 180 is backtrack.
+        const isAcuteTurn = turnAngleDeg > 60;
         const isSmallDeficit = coverageDeficit < radius * 0.5;
 
-        if (!(isSharpTurn && isSmallDeficit)) {
+        if (!(isAcuteTurn && isSmallDeficit)) {
           greedy.splice(segCursor + 1, 0, [point.geo[0], point.geo[1]]);
           segCursor++;
         }
@@ -193,7 +194,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
 
   if (greedy.length < 2) return endpoints;
 
-  // Simplification: Remove collinear points and merge very small consecutive turns
+  // Simplification 1: Remove collinear points and merge very small consecutive turns
   const simplified: Vec2[] = [greedy[0]!];
 
   for (let i = 1; i < greedy.length; i++) {
@@ -217,5 +218,25 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
     simplified.push(curr);
   }
 
-  return simplified.length >= 2 ? simplified : endpoints;
+  // Simplification 2: Greedily remove redundant vertices to minimize the path while preserving coverage.
+  // This eliminates anchors that became redundant once specific points were inserted for coverage.
+  const checkFit = (testPath: Vec2[]): boolean => {
+    for (const p of path) {
+      const nearest = nearestPointOnPolyline(p.geo, testPath);
+      const d = length(sub(nearest, p.geo));
+      const r = Math.max(0, p.accuracy);
+      const slack = BASE_SLACK_METERS + ((1 - baseAccuracyWeight(r)) * Math.min(8, r * 0.12));
+      if (d > r + slack + EPSILON) return false;
+    }
+    return true;
+  };
+
+  let final = [...simplified];
+  for (let i = 1; i < final.length - 1;) {
+    const candidate = final.filter((_, idx) => idx !== i);
+    if (checkFit(candidate)) final = candidate;
+    else i++;
+  }
+
+  return final.length >= 2 ? final : endpoints;
 }
