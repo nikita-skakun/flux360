@@ -184,8 +184,15 @@ export class Engine {
       const deviceId = draft.path[0]?.device ?? draft.predecessor.recent[0]?.device;
       if (deviceId === undefined) { throw new Error('Engine: unable to determine deviceId for motion path'); }
 
+      // The start anchor represents the stable center of the PREVIOUS stationary period.
+      // We use the timestamp of the last point in the stationary window as the time we "left" that anchor.
+      const predecessorPoints = draft.predecessor.recent;
+      const lastStableTimestamp = (predecessorPoints.length > 0)
+        ? predecessorPoints[predecessorPoints.length - 1]!.timestamp
+        : draft.start;
+
       const path = [
-        { device: deviceId, geo: draft.startAnchor, accuracy: startAnchorAccuracy, timestamp: draft.start },
+        { device: deviceId, geo: draft.startAnchor, accuracy: startAnchorAccuracy, timestamp: lastStableTimestamp },
         ...trimmedPath.map(pt => ({ device: pt.device, geo: pt.mean, accuracy: pt.accuracy, timestamp: pt.timestamp })),
         { device: deviceId, geo: settleStats.mean, accuracy: endAnchorAccuracy, timestamp: settleStart },
       ];
