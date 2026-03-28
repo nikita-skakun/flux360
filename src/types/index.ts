@@ -81,6 +81,7 @@ export const MotionEventSchema = z.object({
   startAnchor: Vec2Schema,
   endAnchor: Vec2Schema,
   path: z.array(NormalizedPositionSchema),
+  outliers: z.array(NormalizedPositionSchema),
   distance: z.number(),
   isDraft: z.boolean(),
   bounds: WorldBoundsSchema,
@@ -107,6 +108,7 @@ export const MotionDraftSchema = z.object({
   predecessor: StationaryDraftSchema,
   startAnchor: Vec2Schema,
   path: z.array(DevicePointSchema),
+  outliers: z.array(DevicePointSchema),
   recent: z.array(DevicePointSchema),
 });
 export type MotionDraft = z.infer<typeof MotionDraftSchema>;

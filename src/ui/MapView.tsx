@@ -417,6 +417,15 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
               properties: { isAnchor: false, pathKind: 'accuracy', color: deltaColor },
             });
           }
+
+          for (let i = 0; i < m.outliers.length; i++) {
+            const p = m.outliers[i]!;
+            historyFeatures.push({
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(p.geo, p.accuracy)] },
+              properties: { isAnchor: false, pathKind: 'accuracy', color: '#9e9e9e' },
+            });
+          }
         }
       }
     }

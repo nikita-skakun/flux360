@@ -1,3 +1,4 @@
+import { filterMotionOutliers } from "@/util/motionOutliers";
 import { fromWebMercator, WORLD_R } from "@/util/webMercator";
 import { haversineDistance, computeBounds, getRadiusFromVariance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
@@ -110,6 +111,7 @@ export class Engine {
         predecessor: draft,
         startAnchor: stats.mean,
         path: [...draft.pending],
+        outliers: [],
         recent: [draft.pending[draft.pending.length - 1]!]
       };
       return;
@@ -131,6 +133,14 @@ export class Engine {
   private handleMotion(draft: MotionDraft, p: DevicePoint, profile: MotionProfileConfig) {
     draft.path.push(p);
     draft.recent.push(p);
+
+    const { cleanPath, newOutliers } = filterMotionOutliers(
+      draft.path, 
+      draft.outliers, 
+      (p) => p.mean
+    );
+    draft.path = cleanPath;
+    draft.outliers = newOutliers;
 
     // Cap settling window by count to handle sparse GPS data.
     // checkSettled's own duration check handles the time constraint.
@@ -197,6 +207,8 @@ export class Engine {
         { device: deviceId, geo: settleStats.mean, accuracy: endAnchorAccuracy, timestamp: settleStart },
       ];
 
+      const outliers = draft.outliers.map(pt => ({ device: pt.device, geo: pt.mean, accuracy: pt.accuracy, timestamp: pt.timestamp }));
+
       this.closed.push({
         type: 'stationary',
         start: draft.predecessor.start,
@@ -213,6 +225,7 @@ export class Engine {
         startAnchor: draft.startAnchor,
         endAnchor: settleStats.mean,
         path,
+        outliers,
         distance: totalDistance,
         isDraft: false,
         bounds: computeBounds(path.map(p => p.geo))
@@ -371,6 +384,7 @@ export class Engine {
         }
 
         const mergedPath = [...current.path, ...nextNext.path];
+        const mergedOutliers = [...current.outliers, ...nextNext.outliers];
         const merged: MotionEvent = {
           type: 'motion',
           start: current.start,
@@ -378,6 +392,7 @@ export class Engine {
           startAnchor: current.startAnchor,
           endAnchor: nextNext.endAnchor,
           path: mergedPath,
+          outliers: mergedOutliers,
           distance: this.computePathLength(mergedPath.map(p => p.geo)),
           isDraft: false,
           bounds: computeBounds(mergedPath.map(p => p.geo))

@@ -93,6 +93,7 @@ export function buildEngineSnapshotsFromByDevice(
           const lastPt = draft.path[draft.path.length - 1]!;
           const stats = engine.computeStats(draft.path);
           const motionPath = draft.path.map(p => ({ device: p.device, geo: p.mean, accuracy: p.accuracy, timestamp: p.timestamp }));
+          const motionOutliers = draft.outliers.map(p => ({ device: p.device, geo: p.mean, accuracy: p.accuracy, timestamp: p.timestamp }));
           events.push({
             type: 'motion',
             start: draft.start,
@@ -100,6 +101,7 @@ export function buildEngineSnapshotsFromByDevice(
             startAnchor: draft.startAnchor,
             endAnchor: lastPt.mean,
             path: motionPath,
+            outliers: motionOutliers,
             distance,
             isDraft: true,
             bounds: computeBounds(motionPath.map(p => p.geo))
