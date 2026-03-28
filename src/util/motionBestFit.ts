@@ -3,6 +3,7 @@ import type { NormalizedPosition, Vec2 } from "@/types";
 
 const BASE_SLACK_METERS = 0.2;
 const MIN_ANCHOR_ALLOWED_DEVIATION = 1;
+const STATIONARY_MERGE_DIST_METERS = 60;
 const DENSE_DELTA_MS = 15_000;
 const SUPPORT_CAP_MS = 180_000;
 const TIME_WEIGHT_SCALE_MS = 60_000;
@@ -90,7 +91,10 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
     for (let i = 2; i <= n - 2; i++) {
       const prev = path[i - 1]!;
       const curr = path[i]!;
-      if ((curr.timestamp - prev.timestamp) > DENSE_DELTA_MS) {
+      const timeGap = curr.timestamp - prev.timestamp;
+      const dSq = Math.pow(curr.geo[0] - prev.geo[0], 2) + Math.pow(curr.geo[1] - prev.geo[1], 2);
+
+      if (timeGap > DENSE_DELTA_MS && dSq > STATIONARY_MERGE_DIST_METERS * STATIONARY_MERGE_DIST_METERS) {
         flushRun(runStart, i - 1);
         runStart = i;
       }
@@ -98,7 +102,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
     flushRun(runStart, n - 2);
   }
 
-  if (n > 1) flushRun(n - 1, n - 1);
+  flushRun(n - 1, n - 1);
 
   if (anchors.length < 2) return endpoints;
 
@@ -212,7 +216,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
       const turnAngleDeg = calculateTurnAngleDeg(prev, curr, next);
 
       // Skip this point if it's collinear (0°) or creates a tiny insignificant turn
-      if (turnAngleDeg < 8) continue;
+      if (turnAngleDeg < 4) continue;
     }
 
     simplified.push(curr);
@@ -220,22 +224,34 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
 
   // Simplification 2: Greedily remove redundant vertices to minimize the path while preserving coverage.
   // This eliminates anchors that became redundant once specific points were inserted for coverage.
-  const checkFit = (testPath: Vec2[]): boolean => {
+  const calculateMaxExcess = (testPath: Vec2[]): number => {
+    let maxExcess = 0;
     for (const p of path) {
       const nearest = nearestPointOnPolyline(p.geo, testPath);
       const d = length(sub(nearest, p.geo));
       const r = Math.max(0, p.accuracy);
       const slack = BASE_SLACK_METERS + ((1 - baseAccuracyWeight(r)) * Math.min(8, r * 0.12));
-      if (d > r + slack + EPSILON) return false;
+      const excess = d - (r + slack);
+      if (excess > maxExcess) maxExcess = excess;
     }
-    return true;
+    return maxExcess;
   };
 
   let final = [...simplified];
+  let currentMaxExcess = calculateMaxExcess(final);
+
   for (let i = 1; i < final.length - 1;) {
     const candidate = final.filter((_, idx) => idx !== i);
-    if (checkFit(candidate)) final = candidate;
-    else i++;
+    const candidateMaxExcess = calculateMaxExcess(candidate);
+
+    // Allow removal if it doesn't worsen the fit beyond a tiny tolerance, 
+    // ensuring that pre-existing outlier points don't block simplification of the rest of the path.
+    if (candidateMaxExcess <= Math.max(0, currentMaxExcess) + EPSILON) {
+      final = candidate;
+      currentMaxExcess = candidateMaxExcess;
+    } else {
+      i++;
+    }
   }
 
   return final.length >= 2 ? final : endpoints;
