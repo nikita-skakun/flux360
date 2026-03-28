@@ -1,5 +1,6 @@
 import { computeBestFitMotionPath } from "@/util/motionBestFit";
 import { dot, EPSILON, length, nearestPointOnPolyline, sub } from "@/util/vec2";
+import { encode } from "@toon-format/toon";
 import { MotionEventSchema } from "@/types";
 import { parseArgs } from "util";
 import { readFile } from "fs/promises";
@@ -9,7 +10,6 @@ import type { Vec2 } from "@/types";
 const MotionInputSchema = z.union([
   MotionEventSchema,
   z.object({ ev: MotionEventSchema }),
-  z.object({ data: MotionEventSchema }),
 ]);
 
 function turnAnglesDeg(points: Vec2[]): number[] {
@@ -84,8 +84,7 @@ async function main() {
   if (!values.input) throw new Error("Missing --input path to a motion event JSON file.");
 
   const parsed = MotionInputSchema.parse(JSON.parse(await readFile(values.input, "utf-8")));
-  const ev = "type" in parsed ? parsed : ("ev" in parsed ? parsed.ev : parsed.data);
-
+  const ev = "type" in parsed ? parsed : parsed.ev;
   if (ev.type !== "motion") throw new Error("Input JSON does not contain a motion event.");
 
   const rawPath = ev.path.map(p => p.geo);
@@ -144,7 +143,6 @@ async function main() {
       },
     },
     perPoint: ev.path.map((p, idx) => {
-      const fit = fitProjections[idx]!.best;
       const toCenter = fitProjections[idx]!.dist;
       return {
         idx,
@@ -152,12 +150,11 @@ async function main() {
         accuracy: p.accuracy,
         fitOffsetMeters: Number(toCenter.toFixed(3)),
         fitInsideAccuracy: toCenter <= p.accuracy + EPSILON,
-        raw: { x: Number(p.geo[0].toFixed(3)), y: Number(p.geo[1].toFixed(3)) },
-        bestFit: { x: Number(fit[0].toFixed(3)), y: Number(fit[1].toFixed(3)) },
+        x: Number(p.geo[0].toFixed(3)),
+        y: Number(p.geo[1].toFixed(3)),
       };
     }),
-    bestFitVertices: fitPath.map((p, idx) => ({
-      idx,
+    bestFitVertices: fitPath.map((p) => ({
       x: Number(p[0].toFixed(3)),
       y: Number(p[1].toFixed(3)),
     })),
@@ -165,7 +162,7 @@ async function main() {
     bestFitTurnAnglesDeg: fitTurns.map(v => Number(v.toFixed(2))),
   };
 
-  console.log(JSON.stringify(report, null, 2));
+  process.stdout.write(encode(report));
 }
 
 main().catch(err => {
