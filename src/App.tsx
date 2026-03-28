@@ -100,7 +100,38 @@ export function App() {
   }
 
   return (
-    <div className="h-screen w-screen">
+    <div
+      className="h-screen w-screen"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files?.[0];
+        if (!file?.name.endsWith('.json')) return;
+        const reader = new FileReader();
+        reader.onload = (re) => {
+          try {
+            const data = JSON.parse(re.target?.result as string);
+            if (!data.ev) return;
+            setSelectedTimelineEvent({ id: 'debug-drop', item: data.ev });
+            if (data.ev.bounds) {
+              const { minX, minY, maxX, maxY } = data.ev.bounds;
+              const sw = fromWebMercator([minX, minY]);
+              const ne = fromWebMercator([maxX, maxY]);
+              const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+              mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+              return;
+            } else if (data.ev.type === 'stationary') {
+              const geo = fromWebMercator(data.ev.mean);
+              const r = 0.001;
+              mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
+            }
+          } catch (err) {
+            console.error('Failed to parse dropped JSON', err);
+          }
+        };
+        reader.readAsText(file);
+      }}
+    >
       {selectedTimelineEvent && (
         <HistoryObservationBar
           event={selectedTimelineEvent}
