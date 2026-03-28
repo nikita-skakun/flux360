@@ -5,10 +5,12 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 ## Screenshots
 
 ### Event History View
-<img width="1920" height="1080" alt="Event History View" src="https://github.com/user-attachments/assets/efb4fcf0-e22f-494e-a539-1547d32def58" />
+
+![Event History View](https://github.com/user-attachments/assets/efb4fcf0-e22f-494e-a539-1547d32def58)
 
 ### Cluster Menu and Device Panel
-<img width="1920" height="1080" alt="Devices Panel" src="https://github.com/user-attachments/assets/212fda4e-8eec-43f9-a88a-bce242e6ecdf" />
+
+![Cluster Menu and Device Panel](https://github.com/user-attachments/assets/212fda4e-8eec-43f9-a88a-bce242e6ecdf)
 
 ## Features
 
@@ -39,7 +41,9 @@ Copy `config.sample.json` to `config.json`:
 |---|---|
 | `traccarBaseUrl` | Hostname of your [Traccar](https://www.traccar.org) server |
 | `traccarSecure` | `true` for HTTPS/WSS, `false` for HTTP/WS |
+| `traccarApiToken` | Admin token for the Traccar server |
 | `maptilerApiKey` | [MapTiler](https://www.maptiler.com) API key |
+| `historyDays` | Number of days to pull during syncronization |
 
 Install dependancies:
 ```bash
