@@ -26,7 +26,6 @@ Promise.resolve(document.fonts.ready)
   .then(() =>
     Promise.allSettled([
       document.fonts.load('1em "Material Symbols Outlined"'),
-      document.fonts.load('1em "Material Icons"'),
     ])
   )
   .finally(render);

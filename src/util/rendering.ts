@@ -66,7 +66,7 @@ export function drawPin(
     ctx.fillStyle = rgbaString(iconColor, 1);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = `${pinRadius}px 'Material Symbols Outlined', 'Material Icons', -apple-system, system-ui, Arial`;
+    ctx.font = `${pinRadius}px 'Material Symbols Outlined', -apple-system, system-ui, Arial`;
     ctx.fillText(String(iconText), tipX, headY + 1);
     ctx.restore();
   }
