@@ -1,6 +1,8 @@
+import { getColorForDevice } from "@/util/color";
+import React from "react";
 import type { AppDevice, DevicePoint } from "@/types";
 
-export type ClusterPopupProps = {
+type ClusterPopupProps = {
   x: number;
   y: number;
   items: DevicePoint[];
@@ -10,9 +12,6 @@ export type ClusterPopupProps = {
   darkMode: boolean;
   entities: Record<number, AppDevice>;
 };
-
-import { getColorForDevice } from "@/util/color";
-import React from "react";
 
 export const ClusterPopup = React.memo(({
   x, y, items, animationState, onClose, onSelectDevice,

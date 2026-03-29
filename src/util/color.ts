@@ -17,7 +17,7 @@ export function colorForDevice(deviceId: number): Color {
   return rgb;
 }
 
-export function parseHexColor(hex: string): Color | null {
+function parseHexColor(hex: string): Color | null {
   const match = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
   if (!match?.[1] || !match[2] || !match[3]) return null;
   return [parseInt(match[1], 16), parseInt(match[2], 16), parseInt(match[3], 16)];
@@ -49,7 +49,7 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${clampChannel(r).toString(16).padStart(2, "0")}${clampChannel(g).toString(16).padStart(2, "0")}${clampChannel(b).toString(16).padStart(2, "0")}`;
 }
 
-export function lerpColor(a: Color, b: Color, t: number): Color {
+function lerpColor(a: Color, b: Color, t: number): Color {
   const clamped = Math.max(0, Math.min(1, t));
   return [
     a[0] + (b[0] - a[0]) * clamped,

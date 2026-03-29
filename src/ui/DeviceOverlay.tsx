@@ -118,11 +118,11 @@ function DeviceOverlayComponent({
           {isOwner && (
             <>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="icon"
                 aria-label="Share device"
                 title="Share Device"
-                className="h-8 w-8 text-primary"
+                className="h-7 w-7 rounded-full"
                 onClick={handleShareClick}
               >
                 {ICON_USER_PLUS}
@@ -172,11 +172,11 @@ function DeviceOverlayComponent({
                 </DialogContent>
               </Dialog>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="icon"
-                aria-label="Edit settings"
-                title="Edit Settings"
-                className="h-8 w-8"
+                aria-label="Edit device"
+                title="Edit Device"
+                className="h-7 w-7 rounded-full"
                 onClick={handleEdit}
               >
                 {ICON_PENCIL}
@@ -184,11 +184,11 @@ function DeviceOverlayComponent({
             </>
           )}
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon"
             aria-label="Deselect device"
-            title="Close"
-            className="h-8 w-8"
+            title="Deselect Device"
+            className="h-7 w-7 rounded-full"
             onClick={handleClose}
           >
             {ICON_CLOSE}

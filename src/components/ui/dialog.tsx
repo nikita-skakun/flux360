@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { Root, Trigger, Portal, Close, Overlay, Content, Title, Description } from "@radix-ui/react-dialog"
+import { Root, Portal, Close, Overlay, Content, Title, Description } from "@radix-ui/react-dialog"
 import { XIcon } from "lucide-react"
 import React from "react"
 
@@ -11,23 +11,10 @@ function Dialog({
 }: React.ComponentProps<typeof Root>) {
   return <Root data-slot="dialog" {...props} />
 }
-
-function DialogTrigger({
-  ...props
-}: React.ComponentProps<typeof Trigger>) {
-  return <Trigger data-slot="dialog-trigger" {...props} />
-}
-
 function DialogPortal({
   ...props
 }: React.ComponentProps<typeof Portal>) {
   return <Portal data-slot="dialog-portal" {...props} />
-}
-
-function DialogClose({
-  ...props
-}: React.ComponentProps<typeof Close>) {
-  return <Close data-slot="dialog-close" {...props} />
 }
 
 function DialogOverlay({
@@ -145,13 +132,9 @@ function DialogDescription({
 
 export {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogOverlay,
-  DialogPortal,
   DialogTitle,
-  DialogTrigger,
 }

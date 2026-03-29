@@ -9,7 +9,7 @@ interface PendingRequest {
 
 const pending = new Map<string, PendingRequest>();
 
-export function registerCallback(requestId: string, cb: (resp: unknown) => void) {
+function registerCallback(requestId: string, cb: (resp: unknown) => void) {
   const timer = setTimeout(() => {
     const entry = pending.get(requestId);
     if (entry) {

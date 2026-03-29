@@ -1,0 +1,13 @@
+{
+  "project": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "entry": [
+    "build.ts",
+    "src/server.tsx",
+    "src/client.tsx",
+    "src/index.css",
+    "src/scripts/*.ts"
+  ]
+}

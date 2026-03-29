@@ -89,17 +89,3 @@ export function drawPin(
 
   ctx.restore();
 }
-
-/**
- * Interpolates between two RGB colors.
- */
-export function interpolateColor(
-  c1: [number, number, number],
-  c2: [number, number, number],
-  t: number
-): string {
-  const r = Math.round(c1[0] + (c2[0] - c1[0]) * t);
-  const g = Math.round(c1[1] + (c2[1] - c1[1]) * t);
-  const b = Math.round(c1[2] + (c2[2] - c1[2]) * t);
-  return `rgb(${r}, ${g}, ${b})`;
-}

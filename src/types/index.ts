@@ -43,13 +43,12 @@ export type NormalizedPosition = z.infer<typeof NormalizedPositionSchema>;
 export const MotionProfileNameSchema = z.enum(['person', 'car']);
 export type MotionProfileName = z.infer<typeof MotionProfileNameSchema>;
 
-export const WorldBoundsSchema = z.object({
+const WorldBoundsSchema = z.object({
   minX: z.number(),
   minY: z.number(),
   maxX: z.number(),
   maxY: z.number(),
 });
-export type WorldBounds = z.infer<typeof WorldBoundsSchema>;
 
 export const AppDeviceSchema = z.object({
   id: z.number(),
@@ -64,7 +63,7 @@ export const AppDeviceSchema = z.object({
 });
 export type AppDevice = z.infer<typeof AppDeviceSchema>;
 
-export const StationaryEventSchema = z.object({
+const StationaryEventSchema = z.object({
   type: z.literal('stationary'),
   start: z.number(),
   end: z.number(),
@@ -72,7 +71,6 @@ export const StationaryEventSchema = z.object({
   variance: z.number(),
   isDraft: z.boolean(),
 });
-export type StationaryEvent = z.infer<typeof StationaryEventSchema>;
 
 export const MotionEventSchema = z.object({
   type: z.literal('motion'),
@@ -130,26 +128,19 @@ export const RawTraccarPositionSchema = z.object({
   longitude: z.number(),
   accuracy: z.number().optional(),
 }).loose();
-export type RawTraccarPosition = z.infer<typeof RawTraccarPositionSchema>;
 
 // --- Shared Record Types ---
 
-export const EntitiesSchema = z.record(z.string(), AppDeviceSchema);
-export type Entities = z.infer<typeof EntitiesSchema>;
-
-export const ActivePointsByDeviceSchema = z.record(z.string(), z.array(DevicePointSchema));
-export type ActivePointsByDevice = z.infer<typeof ActivePointsByDeviceSchema>;
-
-export const EventsByDeviceSchema = z.record(z.string(), z.array(EngineEventSchema));
-export type EventsByDevice = z.infer<typeof EventsByDeviceSchema>;
+const EntitiesSchema = z.record(z.string(), AppDeviceSchema);
+const ActivePointsByDeviceSchema = z.record(z.string(), z.array(DevicePointSchema));
+const EventsByDeviceSchema = z.record(z.string(), z.array(EngineEventSchema));
 
 // --- WebSocket Protocol ---
 
 // Auth payload sent once at connection authentication
-export const AuthPayloadSchema = z.object({
+const AuthPayloadSchema = z.object({
   ownedDeviceIds: z.array(z.number()),
 });
-export type AuthPayload = z.infer<typeof AuthPayloadSchema>;
 
 export const InitialStatePayloadSchema = z.object({
   entities: EntitiesSchema,
@@ -196,7 +187,6 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().nullable() }),
   z.object({ type: z.literal("ping"), requestId: z.never().optional() }),
 ]);
-export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("authenticate"), token: z.string(), requestId: z.never().optional() }),

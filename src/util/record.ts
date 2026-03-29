@@ -6,10 +6,3 @@ export function* numericEntries<T>(record: Record<number, T>): IterableIterator<
     yield [Number(k), v] as const;
   }
 }
-
-/**
- * Get the numeric keys of a record.
- */
-export function numericKeys(record: Record<number, unknown>): number[] {
-  return Object.keys(record).map(k => Number(k));
-}
