@@ -86,7 +86,7 @@ function collectDeviceData(
   for (const id of ids) {
     if (serverState.activePointsByDevice[id]) {
       const include = applySnapshotCutoff
-        ? entities[id]?.lastSeen != null && entities[id]!.lastSeen > snapshotCutoff
+        ? entities[id]?.lastSeen != null && entities[id].lastSeen > snapshotCutoff
         : true;
       if (include) {
         activePoints[id] = serverState.activePointsByDevice[id];
@@ -156,8 +156,6 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
         .filter((id): id is number => id !== undefined && !serverState.backfilled.has(id));
 
       if (devicesToBackfill.length > 0) {
-        devicesToBackfill.forEach(id => serverState.backfilled.add(id));
-
         (async () => {
           vlog(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
           for (const id of devicesToBackfill) {
@@ -166,7 +164,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
 
             // Fetch head delta if we have reliable data, otherwise full window
             const isDelta = lastTs && firstTs && firstTs < backfillCutoff + (10 * 60000);
-            const from = isDelta ? (lastTs! + 1) : backfillCutoff;
+            const from = isDelta ? (lastTs + 1) : backfillCutoff;
 
             if (Date.now() - from < 60000) continue;
 
@@ -177,6 +175,9 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
                 broadcastUpdate(server, [id]);
               }
               await new Promise(r => setTimeout(r, 200)); // Gentle delay for Traccar API
+
+              // Only record backfill as complete after successfully fetching and processing history
+              serverState.backfilled.add(id);
             } catch (err) {
               console.error(`[Server] History backfill failed for device ${id}:`, err);
             }
@@ -204,7 +205,6 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
   });
   traccarClient.connect();
 }
-
 
 // Session store and token manager for WebSocket authentication
 import { sessionStore } from "./server/sessionStore";

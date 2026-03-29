@@ -75,7 +75,6 @@ export function App() {
     setSelectedTimelineEvent(null);
   }, [selectedDeviceId]);
 
-
   const allDevicesForSelection = useMemo(() => {
     return Object.values(entities)
       .filter(e => e.memberDeviceIds === null) // Only individual devices
@@ -220,4 +219,3 @@ export function App() {
     </div>
   );
 }
-

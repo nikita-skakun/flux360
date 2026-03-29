@@ -21,6 +21,7 @@ export class ServerState {
   groupIds = new Set<number>();
   engines: Record<number, Engine> = {};
   engineCheckpoints: Record<number, { timestamp: number; snapshot: EngineState }[]> = {};
+  knownKeys = new Set<string>();
   processedKeys = new Set<string>();
   backfilled = new Set<number>();
   private rawTraccarDevices: Record<number, TraccarDevice> = {};
@@ -70,9 +71,12 @@ export class ServerState {
         if (!list) this.allPosById[p.device] = list = [];
         list.push(p);
 
+        const tKey = dedupeKey(p);
+        this.knownKeys.add(tKey);
+
         const engine = this.engines[p.device];
         if (engine?.lastTimestamp && p.timestamp <= engine.lastTimestamp) {
-          this.processedKeys.add(dedupeKey(p));
+          this.processedKeys.add(tKey);
         }
       } catch (err) {
         console.error("Failed to validate position from DB:", err);
@@ -161,30 +165,39 @@ export class ServerState {
   handlePositions(pts: NormalizedPosition[]) {
     if (pts.length === 0) return null;
 
-    // 1. Save to Database
-    db.transaction(() => {
-      const stmt = db.prepare(`INSERT INTO position_events (device_id, geo_lng, geo_lat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
-      for (const p of pts) {
-        stmt.run(p.device, p.geo[0], p.geo[1], p.accuracy, p.timestamp);
-      }
-    })();
+    const newPts = pts.filter(p => {
+      const k = dedupeKey(p);
+      if (this.knownKeys.has(k)) return false;
+      this.knownKeys.add(k);
+      return true;
+    });
 
-    // 2. Update memory index
-    this.positionsAll.push(...pts);
-    this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
+    if (newPts.length > 0) {
+      // 1. Save to Database
+      db.transaction(() => {
+        const stmt = db.prepare(`INSERT INTO position_events (device_id, geo_lng, geo_lat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
+        for (const p of newPts) {
+          stmt.run(p.device, p.geo[0], p.geo[1], p.accuracy, p.timestamp);
+        }
+      })();
 
-    const touchedIds = new Set<number>();
-    for (const p of pts) {
-      const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
-      for (const id of ids) {
-        let list = this.allPosById[id];
-        if (!list) this.allPosById[id] = list = [];
-        list.push(p);
-        touchedIds.add(id);
+      // 2. Update memory index
+      this.positionsAll.push(...newPts);
+      this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
+
+      const touchedIds = new Set<number>();
+      for (const p of newPts) {
+        const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
+        for (const id of ids) {
+          let list = this.allPosById[id];
+          if (!list) this.allPosById[id] = list = [];
+          list.push(p);
+          touchedIds.add(id);
+        }
       }
-    }
-    for (const id of touchedIds) {
-      this.allPosById[id]?.sort((a, b) => a.timestamp - b.timestamp);
+      for (const id of touchedIds) {
+        this.allPosById[id]?.sort((a, b) => a.timestamp - b.timestamp);
+      }
     }
 
     // 3. Prune old data
@@ -193,7 +206,10 @@ export class ServerState {
     if (splitIdx > 0) {
       for (let i = 0; i < splitIdx; i++) {
         const p = this.positionsAll[i];
-        if (p) this.processedKeys.delete(dedupeKey(p));
+        if (!p) continue;
+        const k = dedupeKey(p);
+        this.processedKeys.delete(k);
+        this.knownKeys.delete(k);
       }
       this.positionsAll = this.positionsAll.slice(splitIdx);
     }

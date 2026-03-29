@@ -32,28 +32,10 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
   const startTime = item.start;
   const startTimeStr = useMemo(() => new Date(startTime).toLocaleString(), [startTime]);
 
-  let detailsNode = null;
-
   const isDraft = event.id.startsWith('draft-');
   const draftDurationStr = useTimeAgo(startTime, false, isDraft);
   const nonDraftDurationStr = useMemo(() => humanDurationSince(startTime, item.end), [startTime, item.end]);
   const durationStr = isDraft ? draftDurationStr : nonDraftDurationStr;
-
-  if (item.type === 'stationary') {
-    detailsNode = (
-      <span className="flex items-center gap-1.5">
-        {ICON_MAP_PIN}
-        Stationary for {durationStr}
-      </span>
-    );
-  } else {
-    detailsNode = (
-      <span className="flex items-center gap-1.5">
-        {ICON_ACTIVITY}
-        Moved {Math.round(item.distance)}m ({durationStr})
-      </span>
-    );
-  }
 
   return (
     <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 px-6 py-3 rounded-full bg-background/90 text-foreground shadow-2xl backdrop-blur-md border border-border animate-in slide-in-from-top-4 font-medium pointer-events-auto transition-colors duration-500">
@@ -65,7 +47,17 @@ export const HistoryObservationBar: React.FC<Props> = ({ event, onClose }) => {
       </div>
       <div className="w-px h-6 bg-primary-foreground/20 mx-1" />
       <div className="flex flex-col gap-0.5 max-w-[200px] truncate text-sm">
-        {detailsNode}
+        {item.type === 'stationary' ? (
+          <span className="flex items-center gap-1.5">
+            {ICON_MAP_PIN}
+            Stationary for {durationStr}
+          </span>
+        ) : (
+          <span className="flex items-center gap-1.5">
+            {ICON_ACTIVITY}
+            Moved {Math.round(item.distance)}m ({durationStr})
+          </span>
+        )}
       </div>
       <Button
         variant="ghost"

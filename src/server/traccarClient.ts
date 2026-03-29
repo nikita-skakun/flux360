@@ -1,4 +1,5 @@
 import { extractPositionsFromMessage } from "./traccarAdminUtils";
+import { getTraccarApiBase } from "./traccarUrlUtils";
 import { normalizePosition } from "./serverUtils";
 import { TraccarDeviceSchema, RawTraccarPositionSchema } from "@/types";
 import { vlog } from "@/util/logger";
@@ -57,7 +58,7 @@ export class TraccarAdminClient {
 
   async fetchDevices(): Promise<TraccarDevice[]> {
     try {
-      const res = await fetch(`${this.secure ? "https" : "http"}://${this.baseUrl}/api/devices`, {
+      const res = await fetch(`${getTraccarApiBase(this.baseUrl, this.secure)}/devices`, {
         headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -91,7 +92,7 @@ export class TraccarAdminClient {
     params.set("from", fromStr);
     params.set("to", toStr);
 
-    const url = `${this.secure ? "https" : "http"}://${this.baseUrl}/api/positions?${params.toString()}`;
+    const url = `${getTraccarApiBase(this.baseUrl, this.secure)}/positions?${params.toString()}`;
 
     vlog(`[TraccarAdminClient] Fetching history for device ${deviceId} at ${url}`);
 

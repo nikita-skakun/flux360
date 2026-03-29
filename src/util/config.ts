@@ -22,6 +22,6 @@ export async function loadConfig(): Promise<Config> {
     const message = error instanceof z.ZodError
       ? error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join(", ")
       : "config.json is not valid JSON.";
-    throw new Error(`Configuration error: ${message}`);
+    throw new Error(`Configuration error: ${message}`, { cause: error });
   }
 }

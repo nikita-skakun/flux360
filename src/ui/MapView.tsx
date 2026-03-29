@@ -77,15 +77,15 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   }, []);
 
   useEffect(() => {
-    if (!clusterPopup || clusterPopup.animationState !== 'entering') return;
+    if (clusterPopup?.animationState !== 'entering') return;
     const timer = window.setTimeout(() => {
-      setClusterPopup((prev) => (prev && prev.animationState === 'entering' ? { ...prev, animationState: 'visible' } : prev));
+      setClusterPopup((prev) => (prev?.animationState === 'entering' ? { ...prev, animationState: 'visible' } : prev));
     }, 80);
     return () => window.clearTimeout(timer);
   }, [clusterPopup]);
 
   useEffect(() => {
-    if (!clusterPopup || clusterPopup.animationState !== 'exiting') return;
+    if (clusterPopup?.animationState !== 'exiting') return;
     const timer = window.setTimeout(() => setClusterPopup(null), 150);
     return () => window.clearTimeout(timer);
   }, [clusterPopup]);

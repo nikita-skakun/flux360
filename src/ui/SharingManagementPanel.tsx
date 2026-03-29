@@ -53,7 +53,7 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
       }
     };
 
-    fetchShares();
+    void fetchShares();
   }, [isOpen, sessionToken]);
 
   const handleRemoveShare = async (deviceId: number, username: string) => {
@@ -117,7 +117,7 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={() => handleRemoveShare(share.deviceId, share.sharedWith)}
+                    onClick={() => { void handleRemoveShare(share.deviceId, share.sharedWith); }}
                     disabled={removingShare?.deviceId === share.deviceId && removingShare?.username === share.sharedWith}
                     className="h-7 w-7 ml-2 flex-shrink-0"
                     title="Remove share"
