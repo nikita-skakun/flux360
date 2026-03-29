@@ -1,4 +1,4 @@
-import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, MotionProfileName } from '@/types';
+import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, MotionProfileName, DeviceShare } from '@/types';
 
 export type StoreState = {
   // Entities slice (unifies devices and groups)
@@ -60,6 +60,11 @@ export type StoreActions = {
   setSelectedDeviceId: (id: number | null) => void;
   setIsSidePanelOpen: (open: boolean) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
+
+  // Sharing
+  shareDevice: (deviceId: number, username: string) => Promise<void>;
+  unshareDevice: (deviceId: number, username: string) => Promise<void>;
+  getShares: () => Promise<DeviceShare[]>;
 };
 
 export type Store = StoreState & StoreActions;

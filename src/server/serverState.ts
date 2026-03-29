@@ -24,6 +24,7 @@ export class ServerState {
   knownKeys = new Set<string>();
   processedKeys = new Set<string>();
   backfilled = new Set<number>();
+  inProgressBackfills = new Set<number>();
   private rawTraccarDevices: Record<number, TraccarDevice> = {};
 
   activePointsByDevice: Record<number, DevicePoint[]> = {};

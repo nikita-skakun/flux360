@@ -66,19 +66,8 @@ function DeviceOverlayComponent({
 
     setShareState((prev) => ({ ...prev, isSharing: true, error: null }));
 
-    const sessionToken = useStore.getState().settings.sessionToken;
-
     try {
-      const r = await fetch(`/api/devices/${selectedDeviceId}/share`, {
-        method: "POST",
-        body: JSON.stringify({ username: shareState.username.trim() }),
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionToken}`,
-        },
-      });
-
-      if (!r.ok) throw new Error(await r.text());
+      await useStore.getState().shareDevice(selectedDeviceId, shareState.username.trim());
       closeShareDialog();
     } catch (err) {
       setShareState((prev) => ({ ...prev, error: err instanceof Error ? err.message : "Sharing failed." }));

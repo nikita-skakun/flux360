@@ -3,16 +3,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useStore } from "@/store";
 import { X, Share2 } from "lucide-react";
 import React, { useEffect, useState } from "react";
+import type { DeviceShare } from "@/types";
 
 const ICON_SHARE = <Share2 className="h-4 w-4" />;
 const ICON_CLOSE = <X className="h-4 w-4" />;
-
-type Share = {
-  deviceId: number;
-  deviceName: string;
-  sharedWith: string;
-  sharedAt: number;
-};
 
 type Props = {
   isOpen: boolean;
@@ -23,12 +17,13 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
   isOpen,
   onClose,
 }: Props) {
-  const [shares, setShares] = useState<Share[]>([]);
+  const [shares, setShares] = useState<DeviceShare[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removingShare, setRemovingShare] = useState<{ deviceId: number; username: string } | null>(null);
 
-  const sessionToken = useStore(state => state.settings.sessionToken);
+  const getShares = useStore(state => state.getShares);
+  const unshareDevice = useStore(state => state.unshareDevice);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -37,15 +32,7 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
       setIsLoading(true);
       setError(null);
       try {
-        const response = await fetch("/api/devices/shares", {
-          headers: {
-            Authorization: `Bearer ${sessionToken}`,
-          },
-        });
-
-        if (!response.ok) throw new Error("Failed to fetch shares");
-
-        setShares((await response.json() as { shares: Share[]; }).shares);
+        setShares((await getShares()));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to fetch shares");
       } finally {
@@ -54,20 +41,12 @@ export const SharingManagementPanel = React.memo(function SharingManagementPanel
     };
 
     void fetchShares();
-  }, [isOpen, sessionToken]);
+  }, [isOpen, getShares]);
 
   const handleRemoveShare = async (deviceId: number, username: string) => {
     setRemovingShare({ deviceId, username });
     try {
-      const response = await fetch(`/api/devices/${deviceId}/share/${username}`, {
-        method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${sessionToken}`,
-        },
-      });
-
-      if (!response.ok) throw new Error("Failed to remove share");
-
+      await unshareDevice(deviceId, username);
       setShares(shares.filter(s => !(s.deviceId === deviceId && s.sharedWith === username)));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove share");

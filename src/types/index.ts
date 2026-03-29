@@ -159,6 +159,14 @@ export const InitialStatePayloadSchema = z.object({
 });
 export type InitialStatePayload = z.infer<typeof InitialStatePayloadSchema>;
 
+export const DeviceShareSchema = z.object({
+  deviceId: z.number(),
+  deviceName: z.string(),
+  sharedWith: z.string(),
+  sharedAt: z.number(),
+});
+export type DeviceShare = z.infer<typeof DeviceShareSchema>;
+
 export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("auth_success"), payload: AuthPayloadSchema, requestId: z.never().optional() }),
   z.object({ type: z.literal("initial_state"), payload: InitialStatePayloadSchema, requestId: z.never().optional() }),
@@ -181,12 +189,17 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("update_success"), deviceId: z.number(), requestId: z.string() }),
   z.object({ type: z.literal("create_success"), device: TraccarDeviceSchema, requestId: z.string() }),
   z.object({ type: z.literal("delete_success"), groupId: z.number(), requestId: z.string() }),
+  z.object({ type: z.literal("login_success"), token: z.string(), requestId: z.string() }),
+  z.object({ type: z.literal("share_success"), deviceId: z.number(), sharedWith: z.string(), requestId: z.string() }),
+  z.object({ type: z.literal("unshare_success"), deviceId: z.number(), username: z.string(), requestId: z.string() }),
+  z.object({ type: z.literal("shares_list"), payload: z.array(DeviceShareSchema), requestId: z.string() }),
   z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().nullable() }),
+  z.object({ type: z.literal("ping"), requestId: z.never().optional() }),
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("authenticate"), token: z.string() }),
+  z.object({ type: z.literal("authenticate"), token: z.string(), requestId: z.never().optional() }),
   z.object({
     type: z.literal("update_device"),
     payload: z.object({
@@ -220,5 +233,25 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     payload: z.object({ groupId: z.number(), deviceId: z.number() }),
     requestId: z.string()
   }),
+  z.object({
+    type: z.literal("login"),
+    payload: z.object({ username: z.string(), password: z.string() }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("share_device"),
+    payload: z.object({ deviceId: z.number(), username: z.string() }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("unshare_device"),
+    payload: z.object({ deviceId: z.number(), username: z.string() }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("get_shares"),
+    requestId: z.string()
+  }),
+  z.object({ type: z.literal("pong"), requestId: z.never().optional() }),
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;

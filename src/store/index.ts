@@ -1,10 +1,10 @@
+import { closeWebSocket } from '@/wsClient';
 import { create } from 'zustand';
 import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
 import { rgbToHex, colorForDevice } from '@/util/color';
 import { sendRPC } from '@/wsRPC';
-import { z } from "zod";
-import type { AppDevice, MotionProfileName } from '@/types';
+import type { AppDevice, MotionProfileName, DeviceShare } from '@/types';
 import type { Store, StoreState } from './types';
 
 const initialState: StoreState = {
@@ -338,27 +338,10 @@ export const useStore = create<Store>()(
         set(state => ({
           auth: { ...state.auth, isLoggingIn: true, loginError: null }
         }));
-
         try {
-          const response = await fetch('/api/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password })
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Login failed');
-          }
-
-          // Validate response structure
-          const LoginResponseSchema = z.object({ token: z.string() });
-          const { token } = LoginResponseSchema.parse(await response.json());
+          const { token } = await sendRPC<{ token: string }>('login', { username, password });
           set(state => ({
-            settings: {
-              ...state.settings,
-              sessionToken: token,
-            },
+            settings: { ...state.settings, sessionToken: token },
             auth: {
               ...state.auth,
               isAuthenticated: true,
@@ -378,7 +361,21 @@ export const useStore = create<Store>()(
         }
       },
 
+      shareDevice: async (deviceId: number, username: string) => {
+        await sendRPC('share_device', { deviceId, username });
+      },
+
+      unshareDevice: async (deviceId: number, username: string) => {
+        await sendRPC('unshare_device', { deviceId, username });
+      },
+
+      getShares: async () => {
+        const { payload } = await sendRPC<{ payload: DeviceShare[] }>('get_shares');
+        return payload;
+      },
+
       logout: () => {
+        closeWebSocket();
         set(initialState);
 
         if (typeof window !== 'undefined' && window.localStorage) {
