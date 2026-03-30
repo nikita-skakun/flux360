@@ -1,4 +1,4 @@
-import { ClientMessageSchema, TraccarDeviceSchema } from "@/types";
+import { ClientMessageSchema, TraccarDeviceSchema, ServerMessageSchema } from "@/types";
 import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { loadConfig } from "./util/config";
@@ -131,7 +131,7 @@ function broadcastConfig(targetUsername?: string) {
         .filter(g => session.allowed.has(g.id) || (g.memberDeviceIds?.some(mid => session.allowed.has(mid)) ?? false))
         .map(g => ({ ...g, isOwner: session.owned.has(g.id) }));
 
-      msg = JSON.stringify({
+      msg = JSON.stringify(ServerMessageSchema.parse({
         type: "config_update",
         payload: {
           devices: relevantDevices,
@@ -139,7 +139,7 @@ function broadcastConfig(targetUsername?: string) {
           allowedDeviceIds: Array.from(session.allowed),
           ownedDeviceIds: Array.from(session.owned)
         }
-      });
+      }));
       cache.set(cacheKey, msg);
     }
 
@@ -180,7 +180,7 @@ function broadcastUpdate(deviceIds: number[]) {
         if (serverState.activePointsByDevice[id]) activePoints[id] = serverState.activePointsByDevice[id];
         if (serverState.eventsByDevice[id]) events[id] = serverState.eventsByDevice[id] ?? [];
       }
-      msg = JSON.stringify({ type: "positions_update", payload: { activePoints, events } });
+      msg = JSON.stringify(ServerMessageSchema.parse({ type: "positions_update", payload: { activePoints, events } }));
       cache.set(cacheKey, msg);
     }
 
@@ -321,7 +321,7 @@ serve<WSData>({
               refreshTraccarUsersCache(traccarToken, `login:${user.login}`);
 
               const token = sessionStore.createSession(user.login, traccarToken);
-              ws.send(JSON.stringify({ type: "login_success", token, requestId }));
+              ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "login_success", token, requestId })));
             } catch (e) {
               console.error("[WS Login] Error:", e);
               ws.send(JSON.stringify({ type: "error", message: "Login failed", requestId }));
@@ -396,13 +396,13 @@ serve<WSData>({
             const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(rootIds, true, cutoff, entitiesWithOwner);
 
             // Send auth success with ownedDeviceIds (separate message)
-            ws.send(JSON.stringify({
+            ws.send(JSON.stringify(ServerMessageSchema.parse({
               type: "auth_success",
               payload: { ownedDeviceIds: Array.from(ownedDeviceIds) }
-            }));
+            })));
 
             // Send initial state with entities and activity data (ownership in entities, no separate metadata)
-            const payloadStr = JSON.stringify({
+            const payloadStr = JSON.stringify(ServerMessageSchema.parse({
               type: "initial_state",
               payload: {
                 entities: entitiesWithOwner,
@@ -410,7 +410,7 @@ serve<WSData>({
                 eventsByDevice: filteredEvents,
                 maptilerApiKey: config.maptilerApiKey,
               }
-            });
+            }));
             ws.send(payloadStr);
             vlog(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
             break;
@@ -457,7 +457,7 @@ serve<WSData>({
                   }
                   const device = TraccarDeviceSchema.parse(await res.json());
                   serverState.handleDevices([device]);
-                  ws.send(JSON.stringify({ type: "create_success", device, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "create_success", device, requestId })));
                   break;
                 }
                 case "update_device": {
@@ -485,7 +485,7 @@ serve<WSData>({
                   }
                   const updated = TraccarDeviceSchema.parse(await putRes.json());
                   serverState.handleDevices([updated]);
-                  ws.send(JSON.stringify({ type: "update_success", deviceId, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId, requestId })));
                   break;
                 }
                 case "delete_group": {
@@ -498,7 +498,7 @@ serve<WSData>({
                     console.error(`[Traccar API Error] delete_group: ${res.status} ${text}`);
                     throw new SafeError("Failed to delete group");
                   }
-                  ws.send(JSON.stringify({ type: "delete_success", groupId, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "delete_success", groupId, requestId })));
                   break;
                 }
                 case "add_device_to_group":
@@ -529,7 +529,7 @@ serve<WSData>({
                   }
                   const updated = TraccarDeviceSchema.parse(await putRes.json());
                   serverState.handleDevices([updated]);
-                  ws.send(JSON.stringify({ type: "update_success", deviceId: groupId, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId: groupId, requestId })));
                   break;
                 }
                 case "share_device": {
@@ -555,7 +555,7 @@ serve<WSData>({
                   broadcastConfig(targetUser.login);
                   broadcastUpdate([deviceId]);
 
-                  ws.send(JSON.stringify({ type: "share_success", deviceId, sharedWith: targetUser.login, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "share_success", deviceId, sharedWith: targetUser.login, requestId })));
                   break;
                 }
                 case "unshare_device": {
@@ -569,7 +569,7 @@ serve<WSData>({
                   // Update target user's UI
                   broadcastConfig(targetUsername);
 
-                  ws.send(JSON.stringify({ type: "unshare_success", deviceId, username: targetUsername, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "unshare_success", deviceId, username: targetUsername, requestId })));
                   break;
                 }
                 case "get_shares": {
@@ -587,7 +587,7 @@ serve<WSData>({
                       sharedAt: s.shared_at,
                     }));
 
-                  ws.send(JSON.stringify({ type: "shares_list", payload: sharesList, requestId }));
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "shares_list", payload: sharesList, requestId })));
                   break;
                 }
               }
@@ -598,7 +598,7 @@ serve<WSData>({
               }
               const consoleError = err instanceof Error ? err.stack : String(err);
               console.error(`[WS RPC Error] ${data.type}:`, consoleError);
-              ws.send(JSON.stringify({ type: "error", message, requestId }));
+              ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "error", message, requestId })));
             }
           }
         }
