@@ -395,20 +395,24 @@ const serverInst = serve<WSData>({
               "Content-Type": "application/json",
               "Accept": "application/json"
             };
-
+            const isOwned = (id: number) => ws.data.ownedDeviceIds.has(id);
+            const ensureOwned = (id: number) => {
+              if (!isOwned(id)) throw new SafeError("Forbidden: You do not own this device");
+            };
             try {
               switch (data.type) {
                 case "create_group": {
                   const { name, emoji, memberDeviceIds } = data.payload;
-                  if (!memberDeviceIds.every((id: number) => ws.data.allowedDeviceIds.has(id))) {
-                    throw new SafeError("Forbidden or invalid device IDs");
+                  if (!memberDeviceIds.every((id: number) => isOwned(id))) {
+                    throw new SafeError("Forbidden: Cannot create group with devices you do not own");
                   }
+
                   const res = await fetch(`${apiBase}/devices`, {
                     method: "POST",
                     headers: reqHeaders,
                     body: JSON.stringify({
                       name,
-                      uniqueId: "group-" + Date.now(),
+                      uniqueId: `group-${ws.data.username ?? "unknown"}-${Date.now()}`,
                       attributes: { emoji, memberDeviceIds: JSON.stringify(memberDeviceIds) }
                     })
                   });
@@ -424,7 +428,7 @@ const serverInst = serve<WSData>({
                 }
                 case "update_device": {
                   const { deviceId, updates } = data.payload;
-                  if (!ws.data.allowedDeviceIds.has(deviceId)) throw new SafeError("Forbidden");
+                  ensureOwned(deviceId);
 
                   const getRes = await fetch(`${apiBase}/devices/${deviceId}`, { headers: reqHeaders });
                   if (!getRes.ok) throw new SafeError("Device not found");
@@ -452,7 +456,8 @@ const serverInst = serve<WSData>({
                 }
                 case "delete_group": {
                   const { groupId } = data.payload;
-                  if (!ws.data.allowedDeviceIds.has(groupId)) throw new SafeError("Forbidden");
+                  ensureOwned(groupId);
+
                   const res = await fetch(`${apiBase}/devices/${groupId}`, { method: "DELETE", headers: reqHeaders });
                   if (!res.ok) {
                     const text = await res.text();
@@ -465,7 +470,8 @@ const serverInst = serve<WSData>({
                 case "add_device_to_group":
                 case "remove_device_from_group": {
                   const { groupId, deviceId } = data.payload;
-                  if (!ws.data.allowedDeviceIds.has(groupId) || !ws.data.allowedDeviceIds.has(deviceId)) throw new SafeError("Forbidden");
+                  ensureOwned(groupId);
+
                   const getRes = await fetch(`${apiBase}/devices/${groupId}`, { headers: reqHeaders });
                   if (!getRes.ok) throw new SafeError("Group not found");
                   const current = await getRes.json();
@@ -494,9 +500,7 @@ const serverInst = serve<WSData>({
                 }
                 case "share_device": {
                   const { deviceId, username: targetUsername } = data.payload;
-                  if (!ws.data.ownedDeviceIds.has(deviceId)) {
-                    throw new SafeError("Forbidden: You do not own this device");
-                  }
+                  ensureOwned(deviceId);
 
                   const targetUser = traccarUsersCache.find(u => u.login === targetUsername);
                   if (!targetUser) throw new SafeError("User not found");
@@ -509,10 +513,8 @@ const serverInst = serve<WSData>({
                 }
                 case "unshare_device": {
                   const { deviceId, username: targetUsername } = data.payload;
-                  const isOwner = ws.data.ownedDeviceIds.has(deviceId);
-                  const isTarget = ws.data.username === targetUsername;
-
-                  if (!isOwner && !isTarget) throw new SafeError("Forbidden");
+                  ensureOwned(deviceId);
+                  if (ws.data.username !== targetUsername) throw new SafeError("Cannot unshare from another user");
 
                   db.query("DELETE FROM device_shares WHERE device_id = ? AND shared_with_username = ?")
                     .run(deviceId, targetUsername);
@@ -522,7 +524,7 @@ const serverInst = serve<WSData>({
                 case "get_shares": {
                   const allShares = db.query(
                     `SELECT device_id, shared_with_username, shared_at FROM device_shares WHERE shared_by_username = ?`
-                  ).all(ws.data.username!) as { device_id: number; shared_with_username: string; shared_at: number }[];
+                  ).all(ws.data.username) as { device_id: number; shared_with_username: string; shared_at: number }[];
 
                   // Filter based on currently authenticated devices to be safe
                   const sharesList = allShares
