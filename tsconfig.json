@@ -38,7 +38,6 @@
     // Noise reduction without hiding errors
     "skipLibCheck": true,
     // Path aliases
-    "baseUrl": ".",
     "paths": {
       "@/*": [
         "./src/*"
