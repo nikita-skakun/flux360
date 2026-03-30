@@ -64,11 +64,21 @@ export function App() {
   const eventsByDevice = useStore(state => state.eventsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
 
+  const rootIds = useMemo(() => {
+    const memberIds = new Set<number>();
+    for (const entity of Object.values(entities)) {
+      if (entity.memberDeviceIds)
+        entity.memberDeviceIds.forEach(id => memberIds.add(id));
+    }
+    return Object.keys(entities).map(Number).filter(id => !memberIds.has(id));
+  }, [entities]);
+
   const visibleComponents = useMemo(() => {
+    const roots = new Set(rootIds);
     return Object.values(activePointsByDevice)
       .flat()
-      .filter((comp) => entities[comp.device] != null);
-  }, [activePointsByDevice, entities]);
+      .filter((comp) => roots.has(comp.device) || comp.device === selectedDeviceId);
+  }, [activePointsByDevice, rootIds, selectedDeviceId]);
 
   // Clear selected motion segment when device changes
   useEffect(() => {
@@ -83,15 +93,6 @@ export function App() {
         name: e.name,
         emoji: e.emoji
       }));
-  }, [entities]);
-
-  const rootIds = useMemo(() => {
-    const memberIds = new Set<number>();
-    for (const entity of Object.values(entities)) {
-      if (entity.memberDeviceIds)
-        entity.memberDeviceIds.forEach(id => memberIds.add(id));
-    }
-    return Object.keys(entities).map(Number).filter(id => !memberIds.has(id));
   }, [entities]);
 
   if (!isAuthenticated) {
