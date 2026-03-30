@@ -78,13 +78,13 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
 const serverState = new ServerState(config.historyDays);
 
 // Helper to broadcast device/group metadata (authorized subset only)
-function broadcastConfig(targetUsername?: string) {
+function broadcastConfig(targetUsername: string | null) {
   const cache = new Map<string, string>();
 
   for (const ws of activeWebSockets) {
     const session = ws.data.username ? getSession(ws.data.username) : undefined;
     if (!session) continue;
-    if (targetUsername !== undefined && ws.data.username !== targetUsername) continue;
+    if (targetUsername !== null && ws.data.username !== targetUsername) continue;
 
     // Permissions set + ownership set is the cache key
     const cacheKey = [
@@ -213,7 +213,7 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
         })();
       }
 
-      broadcastConfig();
+      broadcastConfig(null);
     },
     onPositionsReceived: (positions: NormalizedPosition[]) => {
       if (serverState.handlePositions(positions)) {
@@ -256,7 +256,7 @@ serve<WSData>({
     : {
       "/api/ws": wsRouteHandler,
       "/assets/**": Bun.file("src/assets"),
-      "/*": indexHtml as never,
+      "/*": indexHtml,
     },
 
   websocket: {

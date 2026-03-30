@@ -1,6 +1,5 @@
-import { handleResponse } from '@/wsRPC';
+import { handleResponse, setWebSocket } from '@/wsRPC';
 import { ServerMessageSchema } from '@/types';
-import { setWebSocket } from '@/wsClient';
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
 import type { ClientMessage } from '@/types';

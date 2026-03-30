@@ -1,9 +1,8 @@
-import { closeWebSocket } from '@/wsClient';
+import { closeWebSocket, sendRPC } from '@/wsRPC';
 import { create } from 'zustand';
 import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
 import { rgbToHex, colorForDevice } from '@/util/color';
-import { sendRPC } from '@/wsRPC';
 import type { AppDevice, MotionProfileName, DeviceShare } from '@/types';
 import type { Store, StoreState } from './types';
 

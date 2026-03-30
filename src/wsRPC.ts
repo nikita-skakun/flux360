@@ -1,5 +1,3 @@
-import { sendMessage } from "./wsClient";
-
 const RPC_TIMEOUT_MS = 30000;
 
 interface PendingRequest {
@@ -7,6 +5,7 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
+let ws: WebSocket | null = null;
 const pending = new Map<string, PendingRequest>();
 
 function registerCallback(requestId: string, cb: (resp: unknown) => void) {
@@ -21,6 +20,27 @@ function registerCallback(requestId: string, cb: (resp: unknown) => void) {
   pending.set(requestId, { cb, timer });
 }
 
+function clearPendingRequests() {
+  for (const [_, entry] of pending.entries()) {
+    clearTimeout(entry.timer);
+    entry.cb({ type: 'error', message: 'Connection closed' });
+  }
+  pending.clear();
+}
+
+export function setWebSocket(connection: WebSocket | null) {
+  ws = connection;
+  if (connection === null) {
+    clearPendingRequests();
+  }
+}
+
+export function closeWebSocket() {
+  ws?.close();
+  ws = null;
+  clearPendingRequests();
+}
+
 export function handleResponse(resp: unknown) {
   if (typeof resp !== 'object' || resp === null) return;
   const { requestId } = resp as { requestId: string };
@@ -30,14 +50,6 @@ export function handleResponse(resp: unknown) {
     pending.delete(requestId);
     entry.cb(resp);
   }
-}
-
-export function clearPendingRequests() {
-  for (const [_, entry] of pending.entries()) {
-    clearTimeout(entry.timer);
-    entry.cb({ type: 'error', message: 'Connection closed' });
-  }
-  pending.clear();
 }
 
 export function sendRPC<T = unknown>(type: string, payload?: unknown): Promise<T> {
@@ -53,7 +65,8 @@ export function sendRPC<T = unknown>(type: string, payload?: unknown): Promise<T
     });
 
     try {
-      sendMessage(type, payload, requestId);
+      if (ws?.readyState !== WebSocket.OPEN) throw new Error("WebSocket not connected");
+      ws.send(JSON.stringify({ type, payload, requestId }));
     } catch (e) {
       const entry = pending.get(requestId);
       if (entry) {
