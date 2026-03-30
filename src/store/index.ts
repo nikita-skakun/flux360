@@ -81,27 +81,32 @@ export const useStore = create<Store>()(
       updateConfig: (payload) => {
         set(state => {
           const newEntities = { ...state.entities };
-          const ownedIdSet = new Set(state.auth.ownedDeviceIds);
-          if (payload.devices !== null) {
-            for (const [id, newDev] of numericEntries(payload.devices)) {
-              newEntities[id] = {
-                ...newDev,
-                isOwner: state.entities[id]?.isOwner ?? newDev.isOwner ?? ownedIdSet.has(id),
-              };
-            }
+          const ownedIdSet = new Set(payload.ownedDeviceIds);
+          const allowedIdSet = new Set(payload.allowedDeviceIds);
+
+          for (const [id, newDev] of numericEntries(payload.devices)) {
+            newEntities[id] = {
+              ...newDev,
+              isOwner: ownedIdSet.has(id),
+            };
           }
 
-          if (payload.groups !== null) {
-            for (const group of payload.groups) {
-              newEntities[group.id] = {
-                ...group,
-                isOwner: state.entities[group.id]?.isOwner ?? group.isOwner ?? ownedIdSet.has(group.id),
-              };
-            }
+          for (const group of payload.groups) {
+            newEntities[group.id] = {
+              ...group,
+              isOwner: ownedIdSet.has(group.id),
+            };
+          }
+
+          // Reconciliation: Remove entities not in the allowed list (source of truth)
+          for (const idStr of Object.keys(newEntities)) {
+            const id = Number(idStr);
+            if (!allowedIdSet.has(id)) delete newEntities[id];
           }
 
           return {
             entities: newEntities,
+            auth: { ...state.auth, ownedDeviceIds: payload.ownedDeviceIds },
           };
         });
       },

@@ -4,10 +4,13 @@ import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { loadConfig } from "./util/config";
 import { numericEntries } from "@/util/record";
 import { parseArgs } from "util";
+import { register, deregister, getSession, addAllowedDevice, removeAllowedDevice } from "./server/userSessions";
 import { serve } from "bun";
 import { ServerState } from "./server/serverState";
+import { sessionStore } from "./server/sessionStore";
 import { setVerbose, vlog } from "./util/logger";
 import { TraccarAdminClient } from "./server/traccarClient";
+import { TraccarTokenManager } from "./server/traccarTokenManager";
 import { z } from "zod";
 import indexHtml from "./index.html";
 import type { Config } from "./util/config";
@@ -34,9 +37,6 @@ const activeWebSockets = new Set<ServerWebSocket<WSData>>();
 
 interface WSData {
   username: string | null;
-  traccarToken: string | null;
-  allowedDeviceIds: Set<number>;
-  ownedDeviceIds: Set<number>;
   isAlive: boolean;
 }
 
@@ -61,19 +61,18 @@ try {
 
 const apiBase = getTraccarApiBase(config.traccarBaseUrl, config.traccarSecure);
 
-function refreshTraccarUsersCache(authToken: string, reason: string): void {
-  fetch(`${apiBase}/users`, {
-    headers: { "Authorization": `Bearer ${authToken}`, "Accept": "application/json" }
-  })
-    .then(async (usersRes) => {
-      if (!usersRes.ok) throw new Error(`Failed to fetch users for cache refresh: ${usersRes.status} ${usersRes.statusText}`);
-
-      traccarUsersCache = z.array(TraccarUserSchema).parse(await usersRes.json());
-      vlog(`[Users Cache] Refreshed (${reason}): count=${traccarUsersCache.length}`);
-    })
-    .catch((e) => {
-      console.error(`[Users Cache] Background refresh error (${reason}):`, e);
+async function refreshTraccarUsersCache(authToken: string, reason: string): Promise<void> {
+  try {
+    const usersRes = await fetch(`${apiBase}/users`, {
+      headers: { "Authorization": `Bearer ${authToken}`, "Accept": "application/json" }
     });
+    if (!usersRes.ok) throw new Error(`Failed to fetch users for cache refresh: ${usersRes.status} ${usersRes.statusText}`);
+
+    traccarUsersCache = z.array(TraccarUserSchema).parse(await usersRes.json());
+    vlog(`[Users Cache] Refreshed (${reason}): count=${traccarUsersCache.length}`);
+  } catch (e) {
+    console.error(`[Users Cache] Background refresh error (${reason}):`, e);
+  }
 }
 
 const serverState = new ServerState(config.historyDays);
@@ -105,48 +104,93 @@ function collectDeviceData(
   return { activePoints, events };
 }
 
-// Helper to broadcast state to specific device topics
-function broadcastUpdate(server: Server<WSData>, deviceIds?: number[]) {
-  // Determine which IDs to sync (root entities only)
-  let idsToSync: number[];
-  if (deviceIds === undefined) {
-    idsToSync = Object.keys(serverState.activePointsByDevice).map(Number);
-  } else {
-    // Include groups that contain any of the devices, then filter to root entities
-    const allIds = new Set(deviceIds);
-    for (const deviceId of deviceIds) {
-      const groups = serverState.deviceToGroupsMap[deviceId];
-      if (groups) {
-        for (const gid of groups) allIds.add(gid);
-      }
-    }
-    const { rootIds } = serverState.getMetadata(allIds);
-    idsToSync = Array.from(allIds).filter(id => rootIds.includes(id));
-  }
+// Helper to broadcast device/group metadata (authorized subset only)
+function broadcastConfig(targetUsername?: string) {
+  const cache = new Map<string, string>();
 
-  const { activePoints: activePointsPayload, events: eventsPayload } = collectDeviceData(idsToSync, false, 0, {});
+  for (const ws of activeWebSockets) {
+    const session = ws.data.username ? getSession(ws.data.username) : undefined;
+    if (!session) continue;
+    if (targetUsername !== undefined && ws.data.username !== targetUsername) continue;
 
-  // Only send if there's actual data
-  if (Object.keys(activePointsPayload).length === 0 && Object.keys(eventsPayload).length === 0) {
-    return;
-  }
+    // Permissions set + ownership set is the cache key
+    const cacheKey = [
+      Array.from(session.allowed).sort((a, b) => a - b).join(","),
+      Array.from(session.owned).sort((a, b) => a - b).join(",")
+    ].join("|");
+    let msg = cache.get(cacheKey);
 
-  for (const id of idsToSync) {
-    if (activePointsPayload[id] || eventsPayload[id]) {
-      server.publish(`device-${id}`, JSON.stringify({
-        type: "positions_update",
-        payload: {
-          activePoints: { [id]: activePointsPayload[id] },
-          events: { [id]: eventsPayload[id] ?? [] }
+    if (!msg) {
+      const relevantDevices: Record<number, AppDevice> = {};
+      for (const [id, device] of numericEntries(serverState.devices)) {
+        if (session.allowed.has(id)) {
+          relevantDevices[id] = { ...device, isOwner: session.owned.has(id) };
         }
-      }));
+      }
+      const relevantGroups = serverState.groups
+        .filter(g => session.allowed.has(g.id) || (g.memberDeviceIds?.some(mid => session.allowed.has(mid)) ?? false))
+        .map(g => ({ ...g, isOwner: session.owned.has(g.id) }));
+
+      msg = JSON.stringify({
+        type: "config_update",
+        payload: {
+          devices: relevantDevices,
+          groups: relevantGroups,
+          allowedDeviceIds: Array.from(session.allowed),
+          ownedDeviceIds: Array.from(session.owned)
+        }
+      });
+      cache.set(cacheKey, msg);
     }
+
+    ws.send(msg);
+  }
+}
+
+// Helper to broadcast state to active sockets based on per-user permissions
+function broadcastUpdate(deviceIds: number[]) {
+  const idsToSync = new Set(deviceIds);
+  for (const deviceId of deviceIds) {
+    const groups = serverState.deviceToGroupsMap[deviceId];
+    if (groups) for (const gid of groups) idsToSync.add(gid);
+  }
+
+  // Cache serialized payloads for unique sets of IDs within this update batch
+  const cache = new Map<string, string>();
+
+  for (const ws of activeWebSockets) {
+    const session = ws.data.username ? getSession(ws.data.username) : undefined;
+    if (!session) continue;
+
+    // Find subset of updated IDs this user is allowed to see
+    const visibleIds: number[] = [];
+    for (const id of idsToSync) {
+      if (session.allowed.has(id)) visibleIds.push(id);
+    }
+    if (visibleIds.length === 0) continue;
+
+    // Use sorted ID string as cache key to share serialized payloads between users with same access
+    const cacheKey = visibleIds.sort((a, b) => a - b).join(",");
+    let msg = cache.get(cacheKey);
+
+    if (!msg) {
+      const activePoints: Record<number, DevicePoint[]> = {};
+      const events: Record<number, EngineEvent[]> = {};
+      for (const id of visibleIds) {
+        if (serverState.activePointsByDevice[id]) activePoints[id] = serverState.activePointsByDevice[id];
+        if (serverState.eventsByDevice[id]) events[id] = serverState.eventsByDevice[id] ?? [];
+      }
+      msg = JSON.stringify({ type: "positions_update", payload: { activePoints, events } });
+      cache.set(cacheKey, msg);
+    }
+
+    ws.send(msg);
   }
 }
 
 // Helper to start/restart admin client
 let traccarClient: TraccarAdminClient | null = null;
-function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: boolean, token: string) {
+function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
   if (traccarClient) traccarClient.close();
 
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
@@ -180,7 +224,7 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
               vlog(`[Server] Device ${id} backfill: type=${isDelta ? "DELTA" : "FULL"}, from=${new Date(from).toISOString()}`);
               const history = await traccarClient!.fetchHistory(id, from, Date.now());
               if (history.length > 0 && serverState.handlePositions(history)) {
-                broadcastUpdate(server, [id]);
+                broadcastUpdate([id]);
               }
               await new Promise(r => setTimeout(r, 200)); // Gentle delay for Traccar API
 
@@ -196,29 +240,16 @@ function initTraccarClient(server: Server<WSData>, baseUrl: string, secure: bool
         })();
       }
 
-      // Broadcast global device changes to relevant topics
-      for (const [id, device] of numericEntries(serverState.devices)) {
-        server.publish(`device-${id}`, JSON.stringify({
-          type: "config_update",
-          payload: {
-            devices: { [id]: { ...device, isOwner: false } },
-            groups: serverState.groups.filter(g => g.id === id || (g.memberDeviceIds?.includes(id) ?? false))
-          }
-        }));
-      }
+      broadcastConfig();
     },
     onPositionsReceived: (positions: NormalizedPosition[]) => {
       if (serverState.handlePositions(positions)) {
-        broadcastUpdate(server, Array.from(new Set(positions.map(p => p.device))));
+        broadcastUpdate(Array.from(new Set(positions.map(p => p.device))));
       }
     }
   });
   traccarClient.connect();
 }
-
-// Session store and token manager for WebSocket authentication
-import { sessionStore } from "./server/sessionStore";
-import { TraccarTokenManager } from "./server/traccarTokenManager";
 
 // Config is validated and ready
 const currentBaseUrl = config.traccarBaseUrl;
@@ -228,14 +259,14 @@ const tokenManager = new TraccarTokenManager(currentBaseUrl, config.traccarSecur
 const wsRouteHandler = (request: Request, server: Server<WSData>) => {
   vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
   const upgraded = server.upgrade(request, {
-    data: { username: null, traccarToken: null, allowedDeviceIds: new Set(), ownedDeviceIds: new Set(), isAlive: true }
+    data: { username: null, isAlive: true }
   });
   vlog(`[WS] Upgrade result: ${upgraded}`);
   if (upgraded) return undefined;
   return new Response("Upgrade failed", { status: 400 });
 };
 
-const serverInst = serve<WSData>({
+serve<WSData>({
   port,
   routes: isProduction
     ? {
@@ -327,26 +358,29 @@ const serverInst = serve<WSData>({
             const traccarDeviceIds = new Set(devices.map(d => d.id));
 
             // Add shared devices by looking up shares for this user's Traccar ID
-            const shared = db.query("SELECT device_id FROM device_shares WHERE shared_with_username = ?").all(username) as { device_id: number }[];
+            const shared = db.query("SELECT device_id, shared_by_username FROM device_shares WHERE shared_with_username = ?").all(username) as { device_id: number, shared_by_username: string }[];
             const sharedWithMeIds = new Set(shared.map(s => s.device_id));
 
-            // Owned devices are those in Traccar that weren't explicitly shared with me via our system
-            const ownedDeviceIds = new Set([...traccarDeviceIds].filter(id => !sharedWithMeIds.has(id)));
+            // Owned devices are those in Traccar that weren't explicitly shared WITH me by SOMEONE ELSE.
+            // If I shared it with myself, or if it was just in my Traccar account, I'm the owner.
+            const ownedDeviceIds = new Set([...traccarDeviceIds].filter(id => {
+              const share = shared.find(s => s.device_id === id);
+              return !share || share.shared_by_username === username;
+            }));
             const allowedDeviceIds = new Set([...traccarDeviceIds, ...sharedWithMeIds]);
 
             // Update server state with device metadata
             serverState.handleDevices(devices);
 
             ws.data.username = username;
-            ws.data.traccarToken = traccarToken;
-            ws.data.allowedDeviceIds = allowedDeviceIds;
-            ws.data.ownedDeviceIds = ownedDeviceIds;
+            register(username, traccarToken, allowedDeviceIds, ownedDeviceIds);
+
+            // Proactively refresh users cache on auth if empty to prevent 'User not found' on share
+            if (traccarUsersCache.length === 0) {
+              refreshTraccarUsersCache(traccarToken, `auth:${username}`);
+            }
 
             vlog(`[WS] Authentication successful for ${username}. Allowed: ${allowedDeviceIds.size}, Owned: ${ownedDeviceIds.size}`);
-
-            for (const id of allowedDeviceIds) {
-              ws.subscribe(`device-${id}`);
-            }
 
             // Get entities and determine root IDs for filtering snapshots
             const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
@@ -383,19 +417,19 @@ const serverInst = serve<WSData>({
           }
 
           default: {
-            // RPC handlers (require auth)
-            if (!ws.data.username || !ws.data.traccarToken) {
-              ws.send(JSON.stringify({ type: "error", message: "Unauthorized", requestId: data.requestId }));
+            const { requestId } = data;
+            const session = ws.data.username ? getSession(ws.data.username) : undefined;
+            if (!session) {
+              ws.send(JSON.stringify({ type: "error", message: "Session invalid or expired", requestId }));
               return;
             }
 
-            const { requestId } = data;
             const reqHeaders = {
-              "Authorization": `Bearer ${ws.data.traccarToken}`,
+              "Authorization": `Bearer ${session.traccarToken}`,
               "Content-Type": "application/json",
               "Accept": "application/json"
             };
-            const isOwned = (id: number) => ws.data.ownedDeviceIds.has(id);
+            const isOwned = (id: number) => session.owned.has(id);
             const ensureOwned = (id: number) => {
               if (!isOwned(id)) throw new SafeError("Forbidden: You do not own this device");
             };
@@ -501,12 +535,25 @@ const serverInst = serve<WSData>({
                 case "share_device": {
                   const { deviceId, username: targetUsername } = data.payload;
                   ensureOwned(deviceId);
+                  if (ws.data.username === targetUsername) throw new SafeError("Cannot share a device with yourself");
 
-                  const targetUser = traccarUsersCache.find(u => u.login === targetUsername);
+                  let targetUser = traccarUsersCache.find(u => u.login === targetUsername);
+                  if (!targetUser) {
+                    // Cache might be stale or empty, try one refresh
+                    vlog(`[WS] User ${targetUsername} not in cache, attempting refresh...`);
+                    await refreshTraccarUsersCache(session.traccarToken, `share_retry:${targetUsername}`);
+                    targetUser = traccarUsersCache.find(u => u.login === targetUsername);
+                  }
+
                   if (!targetUser) throw new SafeError("User not found");
 
                   db.query("INSERT OR IGNORE INTO device_shares (device_id, shared_with_username, shared_by_username, shared_at) VALUES (?, ?, ?, ?)")
                     .run(deviceId, targetUser.login, ws.data.username!, Date.now());
+
+                  addAllowedDevice(targetUser.login, deviceId);
+                  // Push new device metadata and current positions to the target user
+                  broadcastConfig(targetUser.login);
+                  broadcastUpdate([deviceId]);
 
                   ws.send(JSON.stringify({ type: "share_success", deviceId, sharedWith: targetUser.login, requestId }));
                   break;
@@ -514,10 +561,14 @@ const serverInst = serve<WSData>({
                 case "unshare_device": {
                   const { deviceId, username: targetUsername } = data.payload;
                   ensureOwned(deviceId);
-                  if (ws.data.username !== targetUsername) throw new SafeError("Cannot unshare from another user");
 
                   db.query("DELETE FROM device_shares WHERE device_id = ? AND shared_with_username = ?")
                     .run(deviceId, targetUsername);
+                  removeAllowedDevice(targetUsername, deviceId);
+
+                  // Update target user's UI
+                  broadcastConfig(targetUsername);
+
                   ws.send(JSON.stringify({ type: "unshare_success", deviceId, username: targetUsername, requestId }));
                   break;
                 }
@@ -528,7 +579,7 @@ const serverInst = serve<WSData>({
 
                   // Filter based on currently authenticated devices to be safe
                   const sharesList = allShares
-                    .filter(s => ws.data.ownedDeviceIds.has(s.device_id))
+                    .filter(s => session.owned.has(s.device_id))
                     .map(s => ({
                       deviceId: s.device_id,
                       deviceName: serverState.devices[s.device_id]?.name ?? `Device ${s.device_id}`,
@@ -565,6 +616,9 @@ const serverInst = serve<WSData>({
     },
     close(ws: ServerWebSocket<WSData>) {
       activeWebSockets.delete(ws);
+      if (ws.data.username) {
+        deregister(ws.data.username);
+      }
       vlog("[WS] Connection closed");
     }
   },
@@ -579,7 +633,7 @@ const serverInst = serve<WSData>({
 // Start Traccar admin connection if config is ready
 if (currentBaseUrl && currentToken) {
   refreshTraccarUsersCache(currentToken, "startup");
-  initTraccarClient(serverInst, currentBaseUrl, config.traccarSecure, currentToken);
+  initTraccarClient(currentBaseUrl, config.traccarSecure, currentToken);
 }
 
 // Periodically sends a "ping" to all clients and closes those that don't respond.

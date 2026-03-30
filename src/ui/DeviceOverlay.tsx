@@ -197,11 +197,10 @@ function DeviceOverlayComponent({
       </div>
 
       <div className="mt-1.5">
-        {group && contributors.length > 0 && (
+        {isOwner && group && contributors.length > 0 && (
           <div className="text-xs text-muted-foreground">
             <span className="font-medium">Sources:</span> {contributors.join(", ")}
             {mostRecentSourceName && <div className="text-muted-foreground/70 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
-            {(chosen).sourceDeviceId != null && <div className="text-muted-foreground/70 text-xs mt-0.5">Current source: {entities[(chosen).sourceDeviceId]?.name}</div>}
           </div>
         )}
         <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>

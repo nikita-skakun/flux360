@@ -172,8 +172,10 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("config_update"),
     payload: z.object({
-      devices: EntitiesSchema.nullable(),
-      groups: z.array(AppDeviceSchema).nullable()
+      devices: EntitiesSchema,
+      groups: z.array(AppDeviceSchema),
+      allowedDeviceIds: z.array(z.number()),
+      ownedDeviceIds: z.array(z.number())
     }),
     requestId: z.never().optional()
   }),

@@ -10,10 +10,8 @@ export function setWebSocket(connection: WebSocket | null) {
 }
 
 export function closeWebSocket() {
-  if (ws) {
-    ws.close();
-    ws = null;
-  }
+  ws?.close();
+  ws = null;
   clearPendingRequests();
 }
 

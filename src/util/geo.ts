@@ -39,4 +39,3 @@ export function computeBounds(points: Vec2[]): { minX: number; minY: number; max
   }
   return { minX, minY, maxX, maxY };
 }
-

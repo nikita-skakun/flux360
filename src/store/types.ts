@@ -46,7 +46,7 @@ export type StoreActions = {
   setInitialState: (payload: InitialStatePayload) => void;
   setOwnedDeviceIds: (ids: number[]) => void;
   updatePositions: (payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
-  updateConfig: (payload: { devices: Record<number, AppDevice> | null; groups: AppDevice[] | null }) => void;
+  updateConfig: (payload: { devices: Record<number, AppDevice>, groups: AppDevice[], allowedDeviceIds: number[], ownedDeviceIds: number[] }) => void;
 
   // Motion Profiles
   updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => void;
