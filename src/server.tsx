@@ -77,33 +77,6 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
 
 const serverState = new ServerState(config.historyDays);
 
-// Helper to collect snapshots and events for a set of device IDs
-function collectDeviceData(
-  ids: Iterable<number>,
-  applySnapshotCutoff: boolean,
-  snapshotCutoff: number,
-  entities: Record<number, AppDevice>
-): { activePoints: Record<number, DevicePoint[]>; events: Record<number, EngineEvent[]> } {
-  const activePoints: Record<number, DevicePoint[]> = {};
-  const events: Record<number, EngineEvent[]> = {};
-
-  for (const id of ids) {
-    if (serverState.activePointsByDevice[id]) {
-      const include = applySnapshotCutoff
-        ? entities[id]?.lastSeen != null && entities[id].lastSeen > snapshotCutoff
-        : true;
-      if (include) {
-        activePoints[id] = serverState.activePointsByDevice[id];
-      }
-    }
-    if (serverState.eventsByDevice[id]) {
-      events[id] = serverState.eventsByDevice[id];
-    }
-  }
-
-  return { activePoints, events };
-}
-
 // Helper to broadcast device/group metadata (authorized subset only)
 function broadcastConfig(targetUsername?: string) {
   const cache = new Map<string, string>();
@@ -393,7 +366,20 @@ serve<WSData>({
             const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
 
             // Only include snapshots for root entities that have been seen within the last 48 hours
-            const { activePoints: filteredPoints, events: filteredEvents } = collectDeviceData(rootIds, true, cutoff, entitiesWithOwner);
+            const filteredPoints: Record<number, DevicePoint[]> = {};
+            const filteredEvents: Record<number, EngineEvent[]> = {};
+            for (const id of rootIds) {
+              const entity = entitiesWithOwner[id];
+              if (serverState.activePointsByDevice[id] && entity) {
+                const lastSeen = entity.lastSeen;
+                if (lastSeen !== null && lastSeen > cutoff) {
+                  filteredPoints[id] = serverState.activePointsByDevice[id];
+                }
+              }
+              if (serverState.eventsByDevice[id]) {
+                filteredEvents[id] = serverState.eventsByDevice[id] ?? [];
+              }
+            }
 
             // Send auth success with ownedDeviceIds (separate message)
             ws.send(JSON.stringify(ServerMessageSchema.parse({
