@@ -67,8 +67,8 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
       await action(id, {
         name,
         emoji,
-        color,
-        motionProfile,
+        color: color ?? defaultHex,
+        ...(motionProfile !== null ? { motionProfile } : {})
       });
       onClose();
     } catch (e) {

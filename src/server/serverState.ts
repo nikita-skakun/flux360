@@ -163,6 +163,30 @@ export class ServerState {
     vlog(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
   }
 
+  deleteGroup(groupId: number) {
+    delete this.rawTraccarDevices[groupId];
+    delete this.devices[groupId];
+    this.groups = this.groups.filter(group => group.id !== groupId);
+    delete this.deviceToGroupsMap[groupId];
+    this.groupIds.delete(groupId);
+    delete this.activePointsByDevice[groupId];
+    delete this.eventsByDevice[groupId];
+    delete this.engines[groupId];
+    delete this.engineCheckpoints[groupId];
+    db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
+
+    this.deviceToGroupsMap = {};
+    this.groupIds.clear();
+    for (const group of this.groups) {
+      this.groupIds.add(group.id);
+      group.memberDeviceIds?.forEach(deviceId => {
+        const list = this.deviceToGroupsMap[deviceId] ?? [];
+        list.push(group.id);
+        this.deviceToGroupsMap[deviceId] = list;
+      });
+    }
+  }
+
   handlePositions(pts: NormalizedPosition[]) {
     if (pts.length === 0) return null;
 
@@ -349,6 +373,61 @@ export class ServerState {
     }
 
     return { engineStates: result.engineStatesByDevice, events: result.eventsByDevice };
+  }
+
+  refreshGroupFromMembers(groupId: number) {
+    const group = this.groups.find(g => g.id === groupId);
+    if (!group) return;
+
+    if (!group.memberDeviceIds || group.memberDeviceIds.length === 0) {
+      delete this.engines[groupId];
+      delete this.engineCheckpoints[groupId];
+      delete this.activePointsByDevice[groupId];
+      delete this.eventsByDevice[groupId];
+      db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
+      return;
+    }
+
+    const profile = group.motionProfile ?? (
+      group.memberDeviceIds.some(memberId => this.devices[memberId]?.effectiveMotionProfile === "car") ? "car" : "person"
+    );
+
+    const memberHistory = group.memberDeviceIds
+      .flatMap(memberId => this.allPosById[memberId] ?? [])
+      .sort((a, b) => a.timestamp - b.timestamp);
+    if (memberHistory.length === 0) {
+      delete this.engines[groupId];
+      delete this.engineCheckpoints[groupId];
+      delete this.activePointsByDevice[groupId];
+      delete this.eventsByDevice[groupId];
+      db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
+      return;
+    }
+
+    const rawByDevice: Record<number, DevicePoint[]> = {
+      [groupId]: memberHistory.map(position => ({
+        mean: toWebMercator(position.geo),
+        accuracy: position.accuracy,
+        geo: position.geo,
+        device: position.device,
+        timestamp: position.timestamp,
+        anchorStartTimestamp: position.timestamp,
+        confidence: 0,
+        sourceDeviceId: null,
+      }))
+    };
+
+    const groupEngines: Record<number, Engine> = {};
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, groupEngines, { [groupId]: profile });
+    this.engines[groupId] = groupEngines[groupId]!;
+    delete this.engineCheckpoints[groupId];
+    db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
+    Object.assign(this.activePointsByDevice, result.positionsByDevice);
+    Object.assign(this.eventsByDevice, result.eventsByDevice);
+
+    for (const id in this.eventsByDevice) {
+      this.eventsByDevice[id]?.sort((a, b) => b.start - a.start);
+    }
   }
 
   getMetadata(allowedDeviceIds: Set<number>) {

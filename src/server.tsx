@@ -28,6 +28,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 // Schema definitions
 const TraccarUserSchema = z.object({
+  id: z.number(),
   login: z.string().min(1),
   email: z.string().optional()
 });
@@ -73,6 +74,19 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
   } catch (e) {
     console.error(`[Users Cache] Background refresh error (${reason}):`, e);
   }
+}
+
+async function resolveTraccarUserId(username: string, authToken: string): Promise<number> {
+  const cachedUser = traccarUsersCache.find(user => user.login === username);
+  if (cachedUser) return cachedUser.id;
+
+  await refreshTraccarUsersCache(authToken, `resolve_user:${username}`);
+  const refreshedUser = traccarUsersCache.find(user => user.login === username);
+  if (!refreshedUser) {
+    throw new SafeError("User not found");
+  }
+
+  return refreshedUser.id;
 }
 
 const serverState = new ServerState(config.historyDays);
@@ -415,6 +429,11 @@ serve<WSData>({
               "Content-Type": "application/json",
               "Accept": "application/json"
             };
+            const adminReqHeaders = {
+              "Authorization": `Bearer ${currentToken}`,
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            };
             const isOwned = (id: number) => session.owned.has(id);
             const ensureOwned = (id: number) => {
               if (!isOwned(id)) throw new SafeError("Forbidden: You do not own this device");
@@ -423,16 +442,20 @@ serve<WSData>({
               switch (data.type) {
                 case "create_group": {
                   const { name, emoji, memberDeviceIds } = data.payload;
+                  const username = ws.data.username;
+                  if (!username) {
+                    throw new SafeError("Session missing username");
+                  }
                   if (!memberDeviceIds.every((id: number) => isOwned(id))) {
                     throw new SafeError("Forbidden: Cannot create group with devices you do not own");
                   }
 
                   const res = await fetch(`${apiBase}/devices`, {
                     method: "POST",
-                    headers: reqHeaders,
+                    headers: adminReqHeaders,
                     body: JSON.stringify({
                       name,
-                      uniqueId: `group-${ws.data.username ?? "unknown"}-${Date.now()}`,
+                      uniqueId: `group-${Date.now()}`,
                       attributes: { emoji, memberDeviceIds: JSON.stringify(memberDeviceIds) }
                     })
                   });
@@ -442,7 +465,25 @@ serve<WSData>({
                     throw new SafeError("Failed to create group on the backend service");
                   }
                   const device = TraccarDeviceSchema.parse(await res.json());
+
+                  const ownerUserId = await resolveTraccarUserId(username, currentToken);
+                  const permissionRes = await fetch(`${apiBase}/permissions`, {
+                    method: "POST",
+                    headers: adminReqHeaders,
+                    body: JSON.stringify({ userId: ownerUserId, deviceId: device.id })
+                  });
+                  if (!permissionRes.ok) {
+                    const text = await permissionRes.text();
+                    console.error(`[Traccar API Error] create_group_permission: ${permissionRes.status} ${text}`);
+                    await fetch(`${apiBase}/devices/${device.id}`, { method: "DELETE", headers: adminReqHeaders });
+                    throw new SafeError("Failed to assign the new group to the requesting user");
+                  }
+
                   serverState.handleDevices([device]);
+                  session.allowed.add(device.id);
+                  session.owned.add(device.id);
+                  addAllowedDevice(username, device.id);
+                  broadcastConfig(username);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "create_success", device, requestId })));
                   break;
                 }
