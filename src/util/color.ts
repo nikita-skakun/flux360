@@ -49,6 +49,13 @@ export function rgbToHex(r: number, g: number, b: number): string {
   return `#${clampChannel(r).toString(16).padStart(2, "0")}${clampChannel(g).toString(16).padStart(2, "0")}${clampChannel(b).toString(16).padStart(2, "0")}`;
 }
 
+export function isLightHexColor(hex: string): boolean {
+  const parsed = parseHexColor(hex);
+  if (!parsed) return false;
+  const [r, g, b] = parsed;
+  return (r * 299 + g * 587 + b * 114) / 1000 > 186;
+}
+
 function lerpColor(a: Color, b: Color, t: number): Color {
   const clamped = Math.max(0, Math.min(1, t));
   return [

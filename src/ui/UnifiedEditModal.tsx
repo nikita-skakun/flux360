@@ -1,6 +1,6 @@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { colorForDevice } from "@/util/color";
+import { colorForDevice, isLightHexColor } from "@/util/color";
 import { createPortal } from "react-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { EMOJI_OPTIONS } from "@/util/constants";
@@ -50,6 +50,8 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
 
   const rgb = colorForDevice(id);
   const defaultHex = `#${rgb.map(c => c.toString(16).padStart(2, '0')).join('')}`;
+  const displayEmoji = emoji.trim();
+  const swatchTextColor = isLightHexColor(color ?? defaultHex) ? "text-black" : "text-white";
 
   useEffect(() => {
     if (target) {
@@ -106,14 +108,18 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
               <div className="relative shrink-0">
                 <button
                   ref={triggerRef}
-                  className="relative w-12 h-12 p-0 rounded-full border-2 shadow-sm transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
+                  className="relative flex items-center justify-center w-12 h-12 p-0 rounded-full border-2 shadow-sm transition-transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-ring"
                   style={{ backgroundColor: color ?? defaultHex }}
                   onClick={() => setShowColorPicker(!showColorPicker)}
                   disabled={isLoading}
                 >
-                  {color === null && (
-                    <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white drop-shadow-md">Auto</div>
-                  )}
+                  {displayEmoji ? (
+                    <span className={`text-2xl font-medium leading-none drop-shadow-md material-symbols-outlined ${swatchTextColor}`}>
+                      {displayEmoji}
+                    </span>
+                  ) : color === null ? (
+                    <div className={`flex items-center justify-center text-[10px] font-bold drop-shadow-md ${swatchTextColor}`}>Auto</div>
+                  ) : null}
                 </button>
                 {showColorPicker && createPortal(
                   <div className="fixed inset-0 z-[9999]" style={{ pointerEvents: 'auto' }}>
