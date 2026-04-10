@@ -372,7 +372,11 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       throw e;
     }
 
-    if (!selectedHistoryItem) return;
+    if (!selectedHistoryItem) {
+      (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
+      return;
+    }
+
     const historyFeatures: Feature[] = [];
     if (selectedHistoryItem.type === 'stationary') {
       const s = selectedHistoryItem;

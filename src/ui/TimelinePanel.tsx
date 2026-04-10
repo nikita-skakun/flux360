@@ -1,3 +1,4 @@
+import { encode } from '@toon-format/toon';
 import { humanDurationSince, useTimeAgo } from '@/util/time';
 import { List, useDynamicRowHeight } from 'react-window';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
@@ -253,15 +254,43 @@ export const TimelinePanel: React.FC<Props> = ({
         }
         return val;
       };
+
+      const convertPointArray = (arr: unknown): unknown => {
+        if (!Array.isArray(arr)) return arr;
+
+        return arr.map((entry) => {
+          if (!entry || typeof entry !== 'object') return entry;
+
+          const point = entry as Record<string, unknown>;
+          const geo = point['geo'];
+          if (!Array.isArray(geo) || geo.length < 2) return entry;
+
+          const lon = geo[0];
+          const lat = geo[1];
+          const { geo: _geo, ...rest } = point;
+          return { ...rest, lon, lat };
+        });
+      };
+
+      const roundedEvent = round(ev.item);
+      const normalizedEvent = (() => {
+        if (!roundedEvent || typeof roundedEvent !== 'object') return roundedEvent;
+
+        const roundedObj = roundedEvent as Record<string, unknown>;
+        return {
+          ...roundedObj,
+          path: convertPointArray(roundedObj['path']),
+          outliers: convertPointArray(roundedObj['outliers']),
+        };
+      })();
+
       const exportData = {
         id: selectedDeviceId,
-        ev: round(ev.item),
+        ev: normalizedEvent,
         at: new Date().toISOString(),
       };
 
-      if (navigator?.clipboard) {
-        void navigator.clipboard.writeText(JSON.stringify(exportData, null, 2)).catch(() => { });
-      }
+      void navigator.clipboard?.writeText(encode(exportData)).catch(() => { });
       setCopiedId(ev.id);
       setTimeout(() => setCopiedId(null), 2000);
     },
