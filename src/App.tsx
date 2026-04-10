@@ -23,24 +23,23 @@ export function App() {
   const theme = useStore(state => state.settings.theme);
 
   const isDark = useMemo(() => {
-    if (theme === 'dark') return true;
-    if (theme === 'light') return false;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (theme === "Dark") return true;
+    if (theme === "Light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
   }, [theme]);
 
   useEffect(() => {
     const updateDarkMode = () => {
-      const isDarkNow = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-      document.documentElement.classList.toggle('dark', isDarkNow);
+      const isDarkNow = theme === "Dark" || (theme === "Auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.classList.toggle("dark", isDarkNow);
     };
 
     updateDarkMode();
+    if (theme !== "Auto") return;
 
-    if (theme !== 'system') return;
-
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    mediaQuery.addEventListener('change', updateDarkMode);
-    return () => mediaQuery.removeEventListener('change', updateDarkMode);
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    mediaQuery.addEventListener("change", updateDarkMode);
+    return () => mediaQuery.removeEventListener("change", updateDarkMode);
   }, [theme]);
 
   const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
@@ -106,30 +105,27 @@ export function App() {
       onDrop={(e) => {
         e.preventDefault();
         const file = e.dataTransfer.files?.[0];
-        if (!file?.name.endsWith('.json')) return;
-        const reader = new FileReader();
-        reader.onload = (re) => {
-          try {
-            const data = JSON.parse(re.target?.result as string);
-            if (!data.ev) return;
-            setSelectedTimelineEvent({ id: 'debug-drop', item: data.ev });
-            if (data.ev.bounds) {
-              const { minX, minY, maxX, maxY } = data.ev.bounds;
-              const sw = fromWebMercator([minX, minY]);
-              const ne = fromWebMercator([maxX, maxY]);
-              const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
-              mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
-              return;
-            } else if (data.ev.type === 'stationary') {
-              const geo = fromWebMercator(data.ev.mean);
-              const r = 0.001;
-              mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
-            }
-          } catch (err) {
-            console.error('Failed to parse dropped JSON', err);
+        if (!file?.name.endsWith(".json")) return;
+        file.text().then((text) => {
+          const data = JSON.parse(text) as { ev?: TimelineEvent["item"] };
+          if (!data.ev) return;
+
+          setSelectedTimelineEvent({ id: "debug-drop", item: data.ev });
+          if ("bounds" in data.ev) {
+            const { minX, minY, maxX, maxY } = data.ev.bounds;
+            const sw = fromWebMercator([minX, minY]);
+            const ne = fromWebMercator([maxX, maxY]);
+            const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+            mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+            return;
           }
-        };
-        reader.readAsText(file);
+
+          const geo = fromWebMercator(data.ev.mean);
+          const r = 0.001;
+          mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
+        }).catch((err: unknown) => {
+          console.error("Failed to parse dropped JSON", err);
+        });
       }}
     >
       {selectedTimelineEvent && (
@@ -154,7 +150,7 @@ export function App() {
         onCreateGroup={createGroup}
         onDeleteGroup={deleteGroup}
         onAddDeviceToGroup={addDeviceToGroup}
-        onEditGroup={(groupId) => setEditingTarget({ type: 'group', id: groupId })}
+        onEditGroup={(groupId) => setEditingTarget({ type: "group", id: groupId })}
         onCreateGroupSelectionChange={setPulsingDeviceIds}
         allDevices={allDevicesForSelection}
       />
@@ -192,13 +188,12 @@ export function App() {
               onSelectEvent={(event) => {
                 setSelectedTimelineEvent(event);
 
-                if (event.item.type === 'stationary') {
+                if (event.item.type === "stationary") {
                   const geo = fromWebMercator(event.item.mean);
                   const r = 0.001; // roughly 100m padding
                   mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
                 } else {
                   const s = event.item;
-                  // Use server-computed bounds instead of iterating through path
                   const sw = fromWebMercator([s.bounds.minX, s.bounds.minY]);
                   const ne = fromWebMercator([s.bounds.maxX, s.bounds.maxY]);
                   const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);

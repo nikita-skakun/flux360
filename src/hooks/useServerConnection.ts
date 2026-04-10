@@ -36,50 +36,51 @@ export function useServerConnection() {
       };
 
       ws.onmessage = (event) => {
+        let message;
         try {
-          const raw = JSON.parse(String(event.data)) as unknown;
-          const message = ServerMessageSchema.parse(raw);
-
-          // 1. If message has a requestId, it's a solicited response handled by wsRPC
-          if ('requestId' in message && message.requestId !== null && message.requestId !== undefined) {
-            handleResponse(message);
-            return;
-          }
-
-          // 2. Global server errors (no specific requestId)
-          if (message.type === 'error') {
-            if (message.message === 'Session expired') {
-              console.error('Session expired, logging out...');
-              useStore.getState().logout();
-            } else {
-              console.error('Global Server error:', message.message);
-            }
-            return;
-          }
-
-          // 3. Unsolicited push notifications
-          switch (message.type) {
-            case 'auth_success':
-              preAuthRetryCountRef.current = -1;
-              setOwnedDeviceIds(message.payload.ownedDeviceIds);
-              break;
-            case 'initial_state':
-              setInitialState(message.payload);
-              break;
-            case 'positions_update':
-              updatePositions(message.payload);
-              break;
-            case 'config_update':
-              updateConfig(message.payload);
-              break;
-            case 'ping':
-              ws.send(JSON.stringify({ type: 'pong' }));
-              break;
-            default:
-              console.warn('Unhandled server message type:', message);
-          }
+          message = ServerMessageSchema.parse(JSON.parse(event.data as string));
         } catch (error) {
           console.error('Failed to parse server message:', error);
+          return;
+        }
+
+        // 1. If message has a requestId, it's a solicited response handled by wsRPC
+        if (message.requestId !== undefined) {
+          handleResponse(message);
+          return;
+        }
+
+        // 2. Global server errors (no specific requestId)
+        if (message.type === 'error') {
+          if (message.message === 'Session expired') {
+            console.error('Session expired, logging out...');
+            useStore.getState().logout();
+          } else {
+            console.error('Global Server error:', message.message);
+          }
+          return;
+        }
+
+        // 3. Unsolicited push notifications
+        switch (message.type) {
+          case 'auth_success':
+            preAuthRetryCountRef.current = -1;
+            setOwnedDeviceIds(message.payload.ownedDeviceIds);
+            break;
+          case 'initial_state':
+            setInitialState(message.payload);
+            break;
+          case 'positions_update':
+            updatePositions(message.payload);
+            break;
+          case 'config_update':
+            updateConfig(message.payload);
+            break;
+          case 'ping':
+            ws.send(JSON.stringify({ type: 'pong' }));
+            break;
+          default:
+            console.warn('Unhandled server message type:', message);
         }
       };
 

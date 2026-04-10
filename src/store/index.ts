@@ -4,13 +4,13 @@ import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
 import { rgbToHex, colorForDevice } from '@/util/color';
 import type { AppDevice, MotionProfileName, DeviceShare } from '@/types';
-import type { Store, StoreState } from './types';
+import type { Store, StoreState, ThemeOptions } from './types';
 
 const initialState: StoreState = {
   entities: {},
   settings: {
     maptilerApiKey: '',
-    theme: 'system',
+    theme: 'Auto',
     sessionToken: null,
   },
   auth: {
@@ -222,6 +222,7 @@ export const useStore = create<Store>()(
       },
 
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
+        if (groupId < 0 || deviceId < 0) return;
         const group = get().entities[groupId];
         if (!group?.memberDeviceIds?.includes(deviceId)) return;
 
@@ -233,8 +234,6 @@ export const useStore = create<Store>()(
             [groupId]: { ...group, memberDeviceIds: newMembers }
           }
         }));
-
-        if (groupId < 0 || deviceId < 0) return;
 
         try {
           await sendRPC('remove_device_from_group', { groupId, deviceId });
@@ -255,8 +254,7 @@ export const useStore = create<Store>()(
           defaultColor = rgbToHex(...colorForDevice(groupId));
         }
 
-        const state = get();
-        const group = state.entities[groupId];
+        const group = get().entities[groupId];
         if (!group) return;
 
         const original = { ...group };
@@ -329,7 +327,7 @@ export const useStore = create<Store>()(
         void get().updateDevice(deviceId, { motionProfile: profile });
       },
 
-      setTheme: (theme: 'light' | 'dark' | 'system') => {
+      setTheme: (theme: ThemeOptions) => {
         set(state => ({
           settings: {
             ...state.settings,

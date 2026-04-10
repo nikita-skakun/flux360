@@ -1,5 +1,5 @@
 import { EPSILON, distancePointToSegment, sub, dot, length, nearestPointOnPolyline } from "@/util/vec2";
-import type { NormalizedPosition, Vec2 } from "@/types";
+import type { Vec2, WebMercatorPosition } from "@/types";
 
 const BASE_SLACK_METERS = 0.2;
 const MIN_ANCHOR_ALLOWED_DEVIATION = 1;
@@ -33,7 +33,7 @@ type MotionAnchor = {
   sourceEnd: number;
 };
 
-export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
+export function computeBestFitMotionPath(path: WebMercatorPosition[]): Vec2[] {
   if (path.length < 2) return path.map(p => p.geo);
 
   const n = path.length;
@@ -41,11 +41,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
   const anchors: MotionAnchor[] = [];
 
   const flushRun = (start: number, end: number): void => {
-    let sumW = 0;
-    let sumX = 0;
-    let sumY = 0;
-    let sumR = 0;
-    let sumSupport = 0;
+    let sumW = 0, sumX = 0, sumY = 0, sumR = 0, sumSupport = 0;
 
     for (let i = start; i <= end; i++) {
       const p = path[i]!;
@@ -69,8 +65,8 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
     const denom = Math.max(sumW, EPSILON);
     const center: Vec2 = [sumX / denom, sumY / denom];
     const meanRadius = sumR / denom;
-    const runLen = (end - start) + 1;
-    const aggregatedRadius = runLen > 1 ? (meanRadius / Math.sqrt(runLen)) : meanRadius;
+    const runLen = end - start + 1;
+    const aggregatedRadius = runLen > 1 ? meanRadius / Math.sqrt(runLen) : meanRadius;
 
     const timeSupportWeight = Math.max(0, Math.min(1, sumSupport / (sumSupport + TIME_WEIGHT_SCALE_MS)));
     const centerWeight = 1 - ((1 - baseAccuracyWeight(aggregatedRadius)) * (1 - timeSupportWeight));
@@ -94,10 +90,9 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
       const timeGap = curr.timestamp - prev.timestamp;
       const dSq = Math.pow(curr.geo[0] - prev.geo[0], 2) + Math.pow(curr.geo[1] - prev.geo[1], 2);
 
-      if (timeGap > DENSE_DELTA_MS && dSq > STATIONARY_MERGE_DIST_METERS * STATIONARY_MERGE_DIST_METERS) {
-        flushRun(runStart, i - 1);
-        runStart = i;
-      }
+      if (timeGap <= DENSE_DELTA_MS || dSq <= STATIONARY_MERGE_DIST_METERS * STATIONARY_MERGE_DIST_METERS) continue;
+      flushRun(runStart, i - 1);
+      runStart = i;
     }
     flushRun(runStart, n - 2);
   }
@@ -121,14 +116,12 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
       let connectable = true;
 
       for (let i = fromIdx; i <= toIdx; i++) {
+        if (!connectable) break;
         const p = path[i]!;
         const r = Math.max(0, p.accuracy);
         const d = distancePointToSegment(p.geo, currentAnchor.center, targetAnchor.center);
         const slack = BASE_SLACK_METERS + ((1 - baseAccuracyWeight(r)) * Math.min(8, r * 0.12));
-        if (d > r + slack + EPSILON) {
-          connectable = false;
-          break;
-        }
+        if (d > r + slack + EPSILON) connectable = false;
       }
       if (!connectable) continue;
 
@@ -188,7 +181,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
         const isAcuteTurn = turnAngleDeg > 60;
         const isSmallDeficit = coverageDeficit < radius * 0.5;
 
-        if (!(isAcuteTurn && isSmallDeficit)) {
+        if (!isAcuteTurn || !isSmallDeficit) {
           greedy.splice(segCursor + 1, 0, [point.geo[0], point.geo[1]]);
           segCursor++;
         }
@@ -249,9 +242,7 @@ export function computeBestFitMotionPath(path: NormalizedPosition[]): Vec2[] {
     if (candidateMaxExcess <= Math.max(0, currentMaxExcess) + EPSILON) {
       final = candidate;
       currentMaxExcess = candidateMaxExcess;
-    } else {
-      i++;
-    }
+    } else i++;
   }
 
   return final.length >= 2 ? final : endpoints;

@@ -3,6 +3,23 @@ import { z } from "zod";
 export const Vec2Schema = z.tuple([z.number(), z.number()]);
 export type Vec2 = z.infer<typeof Vec2Schema>;
 
+declare const WEB_MERCATOR_COORD_BRAND: unique symbol;
+declare const RAW_GPS_COORD_BRAND: unique symbol;
+
+export type WebMercatorCoord = Vec2 & { readonly [WEB_MERCATOR_COORD_BRAND]: "WebMercatorCoord" };
+export type RawGpsCoord = Vec2 & { readonly [RAW_GPS_COORD_BRAND]: "RawGpsCoord" };
+
+export function asWebMercatorCoord(v: Vec2): WebMercatorCoord {
+  return v as WebMercatorCoord;
+}
+
+export function asRawGpsCoord(v: Vec2): RawGpsCoord {
+  return v as RawGpsCoord;
+}
+
+const WebMercatorCoordSchema = Vec2Schema.transform<WebMercatorCoord>((v) => asWebMercatorCoord(v));
+const RawGpsCoordSchema = Vec2Schema.transform<RawGpsCoord>((v) => asRawGpsCoord(v));
+
 export const TraccarDeviceSchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -23,8 +40,8 @@ export type Session = z.infer<typeof SessionSchema>;
 export const DevicePointSchema = z.object({
   device: z.number(),
   sourceDeviceId: z.number().nullable(),
-  geo: Vec2Schema,
-  mean: Vec2Schema,
+  geo: RawGpsCoordSchema,
+  mean: WebMercatorCoordSchema,
   timestamp: z.number(),
   accuracy: z.number(),
   anchorStartTimestamp: z.number(),
@@ -32,13 +49,21 @@ export const DevicePointSchema = z.object({
 });
 export type DevicePoint = z.infer<typeof DevicePointSchema>;
 
-export const NormalizedPositionSchema = z.object({
+export const RawGpsPositionSchema = z.object({
   device: z.number(),
-  geo: Vec2Schema,
+  geo: RawGpsCoordSchema,
   accuracy: z.number(),
   timestamp: z.number(),
 });
-export type NormalizedPosition = z.infer<typeof NormalizedPositionSchema>;
+export type RawGpsPosition = z.infer<typeof RawGpsPositionSchema>;
+
+export const WebMercatorPositionSchema = z.object({
+  device: z.number(),
+  geo: WebMercatorCoordSchema,
+  accuracy: z.number(),
+  timestamp: z.number(),
+});
+export type WebMercatorPosition = z.infer<typeof WebMercatorPositionSchema>;
 
 export const MotionProfileNameSchema = z.enum(['person', 'car']);
 export type MotionProfileName = z.infer<typeof MotionProfileNameSchema>;
@@ -67,7 +92,7 @@ const StationaryEventSchema = z.object({
   type: z.literal('stationary'),
   start: z.number(),
   end: z.number(),
-  mean: Vec2Schema,
+  mean: WebMercatorCoordSchema,
   variance: z.number(),
   isDraft: z.boolean(),
 });
@@ -76,10 +101,10 @@ export const MotionEventSchema = z.object({
   type: z.literal('motion'),
   start: z.number(),
   end: z.number(),
-  startAnchor: Vec2Schema,
-  endAnchor: Vec2Schema,
-  path: z.array(NormalizedPositionSchema),
-  outliers: z.array(NormalizedPositionSchema),
+  startAnchor: WebMercatorCoordSchema,
+  endAnchor: WebMercatorCoordSchema,
+  path: z.array(WebMercatorPositionSchema),
+  outliers: z.array(WebMercatorPositionSchema),
   distance: z.number(),
   isDraft: z.boolean(),
   bounds: WorldBoundsSchema,
@@ -93,7 +118,7 @@ export type EngineEvent = z.infer<typeof EngineEventSchema>;
 export const StationaryDraftSchema = z.object({
   type: z.literal('stationary'),
   start: z.number(),
-  stationaryStartAnchor: Vec2Schema,
+  stationaryStartAnchor: WebMercatorCoordSchema,
   recent: z.array(DevicePointSchema),
   pending: z.array(DevicePointSchema),
 });
@@ -104,7 +129,7 @@ export const MotionDraftSchema = z.object({
   start: z.number(),
   stationaryCutoff: z.number(),
   predecessor: StationaryDraftSchema,
-  startAnchor: Vec2Schema,
+  startAnchor: WebMercatorCoordSchema,
   path: z.array(DevicePointSchema),
   outliers: z.array(DevicePointSchema),
   recent: z.array(DevicePointSchema),
@@ -186,7 +211,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("share_success"), deviceId: z.number(), sharedWith: z.string(), requestId: z.string() }),
   z.object({ type: z.literal("unshare_success"), deviceId: z.number(), username: z.string(), requestId: z.string() }),
   z.object({ type: z.literal("shares_list"), payload: z.array(DeviceShareSchema), requestId: z.string() }),
-  z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().nullable() }),
+  z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().optional() }),
   z.object({ type: z.literal("ping"), requestId: z.never().optional() }),
 ]);
 

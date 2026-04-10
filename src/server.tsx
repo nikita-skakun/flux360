@@ -10,11 +10,11 @@ import { ServerState } from "./server/serverState";
 import { sessionStore } from "./server/sessionStore";
 import { setVerbose, vlog } from "./util/logger";
 import { TraccarAdminClient } from "./server/traccarClient";
-import { TraccarTokenManager } from "./server/traccarTokenManager";
+import { getOrCreateTraccarPermanentToken } from "./server/traccarTokenManager";
 import { z } from "zod";
 import indexHtml from "./index.html";
 import type { Config } from "./util/config";
-import type { NormalizedPosition, TraccarDevice, AppDevice, DevicePoint, EngineEvent } from "@/types";
+import type { TraccarDevice, AppDevice, DevicePoint, EngineEvent, RawGpsPosition } from "@/types";
 import type { Server, ServerWebSocket } from "bun";
 
 class SafeError extends Error {
@@ -67,7 +67,7 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
     const usersRes = await fetch(`${apiBase}/users`, {
       headers: { "Authorization": `Bearer ${authToken}`, "Accept": "application/json" }
     });
-    if (!usersRes.ok) throw new Error(`Failed to fetch users for cache refresh: ${usersRes.status} ${usersRes.statusText}`);
+    if (!usersRes.ok) throw new Error(`[Users Cache] Failed to fetch: ${usersRes.status} ${usersRes.statusText}`);
 
     traccarUsersCache = z.array(TraccarUserSchema).parse(await usersRes.json());
     vlog(`[Users Cache] Refreshed (${reason}): count=${traccarUsersCache.length}`);
@@ -229,7 +229,7 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
 
       broadcastConfig(null);
     },
-    onPositionsReceived: (positions: NormalizedPosition[]) => {
+    onPositionsReceived: (positions: RawGpsPosition[]) => {
       if (serverState.handlePositions(positions)) {
         broadcastUpdate(Array.from(new Set(positions.map(p => p.device))));
       }
@@ -241,7 +241,6 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
 // Config is validated and ready
 const currentBaseUrl = config.traccarBaseUrl;
 const currentToken = config.traccarApiToken;
-const tokenManager = new TraccarTokenManager(currentBaseUrl, config.traccarSecure);
 
 const wsRouteHandler = (request: Request, server: Server<WSData>) => {
   vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
@@ -304,7 +303,7 @@ serve<WSData>({
               }
 
               const user = TraccarUserSchema.parse(await sessionRes.json());
-              const traccarToken = await tokenManager.getOrCreateTraccarPermanentToken(user.login, password);
+              const traccarToken = await getOrCreateTraccarPermanentToken(apiBase, user.login, password);
               refreshTraccarUsersCache(traccarToken, `login:${user.login}`);
 
               const token = sessionStore.createSession(user.login, traccarToken);
@@ -550,12 +549,15 @@ serve<WSData>({
                     body: JSON.stringify({ ...current, attributes: { ...current.attributes, memberDeviceIds: JSON.stringify(memberDeviceIds) } })
                   });
                   if (!putRes.ok) {
-                    const text = await putRes.text();
-                    console.error(`[Traccar API Error] membership: ${putRes.status} ${text}`);
+                    console.error(`[Traccar API Error] membership: ${putRes.status} ${await putRes.text()}`);
                     throw new SafeError("Failed to update group membership");
                   }
-                  const updated = TraccarDeviceSchema.parse(await putRes.json());
-                  serverState.handleDevices([updated]);
+                  const parsed = TraccarDeviceSchema.safeParse(await putRes.json());
+                  if (!parsed.success) {
+                    console.error(`[Traccar API Error] membership: Invalid response format: ${parsed.error}`);
+                    throw new SafeError("Failed to parse updated group data");
+                  }
+                  serverState.handleDevices([parsed.data]);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId: groupId, requestId })));
                   break;
                 }

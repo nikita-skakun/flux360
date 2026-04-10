@@ -1,5 +1,7 @@
 import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, MotionProfileName, DeviceShare } from '@/types';
 
+export type ThemeOptions = 'Light' | 'Dark' | 'Auto';
+
 export type StoreState = {
   // Entities slice (unifies devices and groups)
   entities: Record<number, AppDevice>;
@@ -7,7 +9,7 @@ export type StoreState = {
   // Settings slice (persisted)
   settings: {
     maptilerApiKey: string;
-    theme: 'light' | 'dark' | 'system';
+    theme: ThemeOptions;
     sessionToken: string | null;
   };
 
@@ -54,7 +56,7 @@ export type StoreActions = {
   // Settings & Auth
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
+  setTheme: (theme: ThemeOptions) => void;
 
   // UI
   setSelectedDeviceId: (id: number | null) => void;

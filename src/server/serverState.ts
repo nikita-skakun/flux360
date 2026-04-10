@@ -2,13 +2,13 @@ import { buildEngineSnapshotsFromByDevice } from "./serverUtils";
 import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { db } from "./db";
 import { Engine } from "@/engine/engine";
-import { EngineStateSchema, NormalizedPositionSchema } from "@/types";
+import { EngineStateSchema, MotionProfileNameSchema, RawGpsPositionSchema } from "@/types";
 import { numericEntries } from "@/util/record";
 import { rgbToHex, colorForDevice } from "@/util/color";
 import { toWebMercator } from "@/util/webMercator";
 import { vlog } from "@/util/logger";
 import { z } from "zod";
-import type { NormalizedPosition, DevicePoint, MotionProfileName, EngineEvent, AppDevice, TraccarDevice, EngineState, Vec2 } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, AppDevice, TraccarDevice, EngineState, Vec2, RawGpsPosition } from "@/types";
 
 function dedupeKey(p: { device: number; timestamp: number; geo: Vec2 }) {
   return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
@@ -29,9 +29,37 @@ export class ServerState {
 
   activePointsByDevice: Record<number, DevicePoint[]> = {};
   eventsByDevice: Record<number, EngineEvent[]> = {};
-  positionsAll: NormalizedPosition[] = [];
-  private allPosById: Record<number, NormalizedPosition[]> = {};
+  positionsAll: RawGpsPosition[] = [];
+  private allPosById: Record<number, RawGpsPosition[]> = {};
   private historyMs: number;
+
+  private firstAfterTimestamp(list: RawGpsPosition[], timestamp: number) {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if ((list[mid]?.timestamp ?? 0) <= timestamp) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  private replayPositionsForEntity(id: number, replayFrom: number) {
+    const replayIds = this.groupIds.has(id)
+      ? Array.from(new Set(this.groups.find(g => g.id === id)?.memberDeviceIds ?? []))
+      : [id];
+
+    const replay: RawGpsPosition[] = [];
+    for (const replayId of replayIds) {
+      const history = this.allPosById[replayId];
+      if (!history || history.length === 0) continue;
+      const start = this.firstAfterTimestamp(history, replayFrom);
+      if (start < history.length) replay.push(...history.slice(start));
+    }
+
+    if (replayIds.length > 1) replay.sort((a, b) => a.timestamp - b.timestamp);
+    return replay;
+  }
 
   constructor(public readonly historyDays: number) {
     this.historyMs = historyDays * 24 * 60 * 60 * 1000;
@@ -40,16 +68,16 @@ export class ServerState {
     // 1. Restore Checkpoints
     (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all())
       .forEach(row => {
-        const typedRow = row as { device_id: number, timestamp: number, snapshot_json: string | object };
-        const checkpoints = this.engineCheckpoints[typedRow.device_id] ??= [];
-        this.engines[typedRow.device_id] ??= new Engine();
+        const typedRow = row as { device_id: number, timestamp: number, snapshot_json: string };
+        const deviceId = typedRow.device_id;
+        const checkpoints = this.engineCheckpoints[deviceId] ??= [];
+        this.engines[deviceId] ??= new Engine();
         try {
-          const rawSnapshot = typeof typedRow.snapshot_json === 'string' ? JSON.parse(typedRow.snapshot_json) as unknown : typedRow.snapshot_json;
-          const snapshot = EngineStateSchema.parse(rawSnapshot);
+          const snapshot = EngineStateSchema.parse(JSON.parse(typedRow.snapshot_json));
           checkpoints.push({ timestamp: typedRow.timestamp, snapshot });
-          this.engines[typedRow.device_id]?.restoreSnapshot(snapshot);
+          this.engines[deviceId]?.restoreSnapshot(snapshot);
         } catch (err) {
-          console.error("Failed to parse/validate snapshot for device", typedRow.device_id, err);
+          console.error("Failed to parse/validate snapshot for device", deviceId, err);
         }
       });
 
@@ -59,29 +87,25 @@ export class ServerState {
     const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff);
     for (const row of posRows) {
       const typedRow = row as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number };
-      try {
-        const p = NormalizedPositionSchema.parse({
-          device: typedRow.device_id,
-          geo: [typedRow.geo_lng, typedRow.geo_lat],
-          accuracy: typedRow.accuracy,
-          timestamp: typedRow.timestamp
-        });
-        this.positionsAll.push(p);
-
-        let list = this.allPosById[p.device];
-        if (!list) this.allPosById[p.device] = list = [];
-        list.push(p);
-
-        const tKey = dedupeKey(p);
-        this.knownKeys.add(tKey);
-
-        const engine = this.engines[p.device];
-        if (engine?.lastTimestamp && p.timestamp <= engine.lastTimestamp) {
-          this.processedKeys.add(tKey);
-        }
-      } catch (err) {
-        console.error("Failed to validate position from DB:", err);
+      const deviceId = typedRow.device_id;
+      const parsed = RawGpsPositionSchema.safeParse({
+        device: deviceId,
+        geo: [typedRow.geo_lng, typedRow.geo_lat],
+        accuracy: typedRow.accuracy,
+        timestamp: typedRow.timestamp
+      });
+      if (!parsed.success) {
+        console.error("Failed to validate position from DB:", parsed.error);
+        continue;
       }
+      const p = parsed.data;
+      this.allPosById[deviceId] ??= [];
+      this.allPosById[deviceId].push(p);
+      this.positionsAll.push(p);
+
+      const tKey = dedupeKey(p);
+      this.knownKeys.add(tKey);
+      if (p.timestamp <= (this.engines[deviceId]?.lastTimestamp ?? -1)) this.processedKeys.add(tKey);
     }
     vlog(`[ServerState] Restored ${posRows.length} trailing positions. ${Object.keys(this.engines).length} engines ready.`);
   }
@@ -99,21 +123,19 @@ export class ServerState {
         const lastSeen = lastUpdate ? (Date.parse(lastUpdate)) : null;
         if (lastSeen && lastSeen < Date.now() - this.historyMs) return null;
 
-        const profileAttr = attributes["motionProfile"];
-        const profile = (profileAttr === "person" || profileAttr === "car") ? profileAttr : null;
-        const color = (typeof attributes["color"] === "string") ? attributes["color"] : rgbToHex(...colorForDevice(id));
+        const parsed = MotionProfileNameSchema.safeParse(attributes["motionProfile"]);
+        const motionProfile = parsed.success ? parsed.data : null;
+        const color = typeof attributes["color"] === "string" ? attributes["color"] : rgbToHex(...colorForDevice(id));
         const emoji = typeof attributes["emoji"] === "string" ? attributes["emoji"] : "";
 
-        const base: AppDevice = { id, name, emoji, lastSeen, effectiveMotionProfile: profile ?? "person", motionProfile: profile, color, isOwner: false, memberDeviceIds: null };
+        const base: AppDevice = { id, name, emoji, lastSeen, effectiveMotionProfile: motionProfile ?? "person", motionProfile, color, isOwner: false, memberDeviceIds: null };
 
         const memberIdsAttr = attributes["memberDeviceIds"];
         let group: AppDevice | null = null;
-        if (typeof memberIdsAttr === "string") {
-          try {
-            const memberDeviceIds = z.array(z.number()).parse(JSON.parse(memberIdsAttr));
-            group = { ...base, emoji: base.emoji ? base.emoji : 'group', lastSeen: null, memberDeviceIds };
-          } catch { /* ignore */ }
-        }
+        try {
+          const memberDeviceIds = z.number().array().parse(JSON.parse(memberIdsAttr as string));
+          group = { ...base, emoji: base.emoji ?? "group", lastSeen: null, memberDeviceIds };
+        } catch { /* ignore */ }
         return { id, base, group };
       })
       .filter((d): d is NonNullable<typeof d> => d !== null);
@@ -141,9 +163,8 @@ export class ServerState {
     for (const group of this.groups) {
       this.groupIds.add(group.id);
       group.memberDeviceIds?.forEach(deviceId => {
-        const list = this.deviceToGroupsMap[deviceId] ?? [];
-        list.push(group.id);
-        this.deviceToGroupsMap[deviceId] = list;
+        this.deviceToGroupsMap[deviceId] ??= [];
+        this.deviceToGroupsMap[deviceId].push(group.id);
       });
     }
 
@@ -153,9 +174,8 @@ export class ServerState {
       for (const p of this.positionsAll) {
         const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
         for (const id of ids) {
-          let list = this.allPosById[id];
-          if (!list) this.allPosById[id] = list = [];
-          list.push(p);
+          this.allPosById[id] ??= [];
+          this.allPosById[id].push(p);
         }
       }
     }
@@ -180,14 +200,13 @@ export class ServerState {
     for (const group of this.groups) {
       this.groupIds.add(group.id);
       group.memberDeviceIds?.forEach(deviceId => {
-        const list = this.deviceToGroupsMap[deviceId] ?? [];
-        list.push(group.id);
-        this.deviceToGroupsMap[deviceId] = list;
+        this.deviceToGroupsMap[deviceId] ??= [];
+        this.deviceToGroupsMap[deviceId].push(group.id);
       });
     }
   }
 
-  handlePositions(pts: NormalizedPosition[]) {
+  handlePositions(pts: RawGpsPosition[]) {
     if (pts.length === 0) return null;
 
     const newPts = pts.filter(p => {
@@ -214,9 +233,8 @@ export class ServerState {
       for (const p of newPts) {
         const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
         for (const id of ids) {
-          let list = this.allPosById[id];
-          if (!list) this.allPosById[id] = list = [];
-          list.push(p);
+          this.allPosById[id] ??= [];
+          this.allPosById[id].push(p);
           touchedIds.add(id);
         }
       }
@@ -228,16 +246,14 @@ export class ServerState {
     // 3. Prune old data
     const cutoff = Date.now() - this.historyMs;
     const splitIdx = this.positionsAll.findIndex(p => p.timestamp > cutoff);
-    if (splitIdx > 0) {
-      for (let i = 0; i < splitIdx; i++) {
-        const p = this.positionsAll[i];
-        if (!p) continue;
-        const k = dedupeKey(p);
-        this.processedKeys.delete(k);
-        this.knownKeys.delete(k);
-      }
-      this.positionsAll = this.positionsAll.slice(splitIdx);
+    for (let i = 0; i < splitIdx; i++) {
+      const p = this.positionsAll[i];
+      if (!p) continue;
+      const k = dedupeKey(p);
+      this.processedKeys.delete(k);
+      this.knownKeys.delete(k);
     }
+    if (splitIdx > 0) this.positionsAll = this.positionsAll.slice(splitIdx);
 
     for (const [id, list] of numericEntries(this.allPosById)) {
       const split = list.findIndex(p => p.timestamp > cutoff);
@@ -253,17 +269,15 @@ export class ServerState {
       profiles[id] = d.effectiveMotionProfile;
     }
 
-    const posById: Record<number, NormalizedPosition[]> = {};
+    const posById: Record<number, RawGpsPosition[]> = {};
     for (const p of pts) {
       const key = dedupeKey(p);
-      if (!this.processedKeys.has(key)) {
-        this.processedKeys.add(key);
-        const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
-        for (const id of ids) {
-          let list = posById[id];
-          if (!list) posById[id] = list = [];
-          list.push(p);
-        }
+      if (this.processedKeys.has(key)) continue;
+      this.processedKeys.add(key);
+      const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
+      for (const id of ids) {
+        posById[id] ??= [];
+        posById[id].push(p);
       }
     }
 
@@ -275,11 +289,9 @@ export class ServerState {
       const batchKeys = new Set(batch.map(dedupeKey));
 
       const trailing = history.filter(p => p.timestamp > lastTs && !batchKeys.has(dedupeKey(p)));
-      if (trailing.length) {
-        const combined = [...batch, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
-        posById[id] = combined;
-        for (const p of trailing) this.processedKeys.add(dedupeKey(p));
-      }
+      if (!trailing.length) continue;
+      posById[id] = [...batch, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
+      for (const p of trailing) this.processedKeys.add(dedupeKey(p));
     }
 
     if (Object.keys(posById).length === 0) return null;
@@ -288,11 +300,10 @@ export class ServerState {
     for (const [id, newPos] of numericEntries(posById)) {
       const engine = this.engines[id];
       const first = newPos[0];
-      if (!engine?.lastTimestamp || !first || first.timestamp >= engine.lastTimestamp) continue;
+      if (!engine || !first || first.timestamp >= (engine.lastTimestamp ?? -1)) continue;
 
-      const minTs = first.timestamp;
       const checkpoints = this.engineCheckpoints[id] ?? [];
-      const cpIndex = checkpoints.findLastIndex(c => c.timestamp < minTs);
+      const cpIndex = checkpoints.findLastIndex(c => c.timestamp < first.timestamp);
       const cp = cpIndex >= 0 ? checkpoints[cpIndex] : null;
 
       if (cp) {
@@ -306,9 +317,7 @@ export class ServerState {
       }
 
       const replayFrom = cp?.timestamp ?? 0;
-      const relevantIds = this.groupIds.has(id) ? new Set(this.groups.find(g => g.id === id)?.memberDeviceIds ?? []) : [id];
-      const historical = Array.from(relevantIds).flatMap(rId => this.allPosById[rId] ?? []).filter(p => p.timestamp > replayFrom).sort((a, b) => a.timestamp - b.timestamp);
-      posById[id] = historical;
+      posById[id] = this.replayPositionsForEntity(id, replayFrom);
     }
 
     const rawByDevice: Record<number, DevicePoint[]> = {};
@@ -333,30 +342,29 @@ export class ServerState {
     const result = buildEngineSnapshotsFromByDevice(rawByDevice, this.engines, motionProfiles);
 
     // Prune and Checkpoint
-    const cpCutoff = Date.now() - (this.historyMs * 2);
-    const cpToDb: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
+    const checkpointCutoff = Date.now() - this.historyMs - (24 * 60 * 60 * 1000);
+    const pendingCheckpointWrites: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
 
     for (const [id, engine] of numericEntries(this.engines)) {
       if (!engine.lastTimestamp) continue;
-      engine.pruneHistory(cpCutoff);
+      engine.pruneHistory(checkpointCutoff);
       const checkpoints = this.engineCheckpoints[id] ?? [];
       const lastCp = checkpoints[checkpoints.length - 1];
-      if (!lastCp || (engine.lastTimestamp - lastCp.timestamp) > CHECKPOINT_INTERVAL_MS) {
-        const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
-        checkpoints.push(cp);
-        this.engineCheckpoints[id] = checkpoints;
-        cpToDb.push({ id, cp });
+      if (lastCp && (engine.lastTimestamp - lastCp.timestamp) <= CHECKPOINT_INTERVAL_MS) continue;
+      const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
+      checkpoints.push(cp);
+      this.engineCheckpoints[id] = checkpoints;
+      pendingCheckpointWrites.push({ id, cp });
 
-        if (checkpoints.length > MAX_CHECKPOINTS) {
-          const oldest = checkpoints.shift();
-          if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [id, oldest.timestamp]);
-        }
+      if (checkpoints.length > MAX_CHECKPOINTS) {
+        const oldest = checkpoints.shift();
+        if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [id, oldest.timestamp]);
       }
     }
 
-    if (cpToDb.length) {
+    if (pendingCheckpointWrites.length) {
       const stmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (device_id, timestamp, snapshot_json) VALUES (?, ?, ?)`);
-      db.transaction(() => cpToDb.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
+      db.transaction(() => pendingCheckpointWrites.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
     }
 
     const beforeCount = pts[0]?.device !== undefined ? (this.eventsByDevice[pts[0].device]?.length ?? 0) : 0;
@@ -436,8 +444,7 @@ export class ServerState {
 
     // 1. Collect all allowed devices as individual entities first
     for (const [id, dev] of numericEntries(this.devices)) {
-      if (!allowedDeviceIds.has(id)) continue;
-      entities[id] = dev;
+      if (allowedDeviceIds.has(id)) entities[id] = dev;
     }
 
     // 2. Process directly allowed groups and include only their members.
@@ -445,12 +452,9 @@ export class ServerState {
     for (const group of this.groups) {
       if (!allowedDeviceIds.has(group.id)) continue;
 
-      if (group.memberDeviceIds) {
-        for (const mId of group.memberDeviceIds) {
-          groupMemberIds.add(mId);
-
-          if (this.devices[mId]) entities[mId] = this.devices[mId];
-        }
+      for (const mId of (group.memberDeviceIds ?? [])) {
+        groupMemberIds.add(mId);
+        if (this.devices[mId]) entities[mId] = this.devices[mId];
       }
 
       entities[group.id] = group;

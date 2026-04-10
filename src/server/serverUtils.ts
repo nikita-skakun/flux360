@@ -1,27 +1,24 @@
+import { asRawGpsCoord, RawTraccarPositionSchema } from "@/types";
 import { computeBounds } from "@/util/geo";
 import { Engine } from "@/engine/engine";
 import { fromWebMercator } from "@/util/webMercator";
 import { numericEntries } from "@/util/record";
-import { RawTraccarPositionSchema } from "@/types";
-import type { DevicePoint, MotionProfileName, EngineEvent, EngineState, NormalizedPosition } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, EngineState, RawGpsPosition } from "@/types";
 
-export function normalizePosition(raw: unknown): NormalizedPosition | null {
-  try {
-    const parsed = RawTraccarPositionSchema.parse(raw);
-    const { latitude, longitude, fixTime, deviceId, accuracy } = parsed;
+export function normalizePosition(raw: unknown): RawGpsPosition | null {
+  const parsed = RawTraccarPositionSchema.safeParse(raw);
+  if (!parsed.success) return null;
 
-    const ts = Date.parse(fixTime);
-    if (Number.isNaN(ts)) return null;
+  const { latitude, longitude, fixTime, deviceId, accuracy } = parsed.data;
+  const ts = Date.parse(fixTime);
+  if (Number.isNaN(ts)) return null;
 
-    return {
-      device: deviceId,
-      timestamp: ts,
-      geo: [longitude, latitude],
-      accuracy: accuracy ?? 100,
-    };
-  } catch {
-    return null;
-  }
+  return {
+    device: deviceId,
+    timestamp: ts,
+    geo: asRawGpsCoord([longitude, latitude]),
+    accuracy: accuracy ?? 100,
+  };
 }
 
 export function buildEngineSnapshotsFromByDevice(
@@ -37,8 +34,7 @@ export function buildEngineSnapshotsFromByDevice(
         engine = new Engine();
         engines[deviceId] = engine;
       }
-      const profile = motionProfiles[deviceId] ?? "person";
-      engine.setMotionProfile(profile);
+      engine.setMotionProfile(motionProfiles[deviceId] ?? "person");
       engine.processMeasurements(arr);
       engine.refineHistory();
     }
@@ -66,8 +62,7 @@ export function buildEngineSnapshotsFromByDevice(
         const isStationary = draft.type === 'stationary';
         const isMotion = draft.type === 'motion';
         const distance = isMotion ? engine.computePathLength(draft.path.map(p => p.mean)) : 0;
-        const treatAsStationary =
-                    isStationary || (isMotion && distance === 0 && draft.path.length > 1);
+        const treatAsStationary = isStationary || (isMotion && distance === 0 && draft.path.length > 1);
 
         if (treatAsStationary) {
           const stats = engine.computeStats(isStationary ? draft.recent : draft.path);

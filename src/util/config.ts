@@ -12,16 +12,10 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 export async function loadConfig(): Promise<Config> {
   const configFile = Bun.file("config.json");
-  if (!(await configFile.exists())) {
-    throw new Error("config.json is missing. Please create it based on config.sample.json.");
-  }
+  if (!await configFile.exists()) throw new Error("config.json is missing.");
 
-  try {
-    return ConfigSchema.parse(await configFile.json());
-  } catch (error) {
-    const message = error instanceof z.ZodError
-      ? error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join(", ")
-      : "config.json is not valid JSON.";
-    throw new Error(`Configuration error: ${message}`, { cause: error });
-  }
+  const parsed = ConfigSchema.safeParse(await configFile.json());
+  if (parsed.success) return parsed.data;
+  const message = parsed.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join(", ");
+  throw new Error(`Configuration error: ${message}`);
 }

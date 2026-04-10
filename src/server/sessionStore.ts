@@ -21,14 +21,13 @@ export const sessionStore = {
     const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token);
     if (!row) return null;
 
-    let session: Session;
-    try {
-      session = SessionSchema.parse(row);
-    } catch (err) {
-      console.error("Invalid session in database:", err);
+    const parsed = SessionSchema.safeParse(row);
+    if (!parsed.success) {
+      console.error("Invalid session in database:", parsed.error);
       db.run(`DELETE FROM user_tokens WHERE token = ?`, [token]);
       return null;
     }
+    const session = parsed.data;
 
     const now = Date.now();
     if (now - session.lastActive > SESSION_TTL) {

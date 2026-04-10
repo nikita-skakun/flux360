@@ -1,9 +1,10 @@
+import { asWebMercatorCoord } from "@/types";
 import { filterMotionOutliers } from "@/util/motionOutliers";
 import { fromWebMercator, WORLD_R } from "@/util/webMercator";
 import { haversineDistance, computeBounds, getRadiusFromVariance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
 import { vlog } from "@/util/logger";
-import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState } from "@/types";
+import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState, WebMercatorCoord } from "@/types";
 import type { MotionProfileConfig } from "./motionDetector";
 
 const MIN_CLUSTER_VARIANCE = 2.0;
@@ -281,8 +282,8 @@ export class Engine {
     return directions.every(d => (d[0] * avg[0] + d[1] * avg[1]) >= threshold);
   }
 
-  public computeStats(points: DevicePoint[]): { mean: Vec2; variance: number } {
-    if (points.length === 0) return { mean: [0, 0], variance: 1 };
+  public computeStats(points: DevicePoint[]): { mean: WebMercatorCoord; variance: number } {
+    if (points.length === 0) return { mean: asWebMercatorCoord([0, 0]), variance: 1 };
 
     let sumX = 0, sumY = 0;
     for (const point of points) {
@@ -290,7 +291,7 @@ export class Engine {
       sumY += point.mean[1];
     }
 
-    const mean: Vec2 = [sumX / points.length, sumY / points.length];
+    const mean: WebMercatorCoord = asWebMercatorCoord([sumX / points.length, sumY / points.length]);
 
     let sumDistSq = 0;
     for (const point of points) {

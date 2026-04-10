@@ -1,28 +1,19 @@
 import { getTraccarApiBase } from "./traccarUrlUtils";
 import { normalizePosition } from "./serverUtils";
-import { TraccarDeviceSchema, RawTraccarPositionSchema } from "@/types";
+import { TraccarDeviceSchema } from "@/types";
 import { vlog } from "@/util/logger";
-import type { NormalizedPosition, TraccarDevice } from "@/types";
+import type { RawGpsPosition, TraccarDevice } from "@/types";
 
 type ServerStateDeps = {
   // Dependencies injected from server logic so this client can push data to it
-  onPositionsReceived: (positions: NormalizedPosition[]) => void;
+  onPositionsReceived: (positions: RawGpsPosition[]) => void;
   onDevicesReceived: (devices: TraccarDevice[]) => void;
 };
 
-function extractPositionsFromMessage(raw: unknown): NormalizedPosition[] {
-  if (!raw || typeof raw !== "object") return [];
-
-  const obj = raw as { positions?: unknown; data?: { positions?: unknown } };
-  const positions = Array.isArray(obj.positions)
-    ? obj.positions
-    : Array.isArray(obj.data?.positions)
-      ? obj.data?.positions
-      : [];
-
-  return positions
+function extractPositionsFromMessage(raw: unknown): RawGpsPosition[] {
+  return (raw as { positions: unknown[]; }).positions
     .map(p => normalizePosition(p))
-    .filter((p): p is NonNullable<typeof p> => p !== null);
+    .filter((p): p is RawGpsPosition => p !== null);
 }
 
 export class TraccarAdminClient {
@@ -39,19 +30,16 @@ export class TraccarAdminClient {
 
   connect() {
     if (this.destroyed || !this.baseUrl || !this.token) return;
-
-    const protocol = this.secure ? "wss" : "ws";
-    const wsUrl = `${protocol}://${this.baseUrl}/api/socket?token=${encodeURIComponent(this.token)}`;
-
     try {
-      void this.fetchInitialDevices();
-      this.ws = new WebSocket(wsUrl);
+      this.ws = new WebSocket(`${this.secure ? "wss" : "ws"}://${this.baseUrl}/api/socket?token=${encodeURIComponent(this.token)}`);
 
       this.ws.onopen = () => {
         vlog("✅ Traccar Admin WebSocket connected");
         if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;
       };
+
+      void this.fetchInitialDevices();
 
       this.ws.onmessage = (ev) => {
         try {
@@ -71,18 +59,20 @@ export class TraccarAdminClient {
   }
 
   async fetchDevices(): Promise<TraccarDevice[]> {
-    try {
-      const res = await fetch(`${getTraccarApiBase(this.baseUrl, this.secure)}/devices`, {
-        headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const devices = TraccarDeviceSchema.array().parse(await res.json());
-      vlog(`[TraccarAdminClient] Fetched ${devices.length} devices via REST`);
-      return devices;
-    } catch (err) {
-      console.error("[TraccarAdminClient] Devices fetch failed:", err);
+    const res = await fetch(`${getTraccarApiBase(this.baseUrl, this.secure)}/devices`, {
+      headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
+    });
+    if (!res.ok) {
+      console.error("[TraccarAdminClient] Devices fetch failed with HTTP", res.status, res.statusText);
       return [];
     }
+    const parsed = TraccarDeviceSchema.array().safeParse(await res.json());
+    if (!parsed.success) {
+      console.error("[TraccarAdminClient] Devices fetch failed schema validation:", parsed.error);
+      return [];
+    }
+    vlog(`[TraccarAdminClient] Fetched ${parsed.data.length} devices via REST`);
+    return parsed.data;
   }
 
   private async fetchInitialDevices() {
@@ -97,39 +87,28 @@ export class TraccarAdminClient {
     }
   }
 
-  async fetchHistory(deviceId: number, from: number, to: number): Promise<NormalizedPosition[]> {
-    const fromStr = new Date(from).toISOString();
-    const toStr = new Date(to).toISOString();
-
+  async fetchHistory(deviceId: number, from: number, to: number): Promise<RawGpsPosition[]> {
     const params = new URLSearchParams();
     params.set("deviceId", deviceId.toString());
-    params.set("from", fromStr);
-    params.set("to", toStr);
+    params.set("from", new Date(from).toISOString());
+    params.set("to", new Date(to).toISOString());
 
     const url = `${getTraccarApiBase(this.baseUrl, this.secure)}/positions?${params.toString()}`;
+    const res = await fetch(url, {
+      headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
+    });
 
-    vlog(`[TraccarAdminClient] Fetching history for device ${deviceId} at ${url}`);
-
-    try {
-      const res = await fetch(url, {
-        headers: { "Authorization": `Bearer ${this.token}`, "Accept": "application/json" }
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`HTTP ${res.status}: ${text}`);
-      }
-
-      const normalized = RawTraccarPositionSchema.array().parse(await res.json())
-        .map(p => normalizePosition(p))
-        .filter((p): p is NormalizedPosition => p !== null);
-
-      vlog(`[TraccarAdminClient] Received ${normalized.length} historical positions for device ${deviceId}`);
-      return normalized;
-    } catch (err) {
-      console.error(`[TraccarAdminClient] History fetch failed for device ${deviceId}:`, err);
+    if (!res.ok) {
+      console.error(`[TraccarAdminClient] Fetch failed for device ${deviceId} with HTTP ${res.status}: ${res.statusText}`);
       return [];
     }
+
+    const normalized = (await res.json() as unknown[])
+      .map(p => normalizePosition(p))
+      .filter((p): p is RawGpsPosition => p !== null);
+
+    vlog(`[TraccarAdminClient] Received ${normalized.length} historical positions for device ${deviceId}`);
+    return normalized;
   }
 
   close() {

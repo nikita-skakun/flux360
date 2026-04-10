@@ -11,10 +11,9 @@ const pending = new Map<string, PendingRequest>();
 function registerCallback(requestId: string, cb: (resp: unknown) => void) {
   const timer = setTimeout(() => {
     const entry = pending.get(requestId);
-    if (entry) {
-      pending.delete(requestId);
-      entry.cb({ type: 'error', message: 'Request timeout' });
-    }
+    if (!entry) return;
+    pending.delete(requestId);
+    entry.cb({ type: "error", message: "Request timeout" });
   }, RPC_TIMEOUT_MS);
 
   pending.set(requestId, { cb, timer });
@@ -23,16 +22,14 @@ function registerCallback(requestId: string, cb: (resp: unknown) => void) {
 function clearPendingRequests() {
   for (const [_, entry] of pending.entries()) {
     clearTimeout(entry.timer);
-    entry.cb({ type: 'error', message: 'Connection closed' });
+    entry.cb({ type: "error", message: "Connection closed" });
   }
   pending.clear();
 }
 
 export function setWebSocket(connection: WebSocket | null) {
   ws = connection;
-  if (connection === null) {
-    clearPendingRequests();
-  }
+  if (connection === null) clearPendingRequests();
 }
 
 export function closeWebSocket() {
@@ -42,14 +39,13 @@ export function closeWebSocket() {
 }
 
 export function handleResponse(resp: unknown) {
-  if (typeof resp !== 'object' || resp === null) return;
+  if (typeof resp !== "object" || resp === null) return;
   const { requestId } = resp as { requestId: string };
   const entry = pending.get(requestId);
-  if (entry) {
-    clearTimeout(entry.timer);
-    pending.delete(requestId);
-    entry.cb(resp);
-  }
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pending.delete(requestId);
+  entry.cb(resp);
 }
 
 export function sendRPC<T = unknown>(type: string, payload?: unknown): Promise<T> {
@@ -57,23 +53,23 @@ export function sendRPC<T = unknown>(type: string, payload?: unknown): Promise<T
     const requestId = crypto.randomUUID();
     registerCallback(requestId, (resp) => {
       const response = resp as { type?: string; message?: string };
-      if (response.type === 'error') {
-        reject(new Error(response.message || 'Unknown error'));
+      if (response.type === "error") {
+        reject(new Error(response.message ?? "Unknown error"));
       } else {
         resolve(resp as T);
       }
     });
 
-    try {
-      if (ws?.readyState !== WebSocket.OPEN) throw new Error("WebSocket not connected");
+    if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type, payload, requestId }));
-    } catch (e) {
-      const entry = pending.get(requestId);
-      if (entry) {
-        clearTimeout(entry.timer);
-        pending.delete(requestId);
-      }
-      reject(e);
+      return;
     }
+
+    const entry = pending.get(requestId);
+    if (entry) {
+      clearTimeout(entry.timer);
+      pending.delete(requestId);
+    }
+    reject(new Error("WebSocket not connected"));
   });
 }

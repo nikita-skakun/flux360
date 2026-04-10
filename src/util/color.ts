@@ -66,15 +66,15 @@ function lerpColor(a: Color, b: Color, t: number): Color {
 }
 
 export function colorForDeltaSeconds(deltaSec: number): string {
-  const GREEN = parseHexColor('#22c55e');
-  const BLUE = parseHexColor('#2563eb');
-  const YELLOW = parseHexColor('#eab308');
-  const RED = parseHexColor('#ef4444');
+  const GREEN = parseHexColor("#22c55e");
+  const BLUE = parseHexColor("#2563eb");
+  const YELLOW = parseHexColor("#eab308");
+  const RED = parseHexColor("#ef4444");
 
-  if (!GREEN || !BLUE || !YELLOW || !RED) return '#ef4444';
+  if (!GREEN || !BLUE || !YELLOW || !RED) return "#ef4444";
   if (deltaSec <= 30) return rgbToHex(...lerpColor(GREEN, BLUE, deltaSec / 30));
   if (deltaSec <= 60) return rgbToHex(...lerpColor(BLUE, YELLOW, (deltaSec - 30) / 30));
   if (deltaSec <= 180) return rgbToHex(...lerpColor(YELLOW, RED, (deltaSec - 60) / 120));
 
-  return '#ef4444';
+  return "#ef4444";
 }

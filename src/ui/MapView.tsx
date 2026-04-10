@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } 
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
 import type { Color } from "@/util/color";
 import type { DrawItem } from "@/util/clustering";
-import type { Feature, Point, Polygon, LineString } from "geojson";
+import type { Feature, Point, Polygon } from "geojson";
 
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
@@ -125,9 +125,9 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
   const bestFitPathCacheRef = useRef<Map<string, Vec2[]>>(new Map());
 
-  const buildAccuracyCircleCoords = (center: Vec2, radius: number, steps = 64): Vec2[] => {
-    return Array.from({ length: steps + 1 }, (_, j) => {
-      const angle = (j * 2 * Math.PI) / steps;
+  const buildAccuracyCircleCoords = (center: Vec2, radius: number, sides = 64): Vec2[] => {
+    return Array.from({ length: sides + 1 }, (_, j) => {
+      const angle = (j * 2 * Math.PI) / sides;
       return fromWebMercator([
         center[0] + radius * Math.cos(angle),
         center[1] + radius * Math.sin(angle),
@@ -232,9 +232,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (hiddenClusterDeviceIds) {
         const thisClusterIds = new Set(cl.items.map(it => it.device));
         if (thisClusterIds.size === hiddenClusterDeviceIds.size &&
-          [...thisClusterIds].every(id => hiddenClusterDeviceIds.has(id))) {
-          return;
-        }
+          [...thisClusterIds].every(id => hiddenClusterDeviceIds.has(id))) return;
       }
 
       const repItem = cl.items.find(it => it.device === selectedDeviceId) ??
@@ -270,13 +268,12 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     // Pulsing device points (drawn under pins)
     const pulsingPointFeatures: Feature<Point>[] = [];
     for (const comp of activePoints) {
-      if (pulsingDeviceIds.includes(comp.device)) {
-        pulsingPointFeatures.push({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: comp.geo },
-          properties: {},
-        });
-      }
+      if (!pulsingDeviceIds.includes(comp.device)) continue;
+      pulsingPointFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: comp.geo },
+        properties: {},
+      });
     }
 
     try {
@@ -375,131 +372,127 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       throw e;
     }
 
-    // Process history item
-    const historyFeatures: Feature<Polygon | LineString>[] = [];
-    if (selectedHistoryItem) {
-      if (selectedHistoryItem.type === 'stationary') {
-        const s = selectedHistoryItem;
+    if (!selectedHistoryItem) return;
+    const historyFeatures: Feature[] = [];
+    if (selectedHistoryItem.type === 'stationary') {
+      const s = selectedHistoryItem;
+      historyFeatures.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(s.mean, getRadiusFromVariance(s.variance))] },
+        properties: { isAnchor: true },
+      });
+    } else {
+      const m = selectedHistoryItem;
+      if (m.path.length > 1) {
+        const key = `motion-${m.start}-${m.end}`;
+        const cached = bestFitPathCacheRef.current.get(key);
+        const bestFitPath = cached ?? computeBestFitMotionPath(m.path);
+
+        if (!cached && !m.isDraft) bestFitPathCacheRef.current.set(key, bestFitPath);
+
         historyFeatures.push({
           type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(s.mean, getRadiusFromVariance(s.variance))] },
-          properties: { isAnchor: true },
+          geometry: { type: 'LineString', coordinates: m.path.map(p => fromWebMercator(p.geo)) },
+          properties: { isAnchor: false, pathKind: 'raw' },
         });
-      } else {
-        const m = selectedHistoryItem;
-        if (m.path && m.path.length > 1) {
-          const key = `motion-${m.start}-${m.end}`;
-          const cached = bestFitPathCacheRef.current.get(key);
-          const bestFitPath = cached ?? computeBestFitMotionPath(m.path);
 
-          if (!cached && !m.isDraft) bestFitPathCacheRef.current.set(key, bestFitPath);
+        historyFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: bestFitPath.map(fromWebMercator) },
+          properties: { isAnchor: false, pathKind: 'bestfit' },
+        });
 
+        // Add accuracy circles for each point in motion path, colorized by delta to next point.
+        for (let i = 0; i < m.path.length; i++) {
+          const p = m.path[i]!;
+          const next = m.path[i + 1];
+          const deltaColor = colorForDeltaSeconds(next ? Math.max(0, (next.timestamp - p.timestamp) / 1000) : 0);
           historyFeatures.push({
             type: 'Feature',
-            geometry: { type: 'LineString', coordinates: m.path.map(p => fromWebMercator(p.geo)) },
-            properties: { isAnchor: false, pathKind: 'raw' },
+            geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(p.geo, p.accuracy)] },
+            properties: { isAnchor: false, pathKind: 'accuracy', color: deltaColor },
           });
-
-          historyFeatures.push({
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: bestFitPath.map(fromWebMercator) },
-            properties: { isAnchor: false, pathKind: 'bestfit' },
-          });
-
-          // Add accuracy circles for each point in motion path, colorized by delta to next point.
-          for (let i = 0; i < m.path.length; i++) {
-            const p = m.path[i]!;
-            const next = m.path[i + 1];
-            const deltaColor = colorForDeltaSeconds(next ? Math.max(0, (next.timestamp - p.timestamp) / 1000) : 0);
-            historyFeatures.push({
-              type: 'Feature',
-              geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(p.geo, p.accuracy)] },
-              properties: { isAnchor: false, pathKind: 'accuracy', color: deltaColor },
-            });
-          }
-
-          for (let i = 0; i < m.outliers.length; i++) {
-            const p = m.outliers[i]!;
-            historyFeatures.push({
-              type: 'Feature',
-              geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(p.geo, p.accuracy)] },
-              properties: { isAnchor: false, pathKind: 'accuracy', color: '#9e9e9e' },
-            });
-          }
         }
+
+        m.outliers.forEach(p => historyFeatures.push({
+          type: 'Feature',
+          geometry: { type: 'Polygon', coordinates: [buildAccuracyCircleCoords(p.geo, p.accuracy)] },
+          properties: { isAnchor: false, pathKind: 'accuracy', color: '#9e9e9e' },
+        }));
       }
     }
 
     try {
-      if (!map.getSource('history-source')) {
-        map.addSource('history-source', { type: 'geojson', data: { type: 'FeatureCollection', features: historyFeatures as unknown as Feature[] } });
-        map.addLayer({
-          id: 'history-anchor-layer',
-          type: 'fill',
-          source: 'history-source',
-          filter: ['==', 'isAnchor', true],
-          paint: {
-            'fill-color': '#eab308',
-            'fill-opacity': 0.3,
-          }
-        }, 'dots-layer');
-        map.addLayer({
-          id: 'history-anchor-stroke-layer',
-          type: 'line',
-          source: 'history-source',
-          filter: ['==', 'isAnchor', true],
-          paint: {
-            'line-color': '#eab308',
-            'line-width': 2,
-          }
-        }, 'individuals-layer');
-        map.addLayer({
-          id: 'history-raw-path-layer',
-          type: 'line',
-          source: 'history-source',
-          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'raw']],
-          paint: {
-            'line-color': '#94a3b8',
-            'line-width': 3,
-            'line-opacity': 0.95,
-            'line-dasharray': [2, 2],
-          }
-        }, 'individuals-layer');
-        map.addLayer({
-          id: 'history-bestfit-path-layer',
-          type: 'line',
-          source: 'history-source',
-          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'bestfit']],
-          paint: {
-            'line-color': '#eab308',
-            'line-width': 4,
-            'line-opacity': 0.95,
-          }
-        }, 'individuals-layer');
-        map.addLayer({
-          id: 'history-accuracy-circles-layer',
-          type: 'fill',
-          source: 'history-source',
-          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'accuracy']],
-          paint: {
-            'fill-color': ['get', 'color'],
-            'fill-opacity': 0.1,
-          }
-        }, 'individuals-layer');
-        map.addLayer({
-          id: 'history-accuracy-circles-stroke-layer',
-          type: 'line',
-          source: 'history-source',
-          filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'accuracy']],
-          paint: {
-            'line-color': ['get', 'color'],
-            'line-width': 1,
-            'line-opacity': 0.3,
-          }
-        }, 'individuals-layer');
-      } else {
-        (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: historyFeatures as Feature[] });
+      if (map.getSource('history-source')) {
+        (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: historyFeatures });
+        return;
       }
+
+      map.addSource('history-source', { type: 'geojson', data: { type: 'FeatureCollection', features: historyFeatures } });
+      map.addLayer({
+        id: 'history-anchor-layer',
+        type: 'fill',
+        source: 'history-source',
+        filter: ['==', 'isAnchor', true],
+        paint: {
+          'fill-color': '#eab308',
+          'fill-opacity': 0.3,
+        }
+      }, 'dots-layer');
+      map.addLayer({
+        id: 'history-anchor-stroke-layer',
+        type: 'line',
+        source: 'history-source',
+        filter: ['==', 'isAnchor', true],
+        paint: {
+          'line-color': '#eab308',
+          'line-width': 2,
+        }
+      }, 'individuals-layer');
+      map.addLayer({
+        id: 'history-raw-path-layer',
+        type: 'line',
+        source: 'history-source',
+        filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'raw']],
+        paint: {
+          'line-color': '#94a3b8',
+          'line-width': 3,
+          'line-opacity': 0.95,
+          'line-dasharray': [2, 2],
+        }
+      }, 'individuals-layer');
+      map.addLayer({
+        id: 'history-bestfit-path-layer',
+        type: 'line',
+        source: 'history-source',
+        filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'bestfit']],
+        paint: {
+          'line-color': '#eab308',
+          'line-width': 4,
+          'line-opacity': 0.95,
+        }
+      }, 'individuals-layer');
+      map.addLayer({
+        id: 'history-accuracy-circles-layer',
+        type: 'fill',
+        source: 'history-source',
+        filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'accuracy']],
+        paint: {
+          'fill-color': ['get', 'color'],
+          'fill-opacity': 0.1,
+        }
+      }, 'individuals-layer');
+      map.addLayer({
+        id: 'history-accuracy-circles-stroke-layer',
+        type: 'line',
+        source: 'history-source',
+        filter: ['all', ['==', 'isAnchor', false], ['==', 'pathKind', 'accuracy']],
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': 1,
+          'line-opacity': 0.3,
+        }
+      }, 'individuals-layer');
     } catch (e: unknown) {
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
@@ -535,6 +528,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       fullscreenControl: false,
       dragRotate: false,
       boxZoom: false,
+      projection: 'mercator',
     });
 
     mapRef.current = map;
@@ -549,8 +543,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   // Style update
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !maptilerApiKey) return;
-    map.setStyle(darkMode ? STYLE_DARK : STYLE_LIGHT);
+    if (map && maptilerApiKey) map.setStyle(darkMode ? STYLE_DARK : STYLE_LIGHT);
   }, [maptilerApiKey, darkMode]);
 
   // Ref to hold updateLayers to avoid stale closure in event listeners
@@ -559,15 +552,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
   // rAF animation loop: update pulsing-layer paint properties each frame
   useEffect(() => {
-    if (pulsingDeviceIds.length === 0) {
-      // Clear the layer if no devices pulsing
-      const map = mapRef.current;
-      if (map?.getLayer('pulsing-layer')) {
-        map.setPaintProperty('pulsing-layer', 'circle-radius', 8);
-        map.setPaintProperty('pulsing-layer', 'circle-stroke-opacity', 0);
-      }
-      return;
-    }
+    if (pulsingDeviceIds.length <= 0) return;
     const PERIOD = 1200; // ms per ping
     const MAX_RADIUS = 60;
     let running = true;
@@ -589,8 +574,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map?.getLayer('history-raw-path-layer')) return;
 
-    const isMotionSegment = selectedHistoryItem?.type === 'motion';
-    if (!isMotionSegment) {
+    if (selectedHistoryItem?.type !== 'motion') {
       map.setPaintProperty('history-raw-path-layer', 'line-dasharray', [2, 2]);
       return;
     }
@@ -614,17 +598,21 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
     let running = true;
     let lastStep = -1;
+    let rafId = 0;
     const tick = () => {
       const map = mapRef.current;
       const step = Math.floor(Date.now() / 50) % dashArraySequence.length;
-      if (running && map?.getLayer('history-raw-path-layer') && map.getStyle() && step !== lastStep) {
+      if (running && map?.getLayer('history-raw-path-layer') && step !== lastStep) {
         lastStep = step;
-        map.setPaintProperty('history-raw-path-layer', 'line-dasharray', dashArraySequence[step] as [number, number, number]);
+        map.setPaintProperty('history-raw-path-layer', 'line-dasharray', dashArraySequence[step]);
       }
-      window.requestAnimationFrame(tick);
+      if (running) rafId = window.requestAnimationFrame(tick);
     };
-    window.requestAnimationFrame(tick);
-    return () => { running = false; };
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      running = false;
+      window.cancelAnimationFrame(rafId);
+    };
   }, [selectedHistoryItem]);
 
   // Listeners setup
@@ -634,24 +622,21 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
     let rafPending = false;
     const onMove = () => {
-      if (!rafPending) {
-        rafPending = true;
-        window.requestAnimationFrame(() => {
-          updateLayersRef.current();
-          rafPending = false;
-        });
-      }
+      if (rafPending) return;
+      rafPending = true;
+      window.requestAnimationFrame(() => {
+        updateLayersRef.current();
+        rafPending = false;
+      });
     };
 
     const onIndividualClick = (e: MapMouseEvent) => {
       e.preventDefault();
       const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer'] });
-      const props = features[0]?.properties;
-      const device: unknown = props?.['device'];
-      if (typeof device === 'number') {
-        onSelectDeviceRef.current(device);
-        flyToDevice(device);
-      }
+      const device: unknown = features[0]?.properties?.['device'];
+      if (typeof device !== 'number') return;
+      onSelectDeviceRef.current(device);
+      flyToDevice(device);
     };
 
     const onClusterClick = (e: MapMouseEvent) => {
@@ -660,27 +645,22 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const props = features[0]?.properties;
       const members: unknown = props?.['members'];
       let memberIds: number[] = [];
-      try {
-        const source = typeof members === 'string' ? JSON.parse(members) as unknown : members;
-        memberIds = z.coerce.number().array().parse(source);
-      } catch { /* ignore malformed data */ }
-
+      const parsed = z.number().array().safeParse(members);
+      if (parsed.success) memberIds = parsed.data;
       const geo = features[0]?.geometry;
-      if (memberIds.length > 0 && geo?.type === 'Point') {
-        const screen = map.project(geo.coordinates as Vec2);
-        const items: DevicePoint[] = memberIds
-          .map(deviceId => activePointsRef.current.find(c => c.device === deviceId))
-          .filter((c): c is DevicePoint => !!c);
-        setClusterPopup({ x: screen.x, y: screen.y, items, animationState: 'entering' });
-      }
+      if (memberIds.length <= 0 || geo?.type !== 'Point') return;
+
+      const screen = map.project(geo.coordinates as Vec2);
+      const items: DevicePoint[] = memberIds
+        .map(deviceId => activePointsRef.current.find(c => c.device === deviceId))
+        .filter((c): c is DevicePoint => !!c);
+      setClusterPopup({ x: screen.x, y: screen.y, items, animationState: 'entering' });
     };
 
     const onMapClick = (e: MapMouseEvent) => {
       if (e.defaultPrevented) return;
       const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer', 'clusters-layer'] });
-      if (!features.length) {
-        closeClusterPopup();
-      }
+      if (!features.length) closeClusterPopup();
     };
 
     if (!listenersAttached.current) {
@@ -706,9 +686,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
 
-    const onStyleData = () => {
-      updateLayersRef.current();
-    };
+    const onStyleData = () => { updateLayersRef.current(); };
 
     map.on('styledata', onStyleData);
     return () => { map?.off('styledata', onStyleData); };
@@ -716,40 +694,26 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
   // Data update effect
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    updateLayers();
+    if (mapRef.current) updateLayers();
   }, [activePoints, entities, darkMode, selectedDeviceId, updateLayers]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || hasFittedInitially.current) return;
+    if (!map || hasFittedInitially.current || activePointsRef.current.length <= 0) return;
 
-    const c = activePointsRef.current;
-    if (c.length === 0) return;
-
-    let sw: Vec2, ne: Vec2;
-
-    if (c.length > 0) {
-      let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
-      for (const comp of c) {
-        minLat = Math.min(minLat, comp.geo[1]);
-        minLon = Math.min(minLon, comp.geo[0]);
-        maxLat = Math.max(maxLat, comp.geo[1]);
-        maxLon = Math.max(maxLon, comp.geo[0]);
-      }
-      const padding = 0.005;
-      sw = [minLon - padding, minLat - padding];
-      ne = [maxLon + padding, maxLat + padding];
-    } else {
-      return;
+    let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
+    for (const comp of activePointsRef.current) {
+      minLat = Math.min(minLat, comp.geo[1]);
+      minLon = Math.min(minLon, comp.geo[0]);
+      maxLat = Math.max(maxLat, comp.geo[1]);
+      maxLon = Math.max(maxLon, comp.geo[0]);
     }
 
-    map.fitBounds(
-      [sw[0], sw[1], ne[0], ne[1]],
-      { padding: 40, maxZoom: 18, duration: 0 }
-    );
+    const padding = 0.005;
+    let sw: Vec2 = [minLon - padding, minLat - padding];
+    let ne: Vec2 = [maxLon + padding, maxLat + padding];
 
+    map.fitBounds([sw[0], sw[1], ne[0], ne[1]], { padding: 40, maxZoom: 18, duration: 0 });
     hasFittedInitially.current = true;
   }, []);
 
