@@ -7,7 +7,6 @@ import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
-import { z } from "zod";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
 import type { Color } from "@/util/color";
@@ -373,7 +372,9 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     }
 
     if (!selectedHistoryItem) {
-      (map.getSource('history-source') as GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
+      const historySource = map.getSource('history-source');
+      if (historySource)
+        (historySource as GeoJSONSource).setData({ type: 'FeatureCollection', features: [] });
       return;
     }
 
@@ -646,18 +647,25 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const onClusterClick = (e: MapMouseEvent) => {
       e.preventDefault();
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters-layer'] });
-      const props = features[0]?.properties;
-      const members: unknown = props?.['members'];
+      const rawMembers = features[0]?.properties?.['members'];
+      
       let memberIds: number[] = [];
-      const parsed = z.number().array().safeParse(members);
-      if (parsed.success) memberIds = parsed.data;
-      const geo = features[0]?.geometry;
-      if (memberIds.length <= 0 || geo?.type !== 'Point') return;
+      try {
+        const parsed = JSON.parse(rawMembers as string);
+        memberIds = (Array.isArray(parsed) ? parsed : []).map(Number).filter(id => Number.isFinite(id));
+      } catch {
+        return;
+      }
+      if (!memberIds.length) return;
 
-      const screen = map.project(geo.coordinates as Vec2);
       const items: DevicePoint[] = memberIds
-        .map(deviceId => activePointsRef.current.find(c => c.device === deviceId))
+        .map((deviceId) => activePointsRef.current.find((c) => c.device === deviceId))
         .filter((c): c is DevicePoint => !!c);
+      if (!items.length) return;
+
+      const geo = features[0]?.geometry;
+      if (geo?.type !== 'Point') return;
+      const screen = map.project(geo.coordinates as Vec2);
       setClusterPopup({ x: screen.x, y: screen.y, items, animationState: 'entering' });
     };
 

@@ -1,7 +1,8 @@
+import { asWebMercatorCoord, EngineEventSchema } from "./types";
+import { computeBounds } from "./util/geo";
 import { decode } from "@toon-format/toon";
 import { DeviceListSidePanel } from "./ui/DeviceListSidePanel";
 import { DeviceOverlay } from "./ui/DeviceOverlay";
-import { EngineEventSchema } from "./types";
 import { fromWebMercator } from "./util/webMercator";
 import { HistoryObservationBar } from "./ui/HistoryObservationBar";
 import { LoginPage } from "./ui/LoginPage";
@@ -76,15 +77,36 @@ export function App() {
 
   const visibleComponents = useMemo(() => {
     const roots = new Set(rootIds);
+    const selected = selectedDeviceId !== null ? entities[selectedDeviceId] : null;
+    const selectedIds = new Set(selected?.memberDeviceIds);
+
     return Object.values(activePointsByDevice)
       .flat()
-      .filter((comp) => roots.has(comp.device) || comp.device === selectedDeviceId);
-  }, [activePointsByDevice, rootIds, selectedDeviceId]);
+      .filter((comp) => roots.has(comp.device) || selectedIds.has(comp.device));
+  }, [activePointsByDevice, rootIds, selectedDeviceId, entities]);
 
   // Clear selected motion segment when device changes
   useEffect(() => {
     setSelectedTimelineEvent(null);
   }, [selectedDeviceId]);
+
+  // Focus map on selected devices in create group mode
+  useEffect(() => {
+    if (pulsingDeviceIds.length === 0) return;
+
+    const allPoints = pulsingDeviceIds
+      .flatMap(deviceId => activePointsByDevice[deviceId] ?? [])
+      .map(point => point.geo);
+
+    if (allPoints.length === 0) return;
+
+    const bounds = computeBounds(allPoints);
+    const sw = asWebMercatorCoord([bounds.minX, bounds.minY]);
+    const ne = asWebMercatorCoord([bounds.maxX, bounds.maxY]);
+    const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+
+    mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+  }, [pulsingDeviceIds, activePointsByDevice]);
 
   const allDevicesForSelection = useMemo(() => {
     return Object.values(entities)
@@ -212,6 +234,7 @@ export function App() {
               setSelectedDeviceId={setSelectedDeviceId}
               setEditingTarget={setEditingTarget}
               isOwner={selectedDeviceId != null ? (entities[selectedDeviceId]?.isOwner ?? false) : false}
+              onFlyToDevice={(id) => mapViewRef.current?.flyToDevice(id)}
             />
 
             <TimelinePanel

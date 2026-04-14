@@ -22,6 +22,7 @@ type Props = {
   setSelectedDeviceId: (id: number | null) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
   isOwner: boolean;
+  onFlyToDevice: (id: number) => void;
 };
 
 const DurationDisplay: React.FC<{ timestamp: number, addSuffix: boolean }> = ({ timestamp, addSuffix = true }) => {
@@ -36,6 +37,7 @@ function DeviceOverlayComponent({
   setSelectedDeviceId,
   setEditingTarget,
   isOwner,
+  onFlyToDevice,
 }: Props) {
   const handleClose = React.useCallback(() => setSelectedDeviceId(null), [setSelectedDeviceId]);
 
@@ -110,7 +112,11 @@ function DeviceOverlayComponent({
     <div className="p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1 h-8 flex items-center pr-1">
-          <div className="text-base font-semibold leading-tight truncate">
+          <div
+            className="text-base font-semibold leading-tight truncate cursor-pointer hover:text-primary transition-colors"
+            onClick={() => selectedDeviceId != null && onFlyToDevice(selectedDeviceId)}
+            title="Click to re-center map"
+          >
             {group ? group.name : entities[chosen.device]?.name}
           </div>
         </div>

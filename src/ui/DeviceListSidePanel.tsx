@@ -70,9 +70,7 @@ export const DeviceListSidePanel: React.FC<{
 
     const setDeviceSelection = (id: number, selected: boolean) => {
       setSelectedCreateDevices(prev => {
-        if (selected) {
-          return prev.includes(id) ? prev : [...prev, id];
-        }
+        if (selected) return prev.includes(id) ? prev : [...prev, id];
         return prev.filter(i => i !== id);
       });
     };
@@ -82,17 +80,14 @@ export const DeviceListSidePanel: React.FC<{
     }, [selectedCreateDevices, onCreateGroupSelectionChange]);
 
     useEffect(() => {
-      if (!isOpen) {
-        setExpanded(new Set());
-        setMode("list");
-        setContextMenu(null);
-        setShowAllIcons(false);
-        return;
-      }
-
-      if (mode === "list") {
-        setShowAllIcons(false);
-      }
+      if (isOpen && mode !== "list") return;
+      setExpanded(new Set());
+      setMode("list");
+      setContextMenu(null);
+      setShowAllIcons(false);
+      setSelectedCreateDevices([]);
+      setNewGroupName("");
+      setSelectedEmoji("group");
     }, [isOpen, mode]);
 
     // Close context menu on outside click

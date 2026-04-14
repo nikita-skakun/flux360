@@ -84,13 +84,12 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
     setIsLoading(true);
     try {
       await deleteGroup(id);
-      onClose();
     } catch (e) {
       console.error("Failed to delete group", e);
-    } finally {
-      setIsLoading(false);
-      setShowDeleteConfirm(false);
     }
+    setIsLoading(false);
+    setShowDeleteConfirm(false);
+    onClose();
   };
 
   return (
