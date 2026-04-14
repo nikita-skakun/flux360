@@ -438,29 +438,47 @@ export class ServerState {
     }
   }
 
+  /**
+   * Unified projection for config updates: returns devices and groups visible to a user.
+   * Used by both initial_state and config_update to ensure consistent entity visibility.
+   */
+  getConfigProjection(allowedDeviceIds: Set<number>) {
+    const devices: Record<number, AppDevice> = {};
+
+    // 1. Include all allowed devices
+    for (const [id, dev] of numericEntries(this.devices)) {
+      if (allowedDeviceIds.has(id)) devices[id] = dev;
+    }
+
+    // 2. Filter groups: include if user has direct permission or any member device access
+    const allowedGroups = this.groups.filter(g =>
+      allowedDeviceIds.has(g.id) ||
+      (g.memberDeviceIds?.some(mid => allowedDeviceIds.has(mid)) ?? false)
+    );
+
+    // 3. Include all member devices from allowed groups
+    for (const mid of allowedGroups.flatMap(g => g.memberDeviceIds ?? [])) {
+      if (this.devices[mid]) devices[mid] = this.devices[mid];
+    }
+
+    return {
+      devices,
+      groups: allowedGroups
+    };
+  }
+
   getMetadata(allowedDeviceIds: Set<number>) {
-    const entities: Record<number, AppDevice> = {};
+    const { devices, groups } = this.getConfigProjection(allowedDeviceIds);
+    const entities: Record<number, AppDevice> = { ...devices };
     const groupMemberIds = new Set<number>();
 
-    // 1. Collect all allowed devices as individual entities first
-    for (const [id, dev] of numericEntries(this.devices)) {
-      if (allowedDeviceIds.has(id)) entities[id] = dev;
-    }
-
-    // 2. Process directly allowed groups and include only their members.
-    // This keeps shared-group visibility stable without exposing unrelated devices.
-    for (const group of this.groups) {
-      if (!allowedDeviceIds.has(group.id)) continue;
-
-      for (const mId of (group.memberDeviceIds ?? [])) {
-        groupMemberIds.add(mId);
-        if (this.devices[mId]) entities[mId] = this.devices[mId];
-      }
-
+    // Add groups to entities and track member IDs
+    for (const group of groups) {
       entities[group.id] = group;
+      group.memberDeviceIds?.forEach(mid => groupMemberIds.add(mid));
     }
 
-    // 3. Identify root entities (not inside any directly allowed group)
+    // Identify root entities (not inside any directly allowed group)
     const rootIds = Object.keys(entities)
       .map(Number)
       .filter(id => !groupMemberIds.has(id));

@@ -166,8 +166,8 @@ export const useStore = create<Store>()(
 
       deleteGroup: async (groupId: number) => {
         const state = get();
-
         const groupToDelete = state.entities[groupId];
+
         set(state => {
           const newEntities = { ...state.entities };
           delete newEntities[groupId];

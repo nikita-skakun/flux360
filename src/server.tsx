@@ -2,7 +2,6 @@ import { ClientMessageSchema, TraccarDeviceSchema, ServerMessageSchema } from "@
 import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { loadConfig } from "./util/config";
-import { numericEntries } from "@/util/record";
 import { parseArgs } from "util";
 import { register, deregister, getSession, addAllowedDevice, removeAllowedDevice } from "./server/userSessions";
 import { serve } from "bun";
@@ -108,22 +107,27 @@ function broadcastConfig(targetUsername: string | null) {
     let msg = cache.get(cacheKey);
 
     if (!msg) {
-      const relevantDevices: Record<number, AppDevice> = {};
-      for (const [id, device] of numericEntries(serverState.devices)) {
-        if (session.allowed.has(id)) {
-          relevantDevices[id] = { ...device, isOwner: session.owned.has(id) };
-        }
-      }
-      const relevantGroups = serverState.groups
-        .filter(g => session.allowed.has(g.id) || (g.memberDeviceIds?.some(mid => session.allowed.has(mid)) ?? false))
-        .map(g => ({ ...g, isOwner: session.owned.has(g.id) }));
+      // Use unified projection to ensure consistency with initial_state
+      const { devices, groups } = serverState.getConfigProjection(session.allowed);
+      const allowedEntityIds = new Set<number>(Object.keys(devices).map(id => Number(id)));
+      for (const group of groups) allowedEntityIds.add(group.id);
+      const relevantDevices: Record<number, AppDevice> = Object.fromEntries(
+        Object.entries(devices).map(([id, device]) => {
+          const numId = Number(id);
+          return [numId, { ...device, isOwner: session.owned.has(numId) }];
+        })
+      );
+      const relevantGroups = groups.map(g => ({
+        ...g,
+        isOwner: session.owned.has(g.id)
+      }));
 
       msg = JSON.stringify(ServerMessageSchema.parse({
         type: "config_update",
         payload: {
           devices: relevantDevices,
           groups: relevantGroups,
-          allowedDeviceIds: Array.from(session.allowed),
+          allowedDeviceIds: Array.from(allowedEntityIds),
           ownedDeviceIds: Array.from(session.owned)
         }
       }));
@@ -449,6 +453,14 @@ serve<WSData>({
                     throw new SafeError("Forbidden: Cannot create group with devices you do not own");
                   }
 
+                  // Validate membership invariant: no device can belong to multiple groups
+                  const alreadyGroupedDevices = memberDeviceIds.filter(
+                    (id: number) => (serverState.deviceToGroupsMap[id]?.length ?? 0) > 0
+                  );
+                  if (alreadyGroupedDevices.length > 0) {
+                    throw new SafeError(`Cannot create group: devices ${alreadyGroupedDevices.join(", ")} are already members of other groups`);
+                  }
+
                   const res = await fetch(`${apiBase}/devices`, {
                     method: "POST",
                     headers: adminReqHeaders,
@@ -479,10 +491,12 @@ serve<WSData>({
                   }
 
                   serverState.handleDevices([device]);
+                  serverState.refreshGroupFromMembers(device.id);
                   session.allowed.add(device.id);
                   session.owned.add(device.id);
                   addAllowedDevice(username, device.id);
-                  broadcastConfig(username);
+                  broadcastConfig(null);
+                  broadcastUpdate([device.id]);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "create_success", device, requestId })));
                   break;
                 }
@@ -511,12 +525,14 @@ serve<WSData>({
                   }
                   const updated = TraccarDeviceSchema.parse(await putRes.json());
                   serverState.handleDevices([updated]);
+                  broadcastConfig(null);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId, requestId })));
                   break;
                 }
                 case "delete_group": {
                   const { groupId } = data.payload;
                   ensureOwned(groupId);
+                  const memberDeviceIds = [...(serverState.groups.find(group => group.id === groupId)?.memberDeviceIds ?? [])];
 
                   const res = await fetch(`${apiBase}/devices/${groupId}`, { method: "DELETE", headers: reqHeaders });
                   if (!res.ok) {
@@ -524,6 +540,11 @@ serve<WSData>({
                     console.error(`[Traccar API Error] delete_group: ${res.status} ${text}`);
                     throw new SafeError("Failed to delete group");
                   }
+                  session.allowed.delete(groupId);
+                  session.owned.delete(groupId);
+                  serverState.deleteGroup(groupId);
+                  broadcastConfig(null);
+                  if (memberDeviceIds.length > 0) broadcastUpdate(memberDeviceIds);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "delete_success", groupId, requestId })));
                   break;
                 }
@@ -538,6 +559,11 @@ serve<WSData>({
 
                   let memberDeviceIds: number[] = current.attributes?.memberDeviceIds ? JSON.parse(current.attributes.memberDeviceIds) : [];
                   if (data.type === "add_device_to_group") {
+                    // Validate membership invariant: device cannot already be in another group
+                    const otherGroups = (serverState.deviceToGroupsMap[deviceId] ?? []).filter(gid => gid !== groupId);
+                    if (otherGroups.length > 0) {
+                      throw new SafeError(`Cannot add device: it is already a member of another group`);
+                    }
                     if (!memberDeviceIds.includes(deviceId)) memberDeviceIds.push(deviceId);
                   } else {
                     memberDeviceIds = memberDeviceIds.filter(id => id !== deviceId);
@@ -558,6 +584,9 @@ serve<WSData>({
                     throw new SafeError("Failed to parse updated group data");
                   }
                   serverState.handleDevices([parsed.data]);
+                  serverState.refreshGroupFromMembers(groupId);
+                  broadcastConfig(null);
+                  broadcastUpdate([groupId]);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId: groupId, requestId })));
                   break;
                 }

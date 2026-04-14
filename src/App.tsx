@@ -77,13 +77,10 @@ export function App() {
 
   const visibleComponents = useMemo(() => {
     const roots = new Set(rootIds);
-    const selected = selectedDeviceId !== null ? entities[selectedDeviceId] : null;
-    const selectedIds = new Set(selected?.memberDeviceIds);
-
     return Object.values(activePointsByDevice)
       .flat()
-      .filter((comp) => roots.has(comp.device) || selectedIds.has(comp.device));
-  }, [activePointsByDevice, rootIds, selectedDeviceId, entities]);
+      .filter((comp) => roots.has(comp.device));
+  }, [activePointsByDevice, rootIds]);
 
   // Clear selected motion segment when device changes
   useEffect(() => {
@@ -109,8 +106,11 @@ export function App() {
   }, [pulsingDeviceIds, activePointsByDevice]);
 
   const allDevicesForSelection = useMemo(() => {
+    const groupedDeviceIds = new Set(Object.values(entities)
+      .flatMap(e => e.memberDeviceIds ?? []));
+
     return Object.values(entities)
-      .filter(e => e.memberDeviceIds === null) // Only individual devices
+      .filter(e => e.memberDeviceIds === null && !groupedDeviceIds.has(e.id))
       .map(e => ({
         id: e.id,
         name: e.name,
