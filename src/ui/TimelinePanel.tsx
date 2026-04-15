@@ -257,17 +257,20 @@ export const TimelinePanel: React.FC<Props> = ({
 
       const convertPointArray = (arr: unknown): unknown => {
         if (!Array.isArray(arr)) return arr;
+        const entries: unknown[] = arr;
 
-        return arr.map((entry) => {
+        return entries.map((entry: unknown): unknown => {
           if (!entry || typeof entry !== 'object') return entry;
 
           const point = entry as Record<string, unknown>;
           const geo = point['geo'];
           if (!Array.isArray(geo) || geo.length < 2) return entry;
+          const coords: unknown[] = geo;
 
-          const lon = geo[0];
-          const lat = geo[1];
-          const { geo: _geo, ...rest } = point;
+          const lon: unknown = coords[0];
+          const lat: unknown = coords[1];
+          const rest: Record<string, unknown> = { ...point };
+          delete rest['geo'];
           return { ...rest, lon, lat };
         });
       };

@@ -647,24 +647,28 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const onClusterClick = (e: MapMouseEvent) => {
       e.preventDefault();
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters-layer'] });
-      const rawMembers = features[0]?.properties?.['members'];
-      
-      let memberIds: number[] = [];
+      const rawMembers: unknown = features[0]?.properties?.['members'];
+
+      if (typeof rawMembers !== 'string') return;
+      let parsed: unknown;
       try {
-        const parsed = JSON.parse(rawMembers as string);
-        memberIds = (Array.isArray(parsed) ? parsed : []).map(Number).filter(id => Number.isFinite(id));
+        parsed = JSON.parse(rawMembers);
       } catch {
         return;
       }
+      if (!Array.isArray(parsed)) return;
+
+      const memberIds = parsed.map((id: unknown) => Number(id)).filter((id) => Number.isFinite(id));
       if (!memberIds.length) return;
+
+      const geo = features[0]?.geometry;
+      if (geo?.type !== 'Point') return;
 
       const items: DevicePoint[] = memberIds
         .map((deviceId) => activePointsRef.current.find((c) => c.device === deviceId))
         .filter((c): c is DevicePoint => !!c);
       if (!items.length) return;
 
-      const geo = features[0]?.geometry;
-      if (geo?.type !== 'Point') return;
       const screen = map.project(geo.coordinates as Vec2);
       setClusterPopup({ x: screen.x, y: screen.y, items, animationState: 'entering' });
     };
