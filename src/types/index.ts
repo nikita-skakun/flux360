@@ -68,14 +68,15 @@ export type WebMercatorPosition = z.infer<typeof WebMercatorPositionSchema>;
 export const MotionProfileNameSchema = z.enum(['person', 'car']);
 export type MotionProfileName = z.infer<typeof MotionProfileNameSchema>;
 
-const WorldBoundsSchema = z.object({
+const BoundsSchema = z.object({
   minX: z.number(),
   minY: z.number(),
   maxX: z.number(),
   maxY: z.number(),
 });
+export type Bounds = z.infer<typeof BoundsSchema>;
 
-export const AppDeviceSchema = z.object({
+const AppDeviceSchema = z.object({
   id: z.number(),
   name: z.string(),
   emoji: z.string(),
@@ -107,7 +108,7 @@ export const MotionEventSchema = z.object({
   outliers: z.array(WebMercatorPositionSchema),
   distance: z.number(),
   isDraft: z.boolean(),
-  bounds: WorldBoundsSchema,
+  bounds: BoundsSchema,
 });
 export type MotionEvent = z.infer<typeof MotionEventSchema>;
 

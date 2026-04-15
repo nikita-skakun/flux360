@@ -1,5 +1,5 @@
 import { WORLD_R } from "@/util/webMercator";
-import type { Vec2 } from "@/types";
+import type { Bounds, Vec2 } from "@/types";
 
 export function distance(a: Vec2, b: Vec2): number {
   const dx = a[0] - b[0];
@@ -28,7 +28,7 @@ export function haversineDistance(a: Vec2, b: Vec2): number {
   return WORLD_R * c;
 }
 
-export function computeBounds(points: Vec2[]): { minX: number; minY: number; maxX: number; maxY: number } {
+export function computeBounds(points: Vec2[]): Bounds {
   if (points.length === 0) return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const [x, y] of points) {
