@@ -216,18 +216,21 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ping"), requestId: z.never().optional() }),
 ]);
 
+const DeviceMetadataSchema = z.object({
+  name: z.string(),
+  emoji: z.string().nullable(),
+  color: z.string().nullable(),
+  motionProfile: MotionProfileNameSchema.nullable(),
+});
+export type DeviceMetadata = z.infer<typeof DeviceMetadataSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("authenticate"), token: z.string(), requestId: z.never().optional() }),
   z.object({
     type: z.literal("update_device"),
     payload: z.object({
       deviceId: z.number(),
-      updates: z.object({
-        name: z.string().optional(),
-        emoji: z.string().optional(),
-        color: z.string().optional(),
-        motionProfile: MotionProfileNameSchema.optional()
-      })
+      updates: DeviceMetadataSchema
     }),
     requestId: z.string()
   }),

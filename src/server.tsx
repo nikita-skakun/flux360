@@ -81,17 +81,10 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
   }
 }
 
-async function resolveTraccarUserId(username: string, authToken: string): Promise<number> {
-  const cachedUser = traccarUsersCache.find(user => user.login === username);
-  if (cachedUser) return cachedUser.id;
-
-  await refreshTraccarUsersCache(authToken, `resolve_user:${username}`);
-  const refreshedUser = traccarUsersCache.find(user => user.login === username);
-  if (!refreshedUser) {
-    throw new SafeError("User not found");
-  }
-
-  return refreshedUser.id;
+function isSQLiteConstraintError(err: unknown) {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  return msg.includes("constraint") || msg.includes("unique");
 }
 
 const serverState = new ServerState(config.historyDays);
@@ -198,7 +191,7 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
         .filter((id): id is number => id !== undefined && !serverState.backfilled.has(id) && !serverState.inProgressBackfills.has(id));
 
       if (devicesToBackfill.length > 0) {
-        (async () => {
+        void (async () => {
           vlog(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
           for (const id of devicesToBackfill) {
             if (serverState.backfilled.has(id) || serverState.inProgressBackfills.has(id)) continue;
@@ -310,7 +303,7 @@ serve<WSData>({
 
               const user = TraccarUserSchema.parse(await sessionRes.json());
               const traccarToken = await getOrCreateTraccarPermanentToken(apiBase, user.login, password);
-              refreshTraccarUsersCache(traccarToken, `login:${user.login}`);
+              void refreshTraccarUsersCache(traccarToken, `login:${user.login}`);
 
               const token = sessionStore.createSession(user.login, traccarToken);
               ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "login_success", token, requestId })));
@@ -350,19 +343,32 @@ serve<WSData>({
             const traccarDeviceIds = new Set(devices.map(d => d.id));
 
             // Add shared devices by looking up shares for this user's Traccar ID
-            const shared = db.query("SELECT device_id, shared_by_username FROM device_shares WHERE shared_with_username = ?").all(username) as { device_id: number, shared_by_username: string }[];
-            const sharedWithMeIds = new Set(shared.map(s => s.device_id));
+            const shared = db.query("SELECT deviceId, sharedBy FROM device_shares WHERE sharedWith = ?").all(username) as { deviceId: number, sharedBy: string }[];
+            const sharedWithMeIds = new Set(shared.map(s => s.deviceId));
+            const sharedByDeviceId = new Map(shared.map(s => [s.deviceId, s.sharedBy]));
 
             // Owned devices are those in Traccar that weren't explicitly shared WITH me by SOMEONE ELSE.
             // If I shared it with myself, or if it was just in my Traccar account, I'm the owner.
-            const ownedDeviceIds = new Set([...traccarDeviceIds].filter(id => {
-              const share = shared.find(s => s.device_id === id);
-              return !share || share.shared_by_username === username;
+            const ownedPhysicalDeviceIds = new Set([...traccarDeviceIds].filter(id => {
+              const sharedBy = sharedByDeviceId.get(id);
+              return sharedBy === undefined || sharedBy === username;
             }));
-            const allowedDeviceIds = new Set([...traccarDeviceIds, ...sharedWithMeIds]);
+            const allowedPhysicalDeviceIds = new Set([...traccarDeviceIds, ...sharedWithMeIds]);
 
             // Update server state with device metadata
             serverState.handleDevices(devices);
+
+            const ownedGroupRows = db.query(`SELECT id FROM groups WHERE owner = ?`).all(username) as { id: number }[];
+            const ownedGroupIds = new Set(ownedGroupRows.map(row => -row.id));
+            const visibleGroups = serverState.getConfigProjection(allowedPhysicalDeviceIds).groups;
+            const visibleGroupIds = new Set(visibleGroups.map(group => group.id));
+
+            const ownedDeviceIds = new Set<number>([...ownedPhysicalDeviceIds, ...ownedGroupIds]);
+            const allowedDeviceIds = new Set<number>([
+              ...allowedPhysicalDeviceIds,
+              ...visibleGroupIds,
+              ...ownedGroupIds,
+            ]);
 
             ws.data.principal = {
               username,
@@ -373,13 +379,23 @@ serve<WSData>({
 
             // Proactively refresh users cache on auth if empty to prevent 'User not found' on share
             if (traccarUsersCache.length === 0) {
-              refreshTraccarUsersCache(traccarToken, `auth:${username}`);
+              void refreshTraccarUsersCache(traccarToken, `auth:${username}`);
             }
 
             vlog(`[WS] Authentication successful for ${username}. Allowed: ${allowedDeviceIds.size}, Owned: ${ownedDeviceIds.size}`);
 
             // Get entities and determine root IDs for filtering snapshots
-            const { entities: allEntities, rootIds } = serverState.getMetadata(allowedDeviceIds);
+            const { devices: projectedDevices, groups } = serverState.getConfigProjection(allowedDeviceIds);
+            const allEntities: Record<number, AppDevice> = { ...projectedDevices };
+            const groupMemberIds = new Set<number>();
+            for (const group of groups) {
+              allEntities[group.id] = group;
+              group.memberDeviceIds?.forEach(memberId => groupMemberIds.add(memberId));
+            }
+            const rootIds = Object.keys(allEntities)
+              .map(Number)
+              .filter(id => !groupMemberIds.has(id));
+
             const entitiesWithOwner = Object.fromEntries(
               Object.entries(allEntities).map(([id, entity]) => {
                 const numericId = Number(id);
@@ -438,11 +454,6 @@ serve<WSData>({
               "Content-Type": "application/json",
               "Accept": "application/json"
             };
-            const adminReqHeaders = {
-              "Authorization": `Bearer ${currentToken}`,
-              "Content-Type": "application/json",
-              "Accept": "application/json"
-            };
             const isOwned = (id: number) => principal.owned.has(id);
             const ensureOwned = (id: number) => {
               if (!isOwned(id)) throw new SafeError("Forbidden: You do not own this device");
@@ -459,77 +470,85 @@ serve<WSData>({
                     throw new SafeError("Forbidden: Cannot create group with devices you do not own");
                   }
 
-                  // Validate membership invariant: no device can belong to multiple groups
-                  const alreadyGroupedDevices = memberDeviceIds.filter(
-                    (id: number) => (serverState.deviceToGroupsMap[id]?.length ?? 0) > 0
-                  );
-                  if (alreadyGroupedDevices.length > 0) {
-                    throw new SafeError(`Cannot create group: devices ${alreadyGroupedDevices.join(", ")} are already members of other groups`);
+                  if (!memberDeviceIds.every((id: number) => serverState.devices[id] !== undefined)) {
+                    throw new SafeError("Device not found");
                   }
 
-                  const res = await fetch(`${apiBase}/devices`, {
-                    method: "POST",
-                    headers: adminReqHeaders,
-                    body: JSON.stringify({
-                      name,
-                      uniqueId: `group-${Date.now()}`,
-                      attributes: { emoji, memberDeviceIds: JSON.stringify(memberDeviceIds) }
-                    })
-                  });
-                  if (!res.ok) {
-                    const text = await res.text();
-                    console.error(`[Traccar API Error] create_group: ${res.status} ${text}`);
-                    throw new SafeError("Failed to create group on the backend service");
-                  }
-                  const device = TraccarDeviceSchema.parse(await res.json());
-
-                  const ownerUserId = await resolveTraccarUserId(username, currentToken);
-                  const permissionRes = await fetch(`${apiBase}/permissions`, {
-                    method: "POST",
-                    headers: adminReqHeaders,
-                    body: JSON.stringify({ userId: ownerUserId, deviceId: device.id })
-                  });
-                  if (!permissionRes.ok) {
-                    const text = await permissionRes.text();
-                    console.error(`[Traccar API Error] create_group_permission: ${permissionRes.status} ${text}`);
-                    await fetch(`${apiBase}/devices/${device.id}`, { method: "DELETE", headers: adminReqHeaders });
-                    throw new SafeError("Failed to assign the new group to the requesting user");
+                  let createdGroup: AppDevice | null = null;
+                  try {
+                    createdGroup = serverState.createGroup(name, emoji, memberDeviceIds, username);
+                  } catch (err) {
+                    if (isSQLiteConstraintError(err)) {
+                      throw new SafeError("Device already in another group");
+                    }
+                    throw err;
                   }
 
-                  serverState.handleDevices([device]);
-                  serverState.refreshGroupFromMembers(device.id);
-                  principal.allowed.add(device.id);
-                  principal.owned.add(device.id);
+                  if (!createdGroup) {
+                    throw new SafeError("Failed to create group");
+                  }
+
+                  principal.allowed.add(createdGroup.id);
+                  principal.owned.add(createdGroup.id);
                   broadcastConfig(null);
-                  broadcastUpdate([device.id]);
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "create_success", device, requestId })));
+                  if (memberDeviceIds.length > 0) broadcastUpdate(memberDeviceIds);
+                  ws.send(JSON.stringify(ServerMessageSchema.parse({
+                    type: "create_success",
+                    device: {
+                      id: createdGroup.id,
+                      name: createdGroup.name,
+                      lastUpdate: null,
+                      attributes: {}
+                    },
+                    requestId
+                  })));
                   break;
                 }
                 case "update_device": {
                   const { deviceId, updates } = data.payload;
                   ensureOwned(deviceId);
 
-                  const getRes = await fetch(`${apiBase}/devices/${deviceId}`, { headers: reqHeaders });
-                  if (!getRes.ok) throw new SafeError("Device not found");
-                  const current = await getRes.json();
-
-                  const attributes = { ...current.attributes };
-                  if (updates.emoji !== undefined) attributes['emoji'] = updates.emoji;
-                  if (updates.color !== undefined) attributes['color'] = updates.color;
-                  if (updates.motionProfile !== undefined) attributes['motionProfile'] = updates.motionProfile;
-
-                  const putRes = await fetch(`${apiBase}/devices/${deviceId}`, {
-                    method: "PUT",
-                    headers: reqHeaders,
-                    body: JSON.stringify({ ...current, name: updates.name || current.name, attributes })
-                  });
-                  if (!putRes.ok) {
-                    const text = await putRes.text();
-                    console.error(`[Traccar API Error] update_device: ${putRes.status} ${text}`);
-                    throw new SafeError("Failed to update device settings");
+                  if (deviceId < 0) {
+                    const currentGroup = serverState.getGroupMetadata(deviceId);
+                    if (!currentGroup) throw new SafeError("Group not found");
+                    const ok = serverState.updateGroupMetadata(deviceId, updates);
+                    if (!ok) throw new SafeError("Group not found");
+                    broadcastConfig(null);
+                    ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId, requestId })));
+                    break;
                   }
-                  const updated = TraccarDeviceSchema.parse(await putRes.json());
-                  serverState.handleDevices([updated]);
+
+                  if (serverState.devices[deviceId] === undefined) {
+                    throw new SafeError("Device not found");
+                  }
+
+                  const currentDevice = serverState.deviceMetadataById[deviceId];
+                  if (!currentDevice) throw new SafeError("Device metadata not found");
+
+                  if (updates.name !== undefined) {
+                    const getRes = await fetch(`${apiBase}/devices/${deviceId}`, { headers: reqHeaders });
+                    if (!getRes.ok) throw new SafeError("Device not found");
+                    const currentRaw: unknown = await getRes.json();
+                    if (!currentRaw || typeof currentRaw !== "object") {
+                      throw new SafeError("Failed to read existing device data");
+                    }
+                    const current = currentRaw as Record<string, unknown>;
+
+                    const putRes = await fetch(`${apiBase}/devices/${deviceId}`, {
+                      method: "PUT",
+                      headers: reqHeaders,
+                      body: JSON.stringify({ ...current, name: updates.name })
+                    });
+                    if (!putRes.ok) {
+                      const text = await putRes.text();
+                      console.error(`[Traccar API Error] update_device_name: ${putRes.status} ${text}`);
+                      throw new SafeError("Failed to update device name");
+                    }
+                    const updated = TraccarDeviceSchema.parse(await putRes.json());
+                    serverState.handleDevices([updated]);
+                  }
+
+                  serverState.upsertDeviceMetadata(deviceId, updates);
                   broadcastConfig(null);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId, requestId })));
                   break;
@@ -537,17 +556,14 @@ serve<WSData>({
                 case "delete_group": {
                   const { groupId } = data.payload;
                   ensureOwned(groupId);
-                  const memberDeviceIds = [...(serverState.groups.find(group => group.id === groupId)?.memberDeviceIds ?? [])];
 
-                  const res = await fetch(`${apiBase}/devices/${groupId}`, { method: "DELETE", headers: reqHeaders });
-                  if (!res.ok) {
-                    const text = await res.text();
-                    console.error(`[Traccar API Error] delete_group: ${res.status} ${text}`);
-                    throw new SafeError("Failed to delete group");
+                  const memberDeviceIds = serverState.getGroupMembers(groupId);
+                  if (!serverState.deleteGroup(groupId)) {
+                    throw new SafeError("Group not found");
                   }
+
                   principal.allowed.delete(groupId);
                   principal.owned.delete(groupId);
-                  serverState.deleteGroup(groupId);
                   broadcastConfig(null);
                   if (memberDeviceIds.length > 0) broadcastUpdate(memberDeviceIds);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "delete_success", groupId, requestId })));
@@ -558,40 +574,30 @@ serve<WSData>({
                   const { groupId, deviceId } = data.payload;
                   ensureOwned(groupId);
 
-                  const getRes = await fetch(`${apiBase}/devices/${groupId}`, { headers: reqHeaders });
-                  if (!getRes.ok) throw new SafeError("Group not found");
-                  const current = await getRes.json();
+                  if (serverState.devices[deviceId] === undefined) {
+                    throw new SafeError("Device not found");
+                  }
+                  if (!isOwned(deviceId)) {
+                    throw new SafeError("Forbidden: Cannot modify group membership for devices you do not own");
+                  }
 
-                  let memberDeviceIds: number[] = current.attributes?.memberDeviceIds ? JSON.parse(current.attributes.memberDeviceIds) : [];
-                  if (data.type === "add_device_to_group") {
-                    // Validate membership invariant: device cannot already be in another group
-                    const otherGroups = (serverState.deviceToGroupsMap[deviceId] ?? []).filter(gid => gid !== groupId);
-                    if (otherGroups.length > 0) {
-                      throw new SafeError(`Cannot add device: it is already a member of another group`);
+                  try {
+                    let ok = false;
+                    if (data.type === "add_device_to_group") {
+                      ok = serverState.addDeviceToGroup(groupId, deviceId);
+                    } else {
+                      ok = serverState.removeDeviceFromGroup(groupId, deviceId);
                     }
-                    if (!memberDeviceIds.includes(deviceId)) memberDeviceIds.push(deviceId);
-                  } else {
-                    memberDeviceIds = memberDeviceIds.filter(id => id !== deviceId);
+                    if (!ok) throw new SafeError("Group not found");
+                  } catch (err) {
+                    if (isSQLiteConstraintError(err)) {
+                      throw new SafeError("Device already in another group");
+                    }
+                    throw err;
                   }
 
-                  const putRes = await fetch(`${apiBase}/devices/${groupId}`, {
-                    method: "PUT",
-                    headers: reqHeaders,
-                    body: JSON.stringify({ ...current, attributes: { ...current.attributes, memberDeviceIds: JSON.stringify(memberDeviceIds) } })
-                  });
-                  if (!putRes.ok) {
-                    console.error(`[Traccar API Error] membership: ${putRes.status} ${await putRes.text()}`);
-                    throw new SafeError("Failed to update group membership");
-                  }
-                  const parsed = TraccarDeviceSchema.safeParse(await putRes.json());
-                  if (!parsed.success) {
-                    console.error(`[Traccar API Error] membership: Invalid response format: ${parsed.error}`);
-                    throw new SafeError("Failed to parse updated group data");
-                  }
-                  serverState.handleDevices([parsed.data]);
-                  serverState.refreshGroupFromMembers(groupId);
                   broadcastConfig(null);
-                  broadcastUpdate([groupId]);
+                  broadcastUpdate([deviceId, groupId]);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId: groupId, requestId })));
                   break;
                 }
@@ -610,7 +616,7 @@ serve<WSData>({
 
                   if (!targetUser) throw new SafeError("User not found");
 
-                  db.query("INSERT OR IGNORE INTO device_shares (device_id, shared_with_username, shared_by_username, shared_at) VALUES (?, ?, ?, ?)")
+                  db.query("INSERT OR IGNORE INTO device_shares (deviceId, sharedWith, sharedBy, sharedAt) VALUES (?, ?, ?, ?)")
                     .run(deviceId, targetUser.login, principal.username, Date.now());
 
                   // For sharing, the target user will get new permissions on next auth
@@ -624,7 +630,7 @@ serve<WSData>({
                   const { deviceId, username: targetUsername } = data.payload;
                   ensureOwned(deviceId);
 
-                  db.query("DELETE FROM device_shares WHERE device_id = ? AND shared_with_username = ?")
+                  db.query("DELETE FROM device_shares WHERE deviceId = ? AND sharedWith = ?")
                     .run(deviceId, targetUsername);
                   // For unsharing, the target user will lose permissions on next auth
                   broadcastConfig(targetUsername);
@@ -634,17 +640,15 @@ serve<WSData>({
                 }
                 case "get_shares": {
                   const allShares = db.query(
-                    `SELECT device_id, shared_with_username, shared_at FROM device_shares WHERE shared_by_username = ?`
-                  ).all(principal.username) as { device_id: number; shared_with_username: string; shared_at: number }[];
+                    `SELECT deviceId, sharedWith, sharedAt FROM device_shares WHERE sharedBy = ?`
+                  ).all(principal.username) as { deviceId: number; sharedWith: string; sharedAt: number }[];
 
                   // Filter based on currently authenticated devices to be safe
                   const sharesList = allShares
-                    .filter(s => principal.owned.has(s.device_id))
+                    .filter(s => principal.owned.has(s.deviceId))
                     .map(s => ({
-                      deviceId: s.device_id,
-                      deviceName: serverState.devices[s.device_id]?.name ?? `Device ${s.device_id}`,
-                      sharedWith: s.shared_with_username,
-                      sharedAt: s.shared_at,
+                      ...s,
+                      deviceName: serverState.devices[s.deviceId]?.name ?? `Device ${s.deviceId}`,
                     }));
 
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "shares_list", payload: sharesList, requestId })));
@@ -689,7 +693,7 @@ serve<WSData>({
 
 // Start Traccar admin connection if config is ready
 if (currentBaseUrl && currentToken) {
-  refreshTraccarUsersCache(currentToken, "startup");
+  void refreshTraccarUsersCache(currentToken, "startup");
   initTraccarClient(currentBaseUrl, config.traccarSecure, currentToken);
 }
 

@@ -273,8 +273,6 @@ export const useStore = create<Store>()(
           }
         }));
 
-        if (groupId < 0) return;
-
         try {
           await sendRPC('update_device', { deviceId: groupId, updates });
         } catch (error) {

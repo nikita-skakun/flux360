@@ -7,8 +7,7 @@ import { numericEntries } from "@/util/record";
 import { rgbToHex, colorForDevice } from "@/util/color";
 import { toWebMercator } from "@/util/webMercator";
 import { vlog } from "@/util/logger";
-import { z } from "zod";
-import type { DevicePoint, MotionProfileName, EngineEvent, AppDevice, TraccarDevice, EngineState, Vec2, RawGpsPosition } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, AppDevice, TraccarDevice, EngineState, Vec2, RawGpsPosition, DeviceMetadata } from "@/types";
 
 function dedupeKey(p: { device: number; timestamp: number; geo: Vec2 }) {
   return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
@@ -25,6 +24,7 @@ export class ServerState {
   processedKeys = new Set<string>();
   backfilled = new Set<number>();
   inProgressBackfills = new Set<number>();
+  deviceMetadataById: Record<number, DeviceMetadata> = {};
   private rawTraccarDevices: Record<number, TraccarDevice> = {};
 
   activePointsByDevice: Record<number, DevicePoint[]> = {};
@@ -32,6 +32,11 @@ export class ServerState {
   positionsAll: RawGpsPosition[] = [];
   private allPosById: Record<number, RawGpsPosition[]> = {};
   private historyMs: number;
+
+  static toDbGroupId(appGroupId: number) {
+    if (appGroupId >= 0) return null;
+    return -appGroupId;
+  }
 
   private firstAfterTimestamp(list: RawGpsPosition[], timestamp: number) {
     let lo = 0;
@@ -61,19 +66,226 @@ export class ServerState {
     return replay;
   }
 
+  private clearGroupRuntime(groupId: number) {
+    delete this.activePointsByDevice[groupId];
+    delete this.eventsByDevice[groupId];
+    delete this.engines[groupId];
+    delete this.engineCheckpoints[groupId];
+    delete this.allPosById[groupId];
+    db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ?`, [groupId]);
+  }
+
+  private rebuildGroupDerivedFields() {
+    for (const group of this.groups) {
+      const members = group.memberDeviceIds ?? [];
+
+      let max: number | null = null;
+      for (const memberId of members) {
+        const ts = this.devices[memberId]?.lastSeen ?? null;
+        if (ts !== null && (max === null || ts > max)) max = ts;
+      }
+
+      group.lastSeen = max;
+      group.effectiveMotionProfile = group.motionProfile ?? (members.some(memberId => this.devices[memberId]?.effectiveMotionProfile === "car") ? "car" : "person");
+      group.color ??= rgbToHex(...colorForDevice(group.id));
+    }
+
+    this.deviceToGroupsMap = {};
+    this.groupIds.clear();
+
+    for (const group of this.groups) {
+      this.groupIds.add(group.id);
+      for (const deviceId of group.memberDeviceIds ?? []) {
+        this.deviceToGroupsMap[deviceId] ??= [];
+        this.deviceToGroupsMap[deviceId].push(group.id);
+      }
+    }
+  }
+
+  private rebuildPositionIndexFromAllPositions() {
+    this.allPosById = {};
+    for (const p of this.positionsAll) {
+      const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
+      for (const id of ids) {
+        this.allPosById[id] ??= [];
+        this.allPosById[id].push(p);
+      }
+    }
+  }
+
+  private refreshGroupFromMembers(groupId: number) {
+    const group = this.groups.find(g => g.id === groupId);
+    if (!group) {
+      this.clearGroupRuntime(groupId);
+      return;
+    }
+
+    const memberDeviceIds = Array.from(new Set(group.memberDeviceIds ?? []));
+    if (memberDeviceIds.length === 0) {
+      this.clearGroupRuntime(groupId);
+      return;
+    }
+
+    const profile = group.motionProfile ?? (
+      memberDeviceIds.some(memberId => this.devices[memberId]?.effectiveMotionProfile === "car") ? "car" : "person"
+    );
+
+    const memberHistory = memberDeviceIds
+      .flatMap(memberId => this.allPosById[memberId] ?? [])
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    if (memberHistory.length === 0) {
+      this.clearGroupRuntime(groupId);
+      return;
+    }
+
+    const rawByDevice: Record<number, DevicePoint[]> = {
+      [groupId]: memberHistory.map(position => ({
+        mean: toWebMercator(position.geo),
+        accuracy: position.accuracy,
+        geo: position.geo,
+        device: groupId,
+        timestamp: position.timestamp,
+        anchorStartTimestamp: position.timestamp,
+        confidence: 0,
+        sourceDeviceId: position.device,
+      }))
+    };
+
+    const groupEngines: Record<number, Engine> = {};
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, groupEngines, { [groupId]: profile });
+
+    this.clearGroupRuntime(groupId);
+    this.engines[groupId] = groupEngines[groupId] ?? new Engine();
+    this.activePointsByDevice[groupId] = result.positionsByDevice[groupId] ?? [];
+    this.eventsByDevice[groupId] = (result.eventsByDevice[groupId] ?? []).sort((a, b) => b.start - a.start);
+  }
+
+  private reloadGroupsFromDB(rebuildHistory: boolean) {
+    const previousGroupIds = new Set(this.groups.map(group => group.id));
+
+    this.groups = this.loadGroupsFromDB();
+    this.rebuildGroupDerivedFields();
+
+    for (const oldId of previousGroupIds) {
+      if (!this.groupIds.has(oldId)) this.clearGroupRuntime(oldId);
+    }
+
+    if (rebuildHistory) {
+      this.rebuildPositionIndexFromAllPositions();
+      for (const group of this.groups) {
+        this.refreshGroupFromMembers(group.id);
+      }
+    }
+  }
+
+  loadDeviceMetadata(deviceIds: number[]) {
+    const out: Record<number, DeviceMetadata> = {};
+    if (deviceIds.length === 0) return out;
+
+    const placeholders = deviceIds.map(() => "?").join(",");
+    const rows = db.query(`SELECT deviceId, emoji, color, motionProfile FROM device_metadata WHERE deviceId IN (${placeholders})`).all(...deviceIds) as {
+      deviceId: number;
+      emoji: string | null;
+      color: string | null;
+      motionProfile: MotionProfileName | null;
+    }[];
+
+    for (const row of rows) {
+      out[row.deviceId] = {
+        name: this.rawTraccarDevices[row.deviceId]?.name ?? `Device ${row.deviceId}`,
+        emoji: row.emoji,
+        color: row.color,
+        motionProfile: row.motionProfile,
+      };
+    }
+
+    return out;
+  }
+
+  materializeAppDevices(): Record<number, AppDevice> {
+    const result: Record<number, AppDevice> = {};
+
+    for (const raw of Object.values(this.rawTraccarDevices)) {
+      const id = raw.id;
+      const lastSeen = raw.lastUpdate ? Date.parse(raw.lastUpdate) : null;
+      if (lastSeen && lastSeen < Date.now() - this.historyMs) continue;
+
+      const metadata = this.deviceMetadataById[id] ?? {
+        emoji: null,
+        color: null,
+        motionProfile: null,
+      };
+
+      const effectiveMotionProfile = metadata.motionProfile ?? "person";
+      result[id] = {
+        id,
+        name: raw.name,
+        emoji: metadata.emoji ?? raw.name.trim().charAt(0),
+        color: metadata.color ?? rgbToHex(...colorForDevice(id)),
+        lastSeen,
+        effectiveMotionProfile,
+        motionProfile: metadata.motionProfile,
+        isOwner: false,
+        memberDeviceIds: null,
+      };
+    }
+
+    return result;
+  }
+
+  loadGroupsFromDB(): AppDevice[] {
+    const groupRows = db.query(`SELECT id, name, emoji, color, motionProfile FROM groups ORDER BY id ASC`).all() as {
+      id: number;
+      name: string;
+      emoji: string | null;
+      color: string | null;
+      motionProfile: string | null;
+    }[];
+
+    const memberRows = db.query(`SELECT groupId, deviceId FROM group_members ORDER BY groupId ASC, deviceId ASC`).all() as {
+      groupId: number;
+      deviceId: number;
+    }[];
+
+    const membersByGroup: Record<number, number[]> = {};
+    for (const row of memberRows) {
+      const appGroupId = -row.groupId;
+      membersByGroup[appGroupId] ??= [];
+      membersByGroup[appGroupId].push(row.deviceId);
+    }
+
+    return groupRows.map(row => {
+      const parsed = MotionProfileNameSchema.safeParse(row.motionProfile);
+      const motionProfile = parsed.success ? parsed.data : null;
+
+      return {
+        id: -row.id,
+        name: row.name,
+        emoji: row.emoji ?? row.name.trim().charAt(0),
+        color: row.color ?? rgbToHex(...colorForDevice(-row.id)),
+        lastSeen: null,
+        effectiveMotionProfile: motionProfile ?? "person",
+        motionProfile,
+        isOwner: false,
+        memberDeviceIds: membersByGroup[-row.id] ?? [],
+      };
+    });
+  }
+
   constructor(public readonly historyDays: number) {
     this.historyMs = historyDays * 24 * 60 * 60 * 1000;
     vlog(`[ServerState] Restoring engine checkpoints...`);
 
     // 1. Restore Checkpoints
-    (db.query(`SELECT device_id, timestamp, snapshot_json FROM engine_checkpoints ORDER BY timestamp ASC`).all())
+    (db.query(`SELECT deviceId, timestamp, snapshotJson FROM engine_checkpoints ORDER BY timestamp ASC`).all())
       .forEach(row => {
-        const typedRow = row as { device_id: number, timestamp: number, snapshot_json: string };
-        const deviceId = typedRow.device_id;
+        const typedRow = row as { deviceId: number, timestamp: number, snapshotJson: string };
+        const deviceId = typedRow.deviceId;
         const checkpoints = this.engineCheckpoints[deviceId] ??= [];
         this.engines[deviceId] ??= new Engine();
         try {
-          const snapshot = EngineStateSchema.parse(JSON.parse(typedRow.snapshot_json));
+          const snapshot = EngineStateSchema.parse(JSON.parse(typedRow.snapshotJson));
           checkpoints.push({ timestamp: typedRow.timestamp, snapshot });
           this.engines[deviceId]?.restoreSnapshot(snapshot);
         } catch (err) {
@@ -84,13 +296,13 @@ export class ServerState {
     vlog(`[ServerState] Restoring recent positions...`);
     // 2. Restore recent raw positions so `positionsAll` is populated
     const cutoff = Date.now() - this.historyMs;
-    const posRows = db.query(`SELECT device_id, geo_lng, geo_lat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff);
+    const posRows = db.query(`SELECT deviceId, geoLon, geoLat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff);
     for (const row of posRows) {
-      const typedRow = row as { device_id: number, geo_lng: number, geo_lat: number, accuracy: number, timestamp: number };
-      const deviceId = typedRow.device_id;
+      const typedRow = row as { deviceId: number, geoLon: number, geoLat: number, accuracy: number, timestamp: number };
+      const deviceId = typedRow.deviceId;
       const parsed = RawGpsPositionSchema.safeParse({
         device: deviceId,
-        geo: [typedRow.geo_lng, typedRow.geo_lat],
+        geo: [typedRow.geoLon, typedRow.geoLat],
         accuracy: typedRow.accuracy,
         timestamp: typedRow.timestamp
       });
@@ -107,6 +319,13 @@ export class ServerState {
       this.knownKeys.add(tKey);
       if (p.timestamp <= (this.engines[deviceId]?.lastTimestamp ?? -1)) this.processedKeys.add(tKey);
     }
+
+    this.groups = this.loadGroupsFromDB();
+    this.rebuildGroupDerivedFields();
+    for (const group of this.groups) {
+      this.refreshGroupFromMembers(group.id);
+    }
+
     vlog(`[ServerState] Restored ${posRows.length} trailing positions. ${Object.keys(this.engines).length} engines ready.`);
   }
 
@@ -114,96 +333,136 @@ export class ServerState {
     const isFirst = Object.keys(this.rawTraccarDevices).length === 0;
 
     for (const d of devices) {
-      if (d.id) this.rawTraccarDevices[d.id] = d;
+      if (!d.id) continue;
+      this.rawTraccarDevices[d.id] = d;
     }
 
-    const processed = Object.values(this.rawTraccarDevices)
-      .map(device => {
-        const { attributes, id, name, lastUpdate } = device;
-        const lastSeen = lastUpdate ? (Date.parse(lastUpdate)) : null;
-        if (lastSeen && lastSeen < Date.now() - this.historyMs) return null;
-
-        const parsed = MotionProfileNameSchema.safeParse(attributes["motionProfile"]);
-        const motionProfile = parsed.success ? parsed.data : null;
-        const color = typeof attributes["color"] === "string" ? attributes["color"] : rgbToHex(...colorForDevice(id));
-        const emoji = typeof attributes["emoji"] === "string" ? attributes["emoji"] : "";
-
-        const base: AppDevice = { id, name, emoji, lastSeen, effectiveMotionProfile: motionProfile ?? "person", motionProfile, color, isOwner: false, memberDeviceIds: null };
-
-        const memberIdsAttr = attributes["memberDeviceIds"];
-        let group: AppDevice | null = null;
-        try {
-          const memberDeviceIds = z.number().array().parse(JSON.parse(memberIdsAttr as string));
-          group = { ...base, emoji: base.emoji ?? "group", lastSeen: null, memberDeviceIds };
-        } catch { /* ignore */ }
-        return { id, base, group };
-      })
-      .filter((d): d is NonNullable<typeof d> => d !== null);
-
-    // Merge new devices/groups instead of replacing—preserves existing state
-    // and ensures shared devices stay visible when partial device lists are synced
-    this.devices = { ...this.devices, ...Object.fromEntries(processed.map(d => [d.id, d.base])) };
-
-    const newGroups = processed.map(d => d.group).filter((g): g is AppDevice => g !== null);
-    this.groups = [...this.groups.filter(g => !newGroups.some(ng => ng.id === g.id)), ...newGroups];
-
-    for (const group of this.groups) {
-      if (group.memberDeviceIds) {
-        let max: number | null = null;
-        for (const mid of group.memberDeviceIds) {
-          const ts = this.devices[mid]?.lastSeen ?? null;
-          if (ts && (max === null || ts > max)) max = ts;
-        }
-        group.lastSeen = max;
+    const deviceIds = Object.keys(this.rawTraccarDevices).map(Number);
+    const now = Date.now();
+    const stmt = db.prepare(`INSERT OR IGNORE INTO device_metadata (deviceId, emoji, color, motionProfile, updatedAt) VALUES (?, NULL, NULL, NULL, ?)`);
+    db.transaction(() => {
+      for (const deviceId of deviceIds) {
+        stmt.run(deviceId, now);
       }
-    }
+    })();
+    this.deviceMetadataById = this.loadDeviceMetadata(deviceIds);
 
-    this.deviceToGroupsMap = {};
-    this.groupIds.clear();
-    for (const group of this.groups) {
-      this.groupIds.add(group.id);
-      group.memberDeviceIds?.forEach(deviceId => {
-        this.deviceToGroupsMap[deviceId] ??= [];
-        this.deviceToGroupsMap[deviceId].push(group.id);
-      });
-    }
+    // Replace materialized devices to avoid stale data from users/devices no longer visible.
+    this.devices = this.materializeAppDevices();
+    this.reloadGroupsFromDB(false);
 
     if (isFirst && this.positionsAll.length > 0) {
       vlog(`[ServerState] Initial catch-up for ${this.positionsAll.length} positions...`);
-      this.allPosById = {};
-      for (const p of this.positionsAll) {
-        const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
-        for (const id of ids) {
-          this.allPosById[id] ??= [];
-          this.allPosById[id].push(p);
-        }
-      }
+      this.rebuildPositionIndexFromAllPositions();
     }
 
     vlog(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
   }
 
-  deleteGroup(groupId: number) {
-    delete this.rawTraccarDevices[groupId];
-    delete this.devices[groupId];
-    this.groups = this.groups.filter(group => group.id !== groupId);
-    delete this.deviceToGroupsMap[groupId];
-    this.groupIds.delete(groupId);
-    delete this.activePointsByDevice[groupId];
-    delete this.eventsByDevice[groupId];
-    delete this.engines[groupId];
-    delete this.engineCheckpoints[groupId];
-    db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
+  getGroupMetadata(groupId: number): DeviceMetadata | null {
+    const dbGroupId = ServerState.toDbGroupId(groupId);
+    if (dbGroupId === null) return null;
 
-    this.deviceToGroupsMap = {};
-    this.groupIds.clear();
-    for (const group of this.groups) {
-      this.groupIds.add(group.id);
-      group.memberDeviceIds?.forEach(deviceId => {
-        this.deviceToGroupsMap[deviceId] ??= [];
-        this.deviceToGroupsMap[deviceId].push(group.id);
-      });
-    }
+    return db.query(`SELECT name, emoji, color, motionProfile FROM groups WHERE id = ?`).get(dbGroupId) as DeviceMetadata | null;
+  }
+
+  getGroupMembers(groupId: number): number[] {
+    const dbGroupId = ServerState.toDbGroupId(groupId);
+    if (dbGroupId === null) return [];
+
+    const rows = db.query(`SELECT deviceId FROM group_members WHERE groupId = ? ORDER BY deviceId ASC`).all(dbGroupId) as { deviceId: number }[];
+    return rows.map(row => row.deviceId);
+  }
+
+  createGroup(name: string, emoji: string, memberDeviceIds: number[], owner: string): AppDevice | null {
+    const createdAt = Date.now();
+    let groupDbId = 0;
+
+    db.transaction(() => {
+      const insertGroupResult = db.query(`INSERT INTO groups (owner, name, emoji, color, motionProfile, createdAt) VALUES (?, ?, ?, NULL, NULL, ?)`)
+        .run(owner, name, emoji, createdAt);
+      groupDbId = Number(insertGroupResult.lastInsertRowid);
+
+      if (memberDeviceIds.length <= 0) return;
+      const stmt = db.prepare(`INSERT INTO group_members (groupId, deviceId) VALUES (?, ?)`);
+      for (const deviceId of memberDeviceIds) {
+        stmt.run(groupDbId, deviceId);
+      }
+    })();
+
+    this.reloadGroupsFromDB(true);
+
+    return this.groups.find(group => group.id === -groupDbId) ?? null;
+  }
+
+  deleteGroup(groupId: number): boolean {
+    const dbGroupId = ServerState.toDbGroupId(groupId);
+    if (dbGroupId === null) return false;
+
+    const deleteResult = db.query(`DELETE FROM groups WHERE id = ?`).run(dbGroupId);
+    if (deleteResult.changes === 0) return false;
+
+    this.clearGroupRuntime(groupId);
+    this.reloadGroupsFromDB(true);
+    return true;
+  }
+
+  updateGroupMetadata(groupId: number, updates: DeviceMetadata): boolean {
+    const dbGroupId = ServerState.toDbGroupId(groupId);
+    if (dbGroupId === null) return false;
+
+    const result = db.query(`UPDATE groups SET name = ?, emoji = ?, color = ?, motionProfile = ? WHERE id = ?`)
+      .run(updates.name, updates.emoji, updates.color, updates.motionProfile, dbGroupId);
+    if (result.changes === 0) return false;
+
+    this.clearGroupRuntime(groupId);
+    this.reloadGroupsFromDB(false);
+    return true;
+  }
+
+  addDeviceToGroup(groupId: number, deviceId: number): boolean {
+    const dbGroupId = ServerState.toDbGroupId(groupId);
+    if (dbGroupId === null) return false;
+    const groupExists = db.query(`SELECT 1 as exists FROM groups WHERE id = ?`).get(dbGroupId) as { exists: number } | null;
+    if (!groupExists) return false;
+
+    db.query(`INSERT INTO group_members (groupId, deviceId) VALUES (?, ?)`).run(dbGroupId, deviceId);
+
+    this.clearGroupRuntime(groupId);
+    this.reloadGroupsFromDB(true);
+    return true;
+  }
+
+  removeDeviceFromGroup(groupId: number, deviceId: number): boolean {
+    const dbGroupId = ServerState.toDbGroupId(groupId);
+    if (dbGroupId === null) return false;
+    const groupExists = db.query(`SELECT 1 as exists FROM groups WHERE id = ?`).get(dbGroupId) as { exists: number } | null;
+    if (!groupExists) return false;
+
+    db.query(`DELETE FROM group_members WHERE groupId = ? AND deviceId = ?`).run(dbGroupId, deviceId);
+
+    this.clearGroupRuntime(groupId);
+    this.reloadGroupsFromDB(true);
+    return true;
+  }
+
+  upsertDeviceMetadata(deviceId: number, updates: DeviceMetadata) {
+    if (this.devices[deviceId] === undefined) return;
+
+    const now = Date.now();
+    db.query(`
+      INSERT INTO device_metadata (deviceId, emoji, color, motionProfile, updatedAt)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(deviceId) DO UPDATE SET
+        emoji = excluded.emoji,
+        color = excluded.color,
+        motionProfile = excluded.motionProfile,
+        updatedAt = excluded.updatedAt
+    `).run(deviceId, updates.emoji, updates.color, updates.motionProfile, now);
+
+    this.deviceMetadataById[deviceId] = updates;
+    this.devices = this.materializeAppDevices();
+    this.reloadGroupsFromDB(false);
   }
 
   handlePositions(pts: RawGpsPosition[]) {
@@ -219,7 +478,7 @@ export class ServerState {
     if (newPts.length > 0) {
       // 1. Save to Database
       db.transaction(() => {
-        const stmt = db.prepare(`INSERT INTO position_events (device_id, geo_lng, geo_lat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
+        const stmt = db.prepare(`INSERT INTO position_events (deviceId, geoLon, geoLat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
         for (const p of newPts) {
           stmt.run(p.device, p.geo[0], p.geo[1], p.accuracy, p.timestamp);
         }
@@ -261,7 +520,7 @@ export class ServerState {
       else if (split > 0) this.allPosById[id] = list.slice(split);
     }
 
-    if (Math.random() < 0.05) db.run('DELETE FROM position_events WHERE timestamp < ?', [cutoff]);
+    if (Math.random() < 0.05) db.run("DELETE FROM position_events WHERE timestamp < ?", [cutoff]);
 
     // 4. Compute Engine State
     const profiles: Record<number, MotionProfileName> = {};
@@ -309,11 +568,11 @@ export class ServerState {
       if (cp) {
         engine.restoreSnapshot(cp.snapshot);
         this.engineCheckpoints[id] = checkpoints.slice(0, cpIndex + 1);
-        db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp > ?`, [id, cp.timestamp]);
+        db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ? AND timestamp > ?`, [id, cp.timestamp]);
       } else {
         this.engines[id] = new Engine();
         this.engineCheckpoints[id] = [];
-        db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [id]);
+        db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ?`, [id]);
       }
 
       const replayFrom = cp?.timestamp ?? 0;
@@ -358,12 +617,12 @@ export class ServerState {
 
       if (checkpoints.length > MAX_CHECKPOINTS) {
         const oldest = checkpoints.shift();
-        if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE device_id = ? AND timestamp = ?`, [id, oldest.timestamp]);
+        if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ? AND timestamp = ?`, [id, oldest.timestamp]);
       }
     }
 
     if (pendingCheckpointWrites.length) {
-      const stmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (device_id, timestamp, snapshot_json) VALUES (?, ?, ?)`);
+      const stmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (deviceId, timestamp, snapshotJson) VALUES (?, ?, ?)`);
       db.transaction(() => pendingCheckpointWrites.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
     }
 
@@ -381,61 +640,6 @@ export class ServerState {
     }
 
     return { engineStates: result.engineStatesByDevice, events: result.eventsByDevice };
-  }
-
-  refreshGroupFromMembers(groupId: number) {
-    const group = this.groups.find(g => g.id === groupId);
-    if (!group) return;
-
-    if (!group.memberDeviceIds || group.memberDeviceIds.length === 0) {
-      delete this.engines[groupId];
-      delete this.engineCheckpoints[groupId];
-      delete this.activePointsByDevice[groupId];
-      delete this.eventsByDevice[groupId];
-      db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
-      return;
-    }
-
-    const profile = group.motionProfile ?? (
-      group.memberDeviceIds.some(memberId => this.devices[memberId]?.effectiveMotionProfile === "car") ? "car" : "person"
-    );
-
-    const memberHistory = group.memberDeviceIds
-      .flatMap(memberId => this.allPosById[memberId] ?? [])
-      .sort((a, b) => a.timestamp - b.timestamp);
-    if (memberHistory.length === 0) {
-      delete this.engines[groupId];
-      delete this.engineCheckpoints[groupId];
-      delete this.activePointsByDevice[groupId];
-      delete this.eventsByDevice[groupId];
-      db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
-      return;
-    }
-
-    const rawByDevice: Record<number, DevicePoint[]> = {
-      [groupId]: memberHistory.map(position => ({
-        mean: toWebMercator(position.geo),
-        accuracy: position.accuracy,
-        geo: position.geo,
-        device: position.device,
-        timestamp: position.timestamp,
-        anchorStartTimestamp: position.timestamp,
-        confidence: 0,
-        sourceDeviceId: null,
-      }))
-    };
-
-    const groupEngines: Record<number, Engine> = {};
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, groupEngines, { [groupId]: profile });
-    this.engines[groupId] = groupEngines[groupId]!;
-    delete this.engineCheckpoints[groupId];
-    db.run(`DELETE FROM engine_checkpoints WHERE device_id = ?`, [groupId]);
-    Object.assign(this.activePointsByDevice, result.positionsByDevice);
-    Object.assign(this.eventsByDevice, result.eventsByDevice);
-
-    for (const id in this.eventsByDevice) {
-      this.eventsByDevice[id]?.sort((a, b) => b.start - a.start);
-    }
   }
 
   /**
@@ -464,28 +668,6 @@ export class ServerState {
     return {
       devices,
       groups: allowedGroups
-    };
-  }
-
-  getMetadata(allowedDeviceIds: Set<number>) {
-    const { devices, groups } = this.getConfigProjection(allowedDeviceIds);
-    const entities: Record<number, AppDevice> = { ...devices };
-    const groupMemberIds = new Set<number>();
-
-    // Add groups to entities and track member IDs
-    for (const group of groups) {
-      entities[group.id] = group;
-      group.memberDeviceIds?.forEach(mid => groupMemberIds.add(mid));
-    }
-
-    // Identify root entities (not inside any directly allowed group)
-    const rootIds = Object.keys(entities)
-      .map(Number)
-      .filter(id => !groupMemberIds.has(id));
-
-    return {
-      entities,
-      rootIds,
     };
   }
 }

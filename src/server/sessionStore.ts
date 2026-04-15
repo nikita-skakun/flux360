@@ -10,7 +10,7 @@ export const sessionStore = {
     const now = Date.now();
 
     db.run(
-      `INSERT INTO user_tokens (token, username, traccar_token, created_at, last_active) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO user_tokens (token, username, traccarToken, createdAt, lastActive) VALUES (?, ?, ?, ?, ?)`,
       [token, username, traccarToken, now, now]
     );
 
@@ -18,7 +18,7 @@ export const sessionStore = {
   },
 
   getSession(token: string): Session | null {
-    const row = db.query(`SELECT token, username, traccar_token as traccarToken, created_at as createdAt, last_active as lastActive FROM user_tokens WHERE token = ?`).get(token);
+    const row = db.query(`SELECT token, username, traccarToken, createdAt, lastActive FROM user_tokens WHERE token = ?`).get(token);
     if (!row) return null;
 
     const parsed = SessionSchema.safeParse(row);
@@ -35,8 +35,8 @@ export const sessionStore = {
       return null;
     }
 
-    // Update last_active
-    db.run(`UPDATE user_tokens SET last_active = ? WHERE token = ?`, [now, token]);
+    // Update lastActive
+    db.run(`UPDATE user_tokens SET lastActive = ? WHERE token = ?`, [now, token]);
     session.lastActive = now;
 
     return session;
@@ -48,7 +48,7 @@ export const sessionStore = {
 
   cleanupExpired(): void {
     const cutoff = Date.now() - SESSION_TTL;
-    db.run(`DELETE FROM user_tokens WHERE last_active <= ?`, [cutoff]);
+    db.run(`DELETE FROM user_tokens WHERE lastActive <= ?`, [cutoff]);
   }
 };
 
