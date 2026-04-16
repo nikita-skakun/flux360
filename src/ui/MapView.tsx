@@ -40,8 +40,8 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   onSelectDevice,
   maptilerApiKey,
   darkMode,
-  pulsingDeviceIds = [],
-  selectedHistoryItem = null,
+  pulsingDeviceIds,
+  selectedHistoryItem,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -122,7 +122,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     flyToBounds,
   }));
 
-  const bestFitPathCacheRef = useRef<Map<string, Vec2[]>>(new Map());
+  const bestFitPathCacheRef = useRef<Record<string, Vec2[]>>({});
 
   const buildAccuracyCircleCoords = (center: Vec2, radius: number, sides = 64): Vec2[] => {
     return Array.from({ length: sides + 1 }, (_, j) => {
@@ -136,7 +136,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
   // Reset cached best-fit paths when selected history path changes
   useEffect(() => {
-    bestFitPathCacheRef.current.clear();
+    bestFitPathCacheRef.current = {};
   }, [selectedHistoryItem]);
 
   const updateLayers = useCallback(() => {
@@ -190,7 +190,8 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const accuracyFeatures: Feature<Polygon>[] = [];
 
     drawItems.forEach((item, i) => {
-      const c = activePoints[i]!;
+      const c = activePoints[i];
+      if (!c) return;
 
       if (clusteredIdxs.has(i)) {
         dotsFeatures.push({
@@ -204,10 +205,12 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
           const pinCanvas = document.createElement("canvas");
           pinCanvas.width = 48;
           pinCanvas.height = 48;
-          const pctx = pinCanvas.getContext("2d")!;
-          drawPin(pctx, 24, 36, PIN_R, item.iconText, item.color as Color, darkMode);
-          const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
-          if (imageData) map.addImage(imageKey, imageData);
+          const pctx = pinCanvas.getContext("2d");
+          if (pctx) {
+            drawPin(pctx, 24, 36, PIN_R, item.iconText, item.color as Color, darkMode);
+            const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+            if (imageData) map.addImage(imageKey, imageData);
+          }
         }
         individualsFeatures.push({
           type: 'Feature',
@@ -248,10 +251,12 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (!map.hasImage(clusterKey)) {
         const pinCanvas = document.createElement("canvas");
         pinCanvas.width = 48; pinCanvas.height = 48;
-        const pctx = pinCanvas.getContext("2d")!;
-        drawPin(pctx, 24, 36, PIN_R, rep.iconText, rep.color as Color, darkMode, false, String(cl.size));
-        const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
-        if (imageData) map.addImage(clusterKey, imageData);
+        const pctx = pinCanvas.getContext("2d");
+        if (pctx) {
+          drawPin(pctx, 24, 36, PIN_R, rep.iconText, rep.color as Color, darkMode, false, String(cl.size));
+          const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+          if (imageData) map.addImage(clusterKey, imageData);
+        }
       }
 
       clustersFeatures.push({
@@ -390,10 +395,10 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const m = selectedHistoryItem;
       if (m.path.length > 1) {
         const key = `motion-${m.start}-${m.end}`;
-        const cached = bestFitPathCacheRef.current.get(key);
+        const cached = bestFitPathCacheRef.current[key];
         const bestFitPath = cached ?? computeBestFitMotionPath(m.path);
 
-        if (!cached && !m.isDraft) bestFitPathCacheRef.current.set(key, bestFitPath);
+        if (!cached && !m.isDraft) bestFitPathCacheRef.current[key] = bestFitPath;
 
         historyFeatures.push({
           type: 'Feature',
