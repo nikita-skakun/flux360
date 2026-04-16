@@ -45,9 +45,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
-  const activePointsRef = useRef<DevicePoint[]>(activePoints);
-  const selectedDeviceIdRef = useRef(selectedDeviceId);
-  const onSelectDeviceRef = useRef(onSelectDevice);
   const hasFittedInitially = useRef(false);
 
   type ClusterPopupState = {
@@ -58,18 +55,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   };
 
   const [clusterPopup, setClusterPopup] = useState<ClusterPopupState | null>(null);
-
-  useEffect(() => {
-    activePointsRef.current = activePoints;
-  }, [activePoints]);
-
-  useEffect(() => {
-    selectedDeviceIdRef.current = selectedDeviceId;
-  }, [selectedDeviceId]);
-
-  useEffect(() => {
-    onSelectDeviceRef.current = onSelectDevice;
-  }, [onSelectDevice]);
 
   const closeClusterPopup = useCallback(() => {
     setClusterPopup((prev) => (prev ? { ...prev, animationState: 'exiting' } : null));
@@ -93,7 +78,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
 
-    const device = activePointsRef.current.find(c => c.device === id);
+    const device = activePoints.find(c => c.device === id);
     if (!device) return;
 
     const center = map.getCenter();
@@ -109,7 +94,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     }
 
     map.flyTo({ center: device.geo, zoom: 18, duration });
-  }, []);
+  }, [activePoints]);
 
   const flyToBounds = useCallback((bounds: [Vec2, Vec2]) => {
     const map = mapRef.current;
@@ -132,6 +117,21 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         center[1] + radius * Math.sin(angle),
       ]);
     });
+  };
+
+  const renderPinImage = (imageKey: string, iconText: string, color: Color, label?: string) => {
+    const map = mapRef.current;
+    if (!map || map.hasImage(imageKey)) return;
+
+    const pinCanvas = document.createElement("canvas");
+    pinCanvas.width = 48;
+    pinCanvas.height = 48;
+    const pctx = pinCanvas.getContext("2d");
+    if (pctx) {
+      drawPin(pctx, 24, 36, PIN_R, iconText, color, darkMode, false, label);
+      const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
+      if (imageData) map.addImage(imageKey, imageData);
+    }
   };
 
   // Reset cached best-fit paths when selected history path changes
@@ -201,17 +201,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         const imageKey = `${item.iconText}-${item.colorHex}-${darkMode ? 'dark' : 'light'}`;
-        if (!map.hasImage(imageKey)) {
-          const pinCanvas = document.createElement("canvas");
-          pinCanvas.width = 48;
-          pinCanvas.height = 48;
-          const pctx = pinCanvas.getContext("2d");
-          if (pctx) {
-            drawPin(pctx, 24, 36, PIN_R, item.iconText, item.color as Color, darkMode);
-            const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
-            if (imageData) map.addImage(imageKey, imageData);
-          }
-        }
+        renderPinImage(imageKey, item.iconText, item.color as Color);
         individualsFeatures.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: c.geo },
@@ -242,22 +232,16 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const rep = drawItems.find(di => di.device === repItem.device);
       if (!rep) return;
 
-      const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : null;
-      const selComp = selItem ? activePoints[selItem.idx] : null;
-      const markerLng = selComp ? selComp.geo[0] : cl.items.reduce((sum, it) => sum + (activePoints[it.idx]?.geo[0] ?? 0), 0) / cl.size;
-      const markerLat = selComp ? selComp.geo[1] : cl.items.reduce((sum, it) => sum + (activePoints[it.idx]?.geo[1] ?? 0), 0) / cl.size;
+      const selItem = selectedDeviceId != null ? cl.items.find(it => it.device === selectedDeviceId) : undefined;
+      const selComp = selItem ? activePoints[selItem.idx] : undefined;
+      const clusterSum = cl.items.reduce((acc: Vec2, it) => {
+        const pt = activePoints[it.idx];
+        return [acc[0] + (pt?.geo[0] ?? 0), acc[1] + (pt?.geo[1] ?? 0)] as Vec2;
+      }, [0, 0] as Vec2);
+      const [markerLng, markerLat] = selComp?.geo ?? [clusterSum[0] / cl.size, clusterSum[1] / cl.size];
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
-      if (!map.hasImage(clusterKey)) {
-        const pinCanvas = document.createElement("canvas");
-        pinCanvas.width = 48; pinCanvas.height = 48;
-        const pctx = pinCanvas.getContext("2d");
-        if (pctx) {
-          drawPin(pctx, 24, 36, PIN_R, rep.iconText, rep.color as Color, darkMode, false, String(cl.size));
-          const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
-          if (imageData) map.addImage(clusterKey, imageData);
-        }
-      }
+      renderPinImage(clusterKey, rep.iconText, rep.color as Color, String(cl.size));
 
       clustersFeatures.push({
         type: 'Feature',
@@ -270,15 +254,13 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     });
 
     // Pulsing device points (drawn under pins)
-    const pulsingPointFeatures: Feature<Point>[] = [];
-    for (const comp of activePoints) {
-      if (!pulsingDeviceIds.includes(comp.device)) continue;
-      pulsingPointFeatures.push({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: comp.geo },
+    const pulsingPointFeatures: Feature<Point>[] = activePoints
+      .filter(comp => pulsingDeviceIds.includes(comp.device))
+      .map(comp => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: comp.geo },
         properties: {},
-      });
-    }
+      }));
 
     try {
       // Update sources & layers - initialize on first call, setData on subsequent
@@ -521,7 +503,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     let initialCenter: Vec2 = [0, 0];
     let initialZoom = 2;
 
-    const firstComp = activePointsRef.current[0];
+    const firstComp = activePoints[0];
     if (firstComp) {
       initialCenter = firstComp.geo;
       initialZoom = 15;
@@ -645,7 +627,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer'] });
       const device: unknown = features[0]?.properties?.['device'];
       if (typeof device !== 'number') return;
-      onSelectDeviceRef.current(device);
+      onSelectDevice(device);
       flyToDevice(device);
     };
 
@@ -670,7 +652,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (geo?.type !== 'Point') return;
 
       const items: DevicePoint[] = memberIds
-        .map((deviceId) => activePointsRef.current.find((c) => c.device === deviceId))
+        .map((deviceId) => activePoints.find((c) => c.device === deviceId))
         .filter((c): c is DevicePoint => !!c);
       if (!items.length) return;
 
@@ -693,14 +675,14 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       map.on('click', 'clusters-layer', onClusterClick);
       map.on('click', onMapClick);
 
-      map.on("mouseenter", "individuals-layer", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "individuals-layer", () => { map.getCanvas().style.cursor = ""; });
-      map.on("mouseenter", "clusters-layer", () => { map.getCanvas().style.cursor = "pointer"; });
-      map.on("mouseleave", "clusters-layer", () => { map.getCanvas().style.cursor = ""; });
+      ['individuals-layer', 'clusters-layer'].forEach(layer => {
+        map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
+        map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
+      });
 
       listenersAttached.current = true;
     }
-  }, [maptilerApiKey]);
+  }, [maptilerApiKey, onSelectDevice, activePoints, flyToDevice]);
 
   // Style data listener to restore layers after style change
   useEffect(() => {
@@ -720,10 +702,10 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || hasFittedInitially.current || activePointsRef.current.length <= 0) return;
+    if (!map || hasFittedInitially.current || activePoints.length <= 0) return;
 
     let minLat = Infinity, minLon = Infinity, maxLat = -Infinity, maxLon = -Infinity;
-    for (const comp of activePointsRef.current) {
+    for (const comp of activePoints) {
       minLat = Math.min(minLat, comp.geo[1]);
       minLon = Math.min(minLon, comp.geo[0]);
       maxLat = Math.max(maxLat, comp.geo[1]);
@@ -736,7 +718,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
     map.fitBounds([sw[0], sw[1], ne[0], ne[1]], { padding: 40, maxZoom: 18, duration: 0 });
     hasFittedInitially.current = true;
-  }, []);
+  }, [activePoints]);
 
   return (
     <div style={{ height: "100vh", position: "relative", width: "100%" }}>
