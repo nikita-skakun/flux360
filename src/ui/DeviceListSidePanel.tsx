@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { colorForDevice } from "@/util/color";
 import { EMOJI_OPTIONS } from "@/util/constants";
+import { getEmojiClassName, getEmojiStyle } from "@/util/emoji";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -187,11 +188,7 @@ export const DeviceListSidePanel: React.FC<{
 
               <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => isGroup && toggle(e, device.id)}>
                 <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
-                  {device.emoji?.length > 1 ? (
-                    <span className="material-symbols-outlined text-lg select-none" style={{ color: colorStr }}>{device.emoji}</span>
-                  ) : (
-                    <span style={{ color: colorStr, fontSize: "16px", fontWeight: "600" }} className="select-none">{device.emoji || displayName}</span>
-                  )}
+                  <span className={`${getEmojiClassName(device.emoji ?? "")} text-lg select-none`} style={getEmojiStyle(device.emoji ?? "", colorStr, 16)}>{device.emoji || displayName}</span>
                 </div>
                 {sortedChildren.length > 0 && (
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-background rounded-full border border-border shadow-sm flex items-center justify-center z-10">

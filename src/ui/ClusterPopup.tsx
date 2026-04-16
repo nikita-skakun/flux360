@@ -1,4 +1,5 @@
 import { getColorForDevice } from "@/util/color";
+import { getEmojiClassName, getEmojiStyle } from "@/util/emoji";
 import React from "react";
 import type { AppDevice, DevicePoint } from "@/types";
 
@@ -102,7 +103,7 @@ export const ClusterPopup = React.memo(({
                   onClick={(e) => { e.stopPropagation(); onSelectDevice(it.device); onClose(); }}
                   title={entity?.name ?? String(it.device)}
                 >
-                  <span className="material-symbols-outlined select-none" style={{ color: colorStr, fontSize: 14, lineHeight: 1, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{entity?.emoji ?? String(it.device).charAt(0).toUpperCase()}</span>
+                  <span className={`${getEmojiClassName(entity?.emoji ?? "")} select-none`} style={{ ...getEmojiStyle(entity?.emoji ?? "", colorStr, 14), lineHeight: 1, WebkitUserSelect: 'none', MozUserSelect: 'none', msUserSelect: 'none' }}>{entity?.emoji ?? String(it.device).charAt(0).toUpperCase()}</span>
                 </div>
               </div>
             );

@@ -1,3 +1,4 @@
+import { getEmojiFont } from "@/util/emoji";
 import { rgbaString } from "@/util/color";
 import type { Color } from "@/util/color";
 
@@ -66,7 +67,7 @@ export function drawPin(
     ctx.fillStyle = rgbaString(iconColor, 1);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = `${pinRadius}px 'Material Symbols Outlined', -apple-system, system-ui, Arial`;
+    ctx.font = getEmojiFont(iconText, pinRadius);
     ctx.fillText(String(iconText), tipX, headY + 1);
     ctx.restore();
   }
