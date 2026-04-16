@@ -317,7 +317,9 @@ export class ServerState {
 
       const tKey = dedupeKey(p);
       this.knownKeys.add(tKey);
-      if (p.timestamp <= (this.engines[deviceId]?.lastTimestamp ?? -1)) this.processedKeys.add(tKey);
+      // Mark ALL restored positions as processed to prevent replay duplication.
+      // Positions from DB are historical and should not be reprocessed on restart.
+      this.processedKeys.add(tKey);
     }
 
     this.groups = this.loadGroupsFromDB();
@@ -468,6 +470,11 @@ export class ServerState {
   handlePositions(pts: RawGpsPosition[]) {
     if (pts.length === 0) return null;
 
+    // Snapshot processedKeys at start so we can distinguish between
+    // positions already processed before this call vs. positions in this batch.
+    // This prevents out-of-order replay from filtering out new batch positions.
+    const alreadyProcessedBefore = new Set(this.processedKeys);
+
     const newPts = pts.filter(p => {
       const k = dedupeKey(p);
       if (this.knownKeys.has(k)) return false;
@@ -576,7 +583,11 @@ export class ServerState {
       }
 
       const replayFrom = cp?.timestamp ?? 0;
-      posById[id] = this.replayPositionsForEntity(id, replayFrom);
+      const replayed = this.replayPositionsForEntity(id, replayFrom);
+      // Filter replay positions to only include those not already processed BEFORE this call.
+      // Using alreadyProcessedBefore ensures positions arriving in THIS batch are not filtered out.
+      // This makes incremental processing identical to bulk processing.
+      posById[id] = replayed.filter(p => !alreadyProcessedBefore.has(dedupeKey(p)));
     }
 
     const rawByDevice: Record<number, DevicePoint[]> = {};
