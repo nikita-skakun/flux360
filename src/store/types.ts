@@ -1,4 +1,4 @@
-import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, MotionProfileName, DeviceShare } from '@/types';
+import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, DeviceShare, DeviceMetadata } from '@/types';
 
 export type ThemeOptions = 'Light' | 'Dark' | 'Auto';
 
@@ -41,17 +41,13 @@ export type StoreActions = {
   deleteGroup: (groupId: number) => Promise<void>;
   addDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
   removeDeviceFromGroup: (groupId: number, deviceId: number) => Promise<void>;
-  updateGroup: (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
-  updateDevice: (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => Promise<void>;
+  updateDevice: (deviceId: number, updates: DeviceMetadata) => Promise<void>;
 
   // Data Handlers from WebSocket
   setInitialState: (payload: InitialStatePayload) => void;
   setOwnedDeviceIds: (ids: number[]) => void;
   updatePositions: (payload: { activePoints: Record<number, DevicePoint[]>, events: Record<number, EngineEvent[]> }) => void;
   updateConfig: (payload: { devices: Record<number, AppDevice>, groups: AppDevice[], allowedDeviceIds: number[], ownedDeviceIds: number[] }) => void;
-
-  // Motion Profiles
-  updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => void;
 
   // Settings & Auth
   login: (username: string, password: string) => Promise<void>;

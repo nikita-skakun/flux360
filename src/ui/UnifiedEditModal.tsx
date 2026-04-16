@@ -20,7 +20,6 @@ type Props = {
 export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
   const target = useStore((state) => state.entities[id]);
   const updateDevice = useStore((state) => state.updateDevice);
-  const updateGroup = useStore((state) => state.updateGroup);
   const deleteGroup = useStore((state) => state.deleteGroup);
 
   const [name, setName] = useState("");
@@ -65,13 +64,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
   const handleSave = async () => {
     setIsLoading(true);
     try {
-      const action = type === "device" ? updateDevice : updateGroup;
-      await action(id, {
-        name,
-        emoji,
-        color: color ?? defaultHex,
-        ...(motionProfile !== null ? { motionProfile } : {})
-      });
+      await updateDevice(id, { name, emoji, color, motionProfile });
       onClose();
     } catch (e) {
       console.error("Failed to update", e);

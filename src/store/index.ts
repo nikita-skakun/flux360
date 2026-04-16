@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
 import { rgbToHex, colorForDevice } from '@/util/color';
-import type { AppDevice, MotionProfileName, DeviceShare } from '@/types';
+import type { AppDevice, DeviceShare, DeviceMetadata } from '@/types';
 import type { Store, StoreState, ThemeOptions } from './types';
 
 const initialState: StoreState = {
@@ -248,81 +248,8 @@ export const useStore = create<Store>()(
         }
       },
 
-      updateGroup: async (groupId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
-        let defaultColor: string | null = null;
-        if (updates.color === null) {
-          defaultColor = rgbToHex(...colorForDevice(groupId));
-        }
-
-        const group = get().entities[groupId];
-        if (!group) return;
-
-        const original = { ...group };
-        const newGroup = {
-          ...group,
-          name: updates.name ?? group.name,
-          emoji: updates.emoji ?? group.emoji,
-          color: updates.color === null ? defaultColor! : (updates.color ?? group.color),
-          motionProfile: updates.motionProfile !== undefined ? updates.motionProfile : group.motionProfile
-        };
-
-        set(state => ({
-          entities: {
-            ...state.entities,
-            [groupId]: newGroup
-          }
-        }));
-
-        try {
-          await sendRPC('update_device', { deviceId: groupId, updates });
-        } catch (error) {
-          set(state => ({
-            entities: {
-              ...state.entities,
-              [groupId]: original
-            },
-          }));
-          throw error;
-        }
-      },
-
-      updateDevice: async (deviceId: number, updates: { name?: string; emoji?: string; color?: string | null; motionProfile?: MotionProfileName | null }) => {
-        const existing = get().entities[deviceId];
-        if (!existing) return;
-
-        const original = { ...existing };
-        const newProfileAttribute = updates.motionProfile !== undefined ? updates.motionProfile : existing.motionProfile;
-        const newEffectiveProfile = newProfileAttribute ?? "person";
-
-        set(state => ({
-          entities: {
-            ...state.entities,
-            [deviceId]: {
-              ...existing,
-              name: updates.name ?? existing.name,
-              emoji: updates.emoji ?? existing.emoji,
-              effectiveMotionProfile: newEffectiveProfile,
-              motionProfile: newProfileAttribute,
-              color: updates.color !== undefined ? updates.color : existing.color,
-              isOwner: true,
-            }
-          }
-        }));
-
-        if (deviceId < 0) return;
-
-        try {
-          await sendRPC('update_device', { deviceId, updates });
-        } catch (error) {
-          set(state => ({
-            entities: { ...state.entities, [deviceId]: original },
-          }));
-          throw error;
-        }
-      },
-
-      updateMotionProfile: (deviceId: number, profile: MotionProfileName | null) => {
-        void get().updateDevice(deviceId, { motionProfile: profile });
+      updateDevice: async (deviceId: number, updates: DeviceMetadata) => {
+        await sendRPC('update_device', { deviceId, updates });
       },
 
       setTheme: (theme: ThemeOptions) => {
