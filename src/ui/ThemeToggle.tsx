@@ -14,8 +14,11 @@ export const ThemeToggle: React.FC<{ className?: string }> = ({ className }) => 
 
   const cycleTheme = () => {
     const nextTheme: ThemeOptions =
-      theme === 'Auto' ? 'Dark' :
-        theme === 'Dark' ? 'Light' : 'Dark';
+      theme === 'Auto'
+        ? window.matchMedia("(prefers-color-scheme: dark)").matches ? 'Light' : 'Dark'
+        : theme === 'Dark'
+          ? 'Light'
+          : 'Dark';
     setTheme(nextTheme);
   };
 
