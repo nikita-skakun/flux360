@@ -401,6 +401,7 @@ export class ServerState {
     const dbGroupId = ServerState.toDbGroupId(groupId);
     if (dbGroupId === null) return false;
 
+    db.query(`DELETE FROM group_members WHERE groupId = ?`).run(dbGroupId);
     const deleteResult = db.query(`DELETE FROM groups WHERE id = ?`).run(dbGroupId);
     if (deleteResult.changes === 0) return false;
 

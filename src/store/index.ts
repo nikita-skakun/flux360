@@ -2,8 +2,7 @@ import { closeWebSocket, sendRPC } from '@/wsRPC';
 import { create } from 'zustand';
 import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
-import { rgbToHex, colorForDevice } from '@/util/color';
-import type { AppDevice, DeviceShare, DeviceMetadata } from '@/types';
+import type { DeviceShare, DeviceMetadata } from '@/types';
 import type { Store, StoreState, ThemeOptions } from './types';
 
 const initialState: StoreState = {
@@ -111,146 +110,26 @@ export const useStore = create<Store>()(
       },
 
       // Device/Group Management
-      createGroup: async (name: string, memberDeviceIds: number[], icon: string) => {
-        const tempId = Date.now();
-        const color = rgbToHex(...colorForDevice(tempId));
-        const newGroup: AppDevice = {
-          id: tempId,
-          name,
-          icon,
-          color,
-          memberDeviceIds,
-          motionProfile: null,
-          lastSeen: Math.max(...memberDeviceIds.map(id => get().entities[id]?.lastSeen ?? 0), 0) || null,
-          effectiveMotionProfile: 'person',
-          isOwner: true
-        };
+      createGroup: (name: string, memberDeviceIds: number[], icon: string) =>
+        sendRPC<{ device: { id: number } }>('create_group', { name, icon, memberDeviceIds }).then(() => undefined),
 
-        set(state => ({
-          ui: { ...state.ui, selectedDeviceId: tempId },
-          entities: {
-            ...state.entities,
-            [tempId]: newGroup
-          },
-        }));
-
-        try {
-          const resp = await sendRPC<{ device: { id: number } }>('create_group', { name, icon, memberDeviceIds });
-          const created = resp.device;
-
-          set(state => {
-            const newEntities = { ...state.entities };
-            const newColor = rgbToHex(...colorForDevice(created.id));
-            if (newEntities[tempId]) {
-              newEntities[created.id] = { ...newEntities[tempId], id: created.id, color: newColor };
-              delete newEntities[tempId];
-            }
-
-            return {
-              ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: created.id } : state.ui,
-              entities: newEntities,
-            };
-          });
-        } catch (error) {
-          set(state => {
-            const newEntities = { ...state.entities };
-            delete newEntities[tempId];
-            return {
-              ui: state.ui.selectedDeviceId === tempId ? { ...state.ui, selectedDeviceId: null } : state.ui,
-              entities: newEntities,
-            };
-          });
-          throw error;
-        }
-      },
-
-      deleteGroup: async (groupId: number) => {
-        const state = get();
-        const groupToDelete = state.entities[groupId];
-
-        set(state => {
-          const newEntities = { ...state.entities };
-          delete newEntities[groupId];
-          return {
-            ui: state.ui.selectedDeviceId === groupId ? { ...state.ui, selectedDeviceId: null } : state.ui,
-            entities: newEntities,
-          };
-        });
-
-        if (groupId < 0) return;
-
-        try {
-          await sendRPC('delete_group', { groupId });
-        } catch (error) {
-          if (!groupToDelete) throw error;
-          set(state => ({
-            entities: {
-              ...state.entities,
-              [groupId]: groupToDelete
-            }
-          }));
-          throw error;
-        }
-      },
+      deleteGroup: (groupId: number) =>
+        sendRPC('delete_group', { groupId }).then(() => undefined),
 
       addDeviceToGroup: async (groupId: number, deviceId: number) => {
         const group = get().entities[groupId];
-        if (!group?.memberDeviceIds || group.memberDeviceIds.includes(deviceId)) return;
-
-        const originalMembers = [...group.memberDeviceIds];
-        const newMembers = [...originalMembers, deviceId];
-        set(state => ({
-          entities: {
-            ...state.entities,
-            [groupId]: { ...group, memberDeviceIds: newMembers }
-          }
-        }));
-
-        if (groupId < 0 || deviceId < 0) return;
-
-        try {
-          await sendRPC('add_device_to_group', { groupId, deviceId });
-        } catch (error) {
-          set(state => ({
-            entities: {
-              ...state.entities,
-              [groupId]: { ...group, memberDeviceIds: originalMembers }
-            }
-          }));
-          throw error;
-        }
+        if (!group?.memberDeviceIds || group.memberDeviceIds.includes(deviceId)) return Promise.resolve();
+        await sendRPC('add_device_to_group', { groupId, deviceId });
       },
 
       removeDeviceFromGroup: async (groupId: number, deviceId: number) => {
-        if (groupId < 0 || deviceId < 0) return;
         const group = get().entities[groupId];
-        if (!group?.memberDeviceIds?.includes(deviceId)) return;
-
-        const originalMembers = [...group.memberDeviceIds];
-        const newMembers = originalMembers.filter(id => id !== deviceId);
-        set(state => ({
-          entities: {
-            ...state.entities,
-            [groupId]: { ...group, memberDeviceIds: newMembers }
-          }
-        }));
-
-        try {
-          await sendRPC('remove_device_from_group', { groupId, deviceId });
-        } catch (error) {
-          set(state => ({
-            entities: {
-              ...state.entities,
-              [groupId]: { ...group, memberDeviceIds: originalMembers }
-            }
-          }));
-          throw error;
-        }
+        if (!group?.memberDeviceIds?.includes(deviceId)) return Promise.resolve();
+        await sendRPC('remove_device_from_group', { groupId, deviceId });
       },
 
-      updateDevice: async (deviceId: number, updates: DeviceMetadata) => {
-        await sendRPC('update_device', { deviceId, updates });
-      },
+      updateDevice: (deviceId: number, updates: DeviceMetadata) =>
+        sendRPC('update_device', { deviceId, updates }).then(() => undefined),
 
       setTheme: (theme: ThemeOptions) => {
         set(state => ({
@@ -288,18 +167,14 @@ export const useStore = create<Store>()(
         }
       },
 
-      shareDevice: async (deviceId: number, username: string) => {
-        await sendRPC('share_device', { deviceId, username });
-      },
+      shareDevice: (deviceId: number, username: string) =>
+        sendRPC('share_device', { deviceId, username }).then(() => undefined),
 
-      unshareDevice: async (deviceId: number, username: string) => {
-        await sendRPC('unshare_device', { deviceId, username });
-      },
+      unshareDevice: (deviceId: number, username: string) =>
+        sendRPC('unshare_device', { deviceId, username }).then(() => undefined),
 
-      getShares: async () => {
-        const { payload } = await sendRPC<{ payload: DeviceShare[] }>('get_shares');
-        return payload;
-      },
+      getShares: () =>
+        sendRPC<{ payload: DeviceShare[] }>('get_shares').then(({ payload }) => payload),
 
       logout: () => {
         closeWebSocket();

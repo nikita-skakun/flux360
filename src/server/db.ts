@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 
 export const db = new Database("flux360.sqlite");
 
+db.run("PRAGMA foreign_keys = ON;");
+
 // Initialize tables
 db.run(`
   CREATE TABLE IF NOT EXISTS position_events (
