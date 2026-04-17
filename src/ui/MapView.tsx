@@ -507,6 +507,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem]);
 
   const listenersAttached = useRef(false);
+  const currentStyleRef = useRef<string>(darkMode ? STYLE_DARK : STYLE_LIGHT);
 
   // Map initialization
   useEffect(() => {
@@ -528,7 +529,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       container,
       center: initialCenter,
       zoom: initialZoom,
-      style: darkMode ? STYLE_DARK : STYLE_LIGHT,
+      style: currentStyleRef.current,
       navigationControl: false,
       geolocateControl: false,
       scaleControl: false,
@@ -549,7 +550,13 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   // Style update
   useEffect(() => {
     const map = mapRef.current;
-    if (map && maptilerApiKey) map.setStyle(darkMode ? STYLE_DARK : STYLE_LIGHT);
+    const desiredStyle = darkMode ? STYLE_DARK : STYLE_LIGHT;
+    if (!map || !maptilerApiKey) return;
+
+    if (currentStyleRef.current !== desiredStyle) {
+      map.setStyle(desiredStyle);
+      currentStyleRef.current = desiredStyle;
+    }
   }, [maptilerApiKey, darkMode]);
 
   // Ref to hold updateLayers to avoid stale closure in event listeners
