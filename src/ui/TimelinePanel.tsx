@@ -266,8 +266,10 @@ export const TimelinePanel: React.FC<Props> = ({
           const geo = point['geo'];
           if (!Array.isArray(geo) || geo.length < 2) return entry;
 
-          const { ['geo']: _geo, ...rest } = point;
-          return { ...rest, lon: geo[0], lat: geo[1] };
+          const rest = Object.fromEntries(
+            Object.entries(point).filter(([key]) => key !== 'geo')
+          );
+          return { ...rest, lon: geo[0] as number, lat: geo[1] as number };
         });
       };
 
