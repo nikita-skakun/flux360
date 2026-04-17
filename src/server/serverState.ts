@@ -163,15 +163,27 @@ export class ServerState {
 
   private reloadGroupsFromDB(rebuildHistory: boolean) {
     const previousGroupIds = new Set(this.groups.map(group => group.id));
+    const previousMemberships = new Map(this.groups.map(g => [g.id, g.memberDeviceIds ?? []]));
 
     this.groups = this.loadGroupsFromDB();
     this.rebuildGroupDerivedFields();
 
+    // Clear runtime state for deleted groups
     for (const oldId of previousGroupIds) {
       if (!this.groupIds.has(oldId)) this.clearGroupRuntime(oldId);
     }
 
-    if (rebuildHistory) {
+    // Detect groups with changed membership
+    const hasAnyMembershipChange = this.groups.some(group => {
+      const oldMembers = previousMemberships.get(group.id) ?? [];
+      const newMembers = group.memberDeviceIds ?? [];
+      if (oldMembers.length !== newMembers.length) return true;
+      const oldSet = new Set(oldMembers);
+      return newMembers.some(m => !oldSet.has(m));
+    });
+
+    // Rebuild history if explicitly requested OR if membership changed
+    if (rebuildHistory || hasAnyMembershipChange) {
       this.rebuildPositionIndexFromAllPositions();
       for (const group of this.groups) {
         this.refreshGroupFromMembers(group.id);
