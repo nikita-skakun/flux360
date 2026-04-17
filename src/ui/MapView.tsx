@@ -46,6 +46,9 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
   const hasFittedInitially = useRef(false);
+  const activePointsRef = useRef<DevicePoint[]>(activePoints);
+  const flyToDeviceRef = useRef<(id: number) => void>(() => undefined);
+  const onSelectDeviceRef = useRef<(id: number) => void>(() => undefined);
 
   type ClusterPopupState = {
     x: number;
@@ -106,6 +109,18 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     flyToDevice,
     flyToBounds,
   }));
+
+  useEffect(() => {
+    activePointsRef.current = activePoints;
+  }, [activePoints]);
+
+  useEffect(() => {
+    flyToDeviceRef.current = flyToDevice;
+  }, [flyToDevice]);
+
+  useEffect(() => {
+    onSelectDeviceRef.current = onSelectDevice;
+  }, [onSelectDevice]);
 
   const bestFitPathCacheRef = useRef<Record<string, Vec2[]>>({});
 
@@ -627,8 +642,8 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const features = map.queryRenderedFeatures(e.point, { layers: ['individuals-layer'] });
       const device: unknown = features[0]?.properties?.['device'];
       if (typeof device !== 'number') return;
-      onSelectDevice(device);
-      flyToDevice(device);
+      onSelectDeviceRef.current(device);
+      flyToDeviceRef.current(device);
     };
 
     const onClusterClick = (e: MapMouseEvent) => {
@@ -652,7 +667,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (geo?.type !== 'Point') return;
 
       const items: DevicePoint[] = memberIds
-        .map((deviceId) => activePoints.find((c) => c.device === deviceId))
+        .map((deviceId) => activePointsRef.current.find((c) => c.device === deviceId))
         .filter((c): c is DevicePoint => !!c);
       if (!items.length) return;
 

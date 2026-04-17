@@ -188,7 +188,7 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
 
       const devicesToBackfill = devices
         .map(d => d.id)
-        .filter((id): id is number => id !== undefined && !serverState.backfilled.has(id) && !serverState.inProgressBackfills.has(id));
+        .filter((id): id is number => !serverState.backfilled.has(id) && !serverState.inProgressBackfills.has(id));
 
       if (devicesToBackfill.length > 0) {
         void (async () => {
@@ -462,15 +462,14 @@ serve<WSData>({
               switch (data.type) {
                 case "create_group": {
                   const { name, icon, memberDeviceIds } = data.payload;
+                  if (memberDeviceIds.length === 0) throw new SafeError("Cannot create an empty group");
                   const username = principal.username;
-                  if (!username) {
-                    throw new SafeError("Session missing username");
-                  }
+                  if (!username) throw new SafeError("Session missing username");
                   if (!memberDeviceIds.every((id: number) => isOwned(id))) {
                     throw new SafeError("Forbidden: Cannot create group with devices you do not own");
                   }
 
-                  if (!memberDeviceIds.every((id: number) => serverState.devices[id] !== undefined)) {
+                  if (!memberDeviceIds.every((id: number) => serverState.devices[id])) {
                     throw new SafeError("Device not found");
                   }
 
@@ -491,7 +490,7 @@ serve<WSData>({
                   principal.allowed.add(createdGroup.id);
                   principal.owned.add(createdGroup.id);
                   broadcastConfig(null);
-                  if (memberDeviceIds.length > 0) broadcastUpdate(memberDeviceIds);
+                  broadcastUpdate([createdGroup.id, ...memberDeviceIds]);
                   ws.send(JSON.stringify(ServerMessageSchema.parse({
                     type: "create_success",
                     device: {
@@ -518,9 +517,7 @@ serve<WSData>({
                     break;
                   }
 
-                  if (serverState.devices[deviceId] === undefined) {
-                    throw new SafeError("Device not found");
-                  }
+                  if (!serverState.devices[deviceId]) throw new SafeError("Device not found");
 
                   const currentDevice = serverState.deviceMetadataById[deviceId];
                   if (!currentDevice) throw new SafeError("Device metadata not found");
@@ -558,9 +555,7 @@ serve<WSData>({
                   ensureOwned(groupId);
 
                   const memberDeviceIds = serverState.getGroupMembers(groupId);
-                  if (!serverState.deleteGroup(groupId)) {
-                    throw new SafeError("Group not found");
-                  }
+                  if (!serverState.deleteGroup(groupId)) throw new SafeError("Group not found");
 
                   principal.allowed.delete(groupId);
                   principal.owned.delete(groupId);
@@ -574,9 +569,7 @@ serve<WSData>({
                   const { groupId, deviceId } = data.payload;
                   ensureOwned(groupId);
 
-                  if (serverState.devices[deviceId] === undefined) {
-                    throw new SafeError("Device not found");
-                  }
+                  if (!serverState.devices[deviceId]) throw new SafeError("Device not found");
                   if (!isOwned(deviceId)) {
                     throw new SafeError("Forbidden: Cannot modify group membership for devices you do not own");
                   }
