@@ -3,7 +3,7 @@ import { humanDurationSince, useTimeAgo } from '@/util/time';
 import { List, useDynamicRowHeight } from 'react-window';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
-import type { EngineEvent, MotionEvent } from '@/types';
+import type { EngineEvent, MotionEvent, Vec2 } from '@/types';
 import type { RowComponentProps } from 'react-window';
 
 const ICON_MAP_PIN = <MapPin className="w-4 h-4 text-blue-500" />;
@@ -112,7 +112,8 @@ const TimelineEventRow = React.memo(
     );
   },
   (prev, next) =>
-    prev.ev === next.ev &&
+    prev.ev.id === next.ev.id &&
+    prev.ev.item === next.ev.item &&
     prev.isSelected === next.isSelected &&
     prev.durationStr === next.durationStr &&
     prev.copiedId === next.copiedId,
@@ -184,12 +185,12 @@ const Sparkline = React.memo(
       const flipY = (y: number) => bounds.minY + bounds.maxY - y;
 
       const raw = event.path.map(p => p.geo);
-      const first = raw[0]!;
-      const last = raw[raw.length - 1]!;
+      const first = raw[0] as Vec2;
+      const last = raw[raw.length - 1] as Vec2;
 
       const maxPoints = 30;
       const sampled = raw.length <= maxPoints ? raw : (() => {
-        const out: Array<[number, number]> = [];
+        const out: Array<Vec2> = [];
         const step = (raw.length - 1) / (maxPoints - 1);
         for (let i = 0; i < maxPoints; i++) {
           const idx = Math.min(raw.length - 1, Math.round(i * step));
@@ -243,52 +244,42 @@ export const TimelinePanel: React.FC<Props> = ({
       e.stopPropagation();
       if (selectedDeviceId == null) return;
 
-      const round = (val: unknown): unknown => {
-        if (typeof val === 'number') return Math.round(val * 100) / 100;
-        if (Array.isArray(val)) return val.map(round);
-        if (val && typeof val === 'object') {
-          const out: Record<string, unknown> = {};
-          const obj = val as Record<string, unknown>;
-          for (const k in obj) {
-            if (!Object.hasOwn(obj, k)) continue;
-            out[k] = round(obj[k]);
-          }
-          return out;
+      const roundValue = (value: unknown): unknown => {
+        if (typeof value === 'number') return Math.round(value * 100) / 100;
+        if (Array.isArray(value)) return value.map(roundValue);
+        if (value && typeof value === 'object') {
+          const objectValue = value as Record<string, unknown>;
+          return Object.fromEntries(
+            Object.entries(objectValue).map(([key, item]) => [key, roundValue(item)]),
+          );
         }
-        return val;
+        return value;
       };
 
-      const convertPointArray = (arr: unknown): unknown => {
-        if (!Array.isArray(arr)) return arr;
-        const entries: unknown[] = arr;
+      const convertPointArray = (value: unknown): unknown => {
+        if (!Array.isArray(value)) return value;
 
-        return entries.map((entry: unknown): unknown => {
+        return value.map((entry: unknown): unknown => {
           if (!entry || typeof entry !== 'object') return entry;
 
           const point = entry as Record<string, unknown>;
           const geo = point['geo'];
           if (!Array.isArray(geo) || geo.length < 2) return entry;
-          const coords: unknown[] = geo;
 
-          const lon: unknown = coords[0];
-          const lat: unknown = coords[1];
-          const rest: Record<string, unknown> = { ...point };
-          delete rest['geo'];
-          return { ...rest, lon, lat };
+          const { ['geo']: _geo, ...rest } = point;
+          return { ...rest, lon: geo[0], lat: geo[1] };
         });
       };
 
-      const roundedEvent = round(ev.item);
-      const normalizedEvent = (() => {
-        if (!roundedEvent || typeof roundedEvent !== 'object') return roundedEvent;
-
-        const roundedObj = roundedEvent as Record<string, unknown>;
-        return {
-          ...roundedObj,
-          path: convertPointArray(roundedObj['path']),
-          outliers: convertPointArray(roundedObj['outliers']),
-        };
-      })();
+      const roundedEvent = roundValue(ev.item);
+      const normalizedEvent =
+        roundedEvent && typeof roundedEvent === 'object'
+          ? {
+              ...(roundedEvent as Record<string, unknown>),
+              path: convertPointArray((roundedEvent as Record<string, unknown>)['path']),
+              outliers: convertPointArray((roundedEvent as Record<string, unknown>)['outliers']),
+            }
+          : roundedEvent;
 
       const exportData = {
         id: selectedDeviceId,
