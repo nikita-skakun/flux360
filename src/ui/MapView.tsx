@@ -6,7 +6,7 @@ import { computeBestFitMotionPath } from "@/util/motionBestFit";
 import { distance, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import { fromWebMercator } from "@/util/webMercator";
-import { GeoJSONSource, Map as MaptilerMap, MapStyle, config, MapMouseEvent } from "@maptiler/sdk";
+import { GeoJSONSource, Map as MaptilerMap, config, MapMouseEvent } from "@maptiler/sdk";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
 import type { Color } from "@/util/color";
@@ -29,7 +29,7 @@ type Props = {
   pulsingDeviceIds: number[];
   selectedHistoryItem: EngineEvent | null;
 };
-const STYLE_LIGHT = MapStyle.DATAVIZ;
+const STYLE_LIGHT = "dataviz";
 const STYLE_DARK = "019d01fb-0333-7f54-9107-395c4e551160";
 
 const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
@@ -535,7 +535,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       fullscreenControl: false,
       dragRotate: false,
       boxZoom: false,
-      projection: 'mercator',
     });
 
     mapRef.current = map;
