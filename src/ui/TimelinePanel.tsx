@@ -170,11 +170,14 @@ const Sparkline = React.memo(
       const dx = bounds.maxX - bounds.minX;
       const dy = bounds.maxY - bounds.minY;
       const size = Math.max(dx, dy, 0.0001);
+      const centerX = (bounds.minX + bounds.maxX) / 2;
+      const centerY = (bounds.minY + bounds.maxY) / 2;
 
       // Add 10% padding
       const padding = size * 0.1;
-      const vbMinX = bounds.minX - padding;
-      const vbMinY = bounds.minY - padding;
+      const halfSize = size / 2 + padding;
+      const vbMinX = centerX - halfSize;
+      const vbMinY = centerY - halfSize;
       const vbW = size + padding * 2;
       const vbH = size + padding * 2;
 
