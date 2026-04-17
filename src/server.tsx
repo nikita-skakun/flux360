@@ -461,7 +461,7 @@ serve<WSData>({
             try {
               switch (data.type) {
                 case "create_group": {
-                  const { name, emoji, memberDeviceIds } = data.payload;
+                  const { name, icon, memberDeviceIds } = data.payload;
                   const username = principal.username;
                   if (!username) {
                     throw new SafeError("Session missing username");
@@ -476,7 +476,7 @@ serve<WSData>({
 
                   let createdGroup: AppDevice | null = null;
                   try {
-                    createdGroup = serverState.createGroup(name, emoji, memberDeviceIds, username);
+                    createdGroup = serverState.createGroup(name, icon, memberDeviceIds, username);
                   } catch (err) {
                     if (isSQLiteConstraintError(err)) {
                       throw new SafeError("Device already in another group");

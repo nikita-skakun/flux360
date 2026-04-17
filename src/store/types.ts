@@ -37,7 +37,7 @@ export type StoreState = {
 
 export type StoreActions = {
   // Device/Group Management
-  createGroup: (name: string, memberDeviceIds: number[], emoji: string) => Promise<void>;
+  createGroup: (name: string, memberDeviceIds: number[], icon: string) => Promise<void>;
   deleteGroup: (groupId: number) => Promise<void>;
   addDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
   removeDeviceFromGroup: (groupId: number, deviceId: number) => Promise<void>;

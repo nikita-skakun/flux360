@@ -1,4 +1,4 @@
-import { getEmojiFont } from "@/util/emoji";
+import { getIconFont } from "@/util/icon";
 import { rgbaString } from "@/util/color";
 import type { Color } from "@/util/color";
 
@@ -67,7 +67,7 @@ export function drawPin(
     ctx.fillStyle = rgbaString(iconColor, 1);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = getEmojiFont(iconText, pinRadius);
+    ctx.font = getIconFont(iconText, pinRadius);
     ctx.fillText(String(iconText), tipX, headY + 1);
     ctx.restore();
   }

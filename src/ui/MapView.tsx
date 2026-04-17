@@ -160,7 +160,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         x: pt.x,
         y: pt.y,
         r: 0,
-        iconText: entity?.emoji ?? String(c.device).charAt(0).toUpperCase(),
+        iconText: entity?.icon ?? String(c.device).charAt(0).toUpperCase(),
         timestamp: c.timestamp,
         color: colorRgb,
         colorHex,

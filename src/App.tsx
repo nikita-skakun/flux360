@@ -114,7 +114,7 @@ export function App() {
       .map(e => ({
         id: e.id,
         name: e.name,
-        emoji: e.emoji
+        icon: e.icon
       }));
   }, [entities]);
 

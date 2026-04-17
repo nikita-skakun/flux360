@@ -184,9 +184,9 @@ export class ServerState {
     if (deviceIds.length === 0) return out;
 
     const placeholders = deviceIds.map(() => "?").join(",");
-    const rows = db.query(`SELECT deviceId, emoji, color, motionProfile FROM device_metadata WHERE deviceId IN (${placeholders})`).all(...deviceIds) as {
+    const rows = db.query(`SELECT deviceId, icon, color, motionProfile FROM device_metadata WHERE deviceId IN (${placeholders})`).all(...deviceIds) as {
       deviceId: number;
-      emoji: string | null;
+      icon: string | null;
       color: string | null;
       motionProfile: MotionProfileName | null;
     }[];
@@ -194,7 +194,7 @@ export class ServerState {
     for (const row of rows) {
       out[row.deviceId] = {
         name: this.rawTraccarDevices[row.deviceId]?.name ?? `Device ${row.deviceId}`,
-        emoji: row.emoji,
+        icon: row.icon,
         color: row.color,
         motionProfile: row.motionProfile,
       };
@@ -212,7 +212,7 @@ export class ServerState {
       if (lastSeen && lastSeen < Date.now() - this.historyMs) continue;
 
       const metadata = this.deviceMetadataById[id] ?? {
-        emoji: null,
+        icon: null,
         color: null,
         motionProfile: null,
       };
@@ -221,7 +221,7 @@ export class ServerState {
       result[id] = {
         id,
         name: raw.name,
-        emoji: metadata.emoji ?? raw.name.trim().charAt(0),
+        icon: metadata.icon ?? raw.name.trim().charAt(0),
         color: metadata.color ?? rgbToHex(...colorForDevice(id)),
         lastSeen,
         effectiveMotionProfile,
@@ -235,10 +235,10 @@ export class ServerState {
   }
 
   loadGroupsFromDB(): AppDevice[] {
-    const groupRows = db.query(`SELECT id, name, emoji, color, motionProfile FROM groups ORDER BY id ASC`).all() as {
+    const groupRows = db.query(`SELECT id, name, icon, color, motionProfile FROM groups ORDER BY id ASC`).all() as {
       id: number;
       name: string;
-      emoji: string | null;
+      icon: string | null;
       color: string | null;
       motionProfile: string | null;
     }[];
@@ -262,7 +262,7 @@ export class ServerState {
       return {
         id: -row.id,
         name: row.name,
-        emoji: row.emoji ?? row.name.trim().charAt(0),
+        icon: row.icon ?? row.name.trim().charAt(0),
         color: row.color ?? rgbToHex(...colorForDevice(-row.id)),
         lastSeen: null,
         effectiveMotionProfile: motionProfile ?? "person",
@@ -341,7 +341,7 @@ export class ServerState {
 
     const deviceIds = Object.keys(this.rawTraccarDevices).map(Number);
     const now = Date.now();
-    const stmt = db.prepare(`INSERT OR IGNORE INTO device_metadata (deviceId, emoji, color, motionProfile, updatedAt) VALUES (?, NULL, NULL, NULL, ?)`);
+    const stmt = db.prepare(`INSERT OR IGNORE INTO device_metadata (deviceId, icon, color, motionProfile, updatedAt) VALUES (?, NULL, NULL, NULL, ?)`);
     db.transaction(() => {
       for (const deviceId of deviceIds) {
         stmt.run(deviceId, now);
@@ -365,7 +365,7 @@ export class ServerState {
     const dbGroupId = ServerState.toDbGroupId(groupId);
     if (dbGroupId === null) return null;
 
-    return db.query(`SELECT name, emoji, color, motionProfile FROM groups WHERE id = ?`).get(dbGroupId) as DeviceMetadata | null;
+    return db.query(`SELECT name, icon, color, motionProfile FROM groups WHERE id = ?`).get(dbGroupId) as DeviceMetadata | null;
   }
 
   getGroupMembers(groupId: number): number[] {
@@ -376,13 +376,13 @@ export class ServerState {
     return rows.map(row => row.deviceId);
   }
 
-  createGroup(name: string, emoji: string, memberDeviceIds: number[], owner: string): AppDevice | null {
+  createGroup(name: string, icon: string, memberDeviceIds: number[], owner: string): AppDevice | null {
     const createdAt = Date.now();
     let groupDbId = 0;
 
     db.transaction(() => {
-      const insertGroupResult = db.query(`INSERT INTO groups (owner, name, emoji, color, motionProfile, createdAt) VALUES (?, ?, ?, NULL, NULL, ?)`)
-        .run(owner, name, emoji, createdAt);
+      const insertGroupResult = db.query(`INSERT INTO groups (owner, name, icon, color, motionProfile, createdAt) VALUES (?, ?, ?, NULL, NULL, ?)`)
+        .run(owner, name, icon, createdAt);
       groupDbId = Number(insertGroupResult.lastInsertRowid);
 
       if (memberDeviceIds.length <= 0) return;
@@ -413,8 +413,8 @@ export class ServerState {
     const dbGroupId = ServerState.toDbGroupId(groupId);
     if (dbGroupId === null) return false;
 
-    const result = db.query(`UPDATE groups SET name = ?, emoji = ?, color = ?, motionProfile = ? WHERE id = ?`)
-      .run(updates.name, updates.emoji, updates.color, updates.motionProfile, dbGroupId);
+    const result = db.query(`UPDATE groups SET name = ?, icon = ?, color = ?, motionProfile = ? WHERE id = ?`)
+      .run(updates.name, updates.icon, updates.color, updates.motionProfile, dbGroupId);
     if (result.changes === 0) return false;
 
     this.clearGroupRuntime(groupId);
@@ -453,14 +453,14 @@ export class ServerState {
 
     const now = Date.now();
     db.query(`
-      INSERT INTO device_metadata (deviceId, emoji, color, motionProfile, updatedAt)
+      INSERT INTO device_metadata (deviceId, icon, color, motionProfile, updatedAt)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(deviceId) DO UPDATE SET
-        emoji = excluded.emoji,
+        icon = excluded.icon,
         color = excluded.color,
         motionProfile = excluded.motionProfile,
         updatedAt = excluded.updatedAt
-    `).run(deviceId, updates.emoji, updates.color, updates.motionProfile, now);
+    `).run(deviceId, updates.icon, updates.color, updates.motionProfile, now);
 
     this.deviceMetadataById[deviceId] = updates;
     this.devices = this.materializeAppDevices();

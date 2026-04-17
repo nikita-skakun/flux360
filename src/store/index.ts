@@ -111,13 +111,13 @@ export const useStore = create<Store>()(
       },
 
       // Device/Group Management
-      createGroup: async (name: string, memberDeviceIds: number[], emoji: string) => {
+      createGroup: async (name: string, memberDeviceIds: number[], icon: string) => {
         const tempId = Date.now();
         const color = rgbToHex(...colorForDevice(tempId));
         const newGroup: AppDevice = {
           id: tempId,
           name,
-          emoji,
+          icon,
           color,
           memberDeviceIds,
           motionProfile: null,
@@ -135,7 +135,7 @@ export const useStore = create<Store>()(
         }));
 
         try {
-          const resp = await sendRPC<{ device: { id: number } }>('create_group', { name, emoji, memberDeviceIds });
+          const resp = await sendRPC<{ device: { id: number } }>('create_group', { name, icon, memberDeviceIds });
           const created = resp.device;
 
           set(state => {

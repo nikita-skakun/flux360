@@ -79,7 +79,7 @@ export type Bounds = z.infer<typeof BoundsSchema>;
 const AppDeviceSchema = z.object({
   id: z.number(),
   name: z.string(),
-  emoji: z.string(),
+  icon: z.string(),
   color: z.string().nullable(),
   lastSeen: z.number().nullable(),
   effectiveMotionProfile: MotionProfileNameSchema,
@@ -218,7 +218,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
 
 const DeviceMetadataSchema = z.object({
   name: z.string(),
-  emoji: z.string().nullable(),
+  icon: z.string().nullable(),
   color: z.string().nullable(),
   motionProfile: MotionProfileNameSchema.nullable(),
 });
@@ -238,7 +238,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("create_group"),
     payload: z.object({
       name: z.string(),
-      emoji: z.string(),
+      icon: z.string(),
       memberDeviceIds: z.array(z.number())
     }),
     requestId: z.string()

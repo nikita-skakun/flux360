@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { colorForDevice, isLightHexColor } from "@/util/color";
 import { createPortal } from "react-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { EMOJI_OPTIONS } from "@/util/constants";
+import { ICON_OPTIONS } from "@/util/constants";
 import { HexColorPicker } from "react-colorful";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
   const deleteGroup = useStore((state) => state.deleteGroup);
 
   const [name, setName] = useState("");
-  const [emoji, setEmoji] = useState("");
+  const [icon, setIcon] = useState("");
   const [color, setColor] = useState<string | null>(null);
   const [motionProfile, setMotionProfile] = useState<MotionProfileName | null>(null);
 
@@ -49,13 +49,13 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
 
   const rgb = colorForDevice(id);
   const defaultHex = `#${rgb.map(c => c.toString(16).padStart(2, '0')).join('')}`;
-  const displayEmoji = emoji.trim();
+  const displayIcon = icon.trim();
   const swatchTextColor = isLightHexColor(color ?? defaultHex) ? "text-black" : "text-white";
 
   useEffect(() => {
     if (target) {
       setName(target.name);
-      setEmoji(target.emoji);
+      setIcon(target.icon);
       setColor(target.color);
       setMotionProfile(target.motionProfile);
     }
@@ -64,7 +64,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
   const handleSave = async () => {
     setIsLoading(true);
     try {
-      await updateDevice(id, { name, emoji, color, motionProfile });
+      await updateDevice(id, { name, icon, color, motionProfile });
       onClose();
     } catch (e) {
       console.error("Failed to update", e);
@@ -105,9 +105,9 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
                   onClick={() => setShowColorPicker(!showColorPicker)}
                   disabled={isLoading}
                 >
-                  {displayEmoji ? (
+                  {displayIcon ? (
                     <span className={`text-2xl font-medium leading-none drop-shadow-md material-symbols-outlined ${swatchTextColor}`}>
-                      {displayEmoji}
+                      {displayIcon}
                     </span>
                   ) : color === null ? (
                     <div className={`flex items-center justify-center text-[10px] font-bold drop-shadow-md ${swatchTextColor}`}>Auto</div>
@@ -155,12 +155,12 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
 
             {/* Icon Picker */}
             <div className="flex flex-wrap gap-1.5 justify-center">
-              {EMOJI_OPTIONS.map(opt => (
+              {ICON_OPTIONS.map(opt => (
                 <Button
                   key={opt}
-                  variant={emoji === opt ? "default" : "ghost"}
+                  variant={icon === opt ? "default" : "ghost"}
                   size="icon"
-                  onClick={() => setEmoji(opt)}
+                  onClick={() => setIcon(opt)}
                   disabled={isLoading}
                   className="w-9 h-9"
                 >
@@ -171,8 +171,8 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
             <Input
               type="text"
               placeholder="Or type icon name (material symbols)"
-              value={emoji}
-              onChange={e => setEmoji(e.target.value)}
+              value={icon}
+              onChange={e => setIcon(e.target.value)}
               disabled={isLoading}
               className="text-xs"
             />

@@ -2,8 +2,8 @@ import { ArrowLeft, ChevronLeft, ChevronUp, ChevronDown, Smartphone, Plus, Setti
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { colorForDevice } from "@/util/color";
-import { EMOJI_OPTIONS } from "@/util/constants";
-import { getEmojiClassName, getEmojiStyle } from "@/util/emoji";
+import { ICON_OPTIONS } from "@/util/constants";
+import { getIconClassName, getIconStyle } from "@/util/icon";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -35,12 +35,12 @@ export const DeviceListSidePanel: React.FC<{
   onSelectDevice: (id: number) => void;
   isOpen: boolean;
   onToggle: () => void;
-  onCreateGroup: (name: string, memberDeviceIds: number[], emoji: string) => Promise<void>;
+  onCreateGroup: (name: string, memberDeviceIds: number[], icon: string) => Promise<void>;
   onDeleteGroup: (groupId: number) => Promise<void>;
   onAddDeviceToGroup: (groupId: number, deviceId: number) => Promise<void>;
   onEditGroup: (groupId: number) => void;
   onCreateGroupSelectionChange: (selectedIds: number[]) => void;
-  allDevices: Array<{ id: number; name: string; emoji: string }>;
+  allDevices: Array<{ id: number; name: string; icon: string }>;
 }> = ({
   entities,
   rootIds,
@@ -64,7 +64,7 @@ export const DeviceListSidePanel: React.FC<{
 
     // Create Group State
     const [newGroupName, setNewGroupName] = useState("");
-    const [selectedEmoji, setSelectedEmoji] = useState("group");
+    const [selectedIcon, setSelectedIcon] = useState("group");
     const [selectedCreateDevices, setSelectedCreateDevices] = useState<number[]>([]);
     const [showAllIcons, setShowAllIcons] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
@@ -88,7 +88,7 @@ export const DeviceListSidePanel: React.FC<{
       setShowAllIcons(false);
       setSelectedCreateDevices([]);
       setNewGroupName("");
-      setSelectedEmoji("group");
+      setSelectedIcon("group");
     }, [isOpen, mode]);
 
     // Close context menu on outside click
@@ -133,11 +133,11 @@ export const DeviceListSidePanel: React.FC<{
       if (!newGroupName.trim() || selectedCreateDevices.length === 0) return;
       setIsCreating(true);
       try {
-        await onCreateGroup(newGroupName, selectedCreateDevices, selectedEmoji);
+        await onCreateGroup(newGroupName, selectedCreateDevices, selectedIcon);
         setMode("list");
         setNewGroupName("");
         setSelectedCreateDevices([]);
-        setSelectedEmoji("group");
+        setSelectedIcon("group");
       } finally {
         setIsCreating(false);
       }
@@ -188,7 +188,7 @@ export const DeviceListSidePanel: React.FC<{
 
               <div className="w-10 h-10 relative flex-shrink-0" onClick={(e) => isGroup && toggle(e, device.id)}>
                 <div className={`w-10 h-10 rounded-full bg-background border-2 flex items-center justify-center ${isGroup ? "cursor-pointer hover:bg-muted" : ""}`} style={{ borderColor: colorStr }}>
-                  <span className={`${getEmojiClassName(device.emoji ?? "")} text-lg select-none`} style={getEmojiStyle(device.emoji ?? "", colorStr, 16)}>{device.emoji || displayName}</span>
+                  <span className={`${getIconClassName(device.icon ?? "")} text-lg select-none`} style={getIconStyle(device.icon ?? "", colorStr, 16)}>{device.icon || displayName}</span>
                 </div>
                 {sortedChildren.length > 0 && (
                   <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-background rounded-full border border-border shadow-sm flex items-center justify-center z-10">
@@ -287,12 +287,12 @@ export const DeviceListSidePanel: React.FC<{
                   <div>
                     <Label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 text-center">Icon</Label>
                     <div className="grid grid-cols-4 gap-2 pb-2">
-                      {(showAllIcons ? EMOJI_OPTIONS : EMOJI_OPTIONS.slice(0, 7)).map((icon: string) => (
+                      {(showAllIcons ? ICON_OPTIONS : ICON_OPTIONS.slice(0, 7)).map((icon: string) => (
                         <Button
                           key={icon}
-                          variant={selectedEmoji === icon ? "default" : "ghost"}
+                          variant={selectedIcon === icon ? "default" : "ghost"}
                           size="icon"
-                          onClick={() => setSelectedEmoji(icon)}
+                          onClick={() => setSelectedIcon(icon)}
                           className="aspect-square h-auto w-auto"
                           type="button"
                         >
@@ -417,10 +417,10 @@ export const DeviceListSidePanel: React.FC<{
                           }}
                         >
                           <span className="w-6 inline-flex items-center justify-center flex-shrink-0 text-muted-foreground">
-                            {d.emoji?.length > 1 ? (
-                              <span className="material-symbols-outlined text-lg select-none">{d.emoji}</span>
+                            {d.icon?.length > 1 ? (
+                              <span className="material-symbols-outlined text-lg select-none">{d.icon}</span>
                             ) : (
-                              <span className="select-none text-sm font-semibold">{d.emoji || d.name?.charAt(0)}</span>
+                              <span className="select-none text-sm font-semibold">{d.icon || d.name?.charAt(0)}</span>
                             )}
                           </span>
                           {d.name}

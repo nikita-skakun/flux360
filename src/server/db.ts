@@ -47,7 +47,7 @@ db.run(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner TEXT NOT NULL,
     name TEXT NOT NULL,
-    emoji TEXT,
+    icon TEXT,
     color TEXT,
     motionProfile TEXT,
     createdAt INTEGER NOT NULL
@@ -66,7 +66,7 @@ db.run(`
 
   CREATE TABLE IF NOT EXISTS device_metadata (
     deviceId INTEGER PRIMARY KEY,
-    emoji TEXT,
+    icon TEXT,
     color TEXT,
     motionProfile TEXT,
     updatedAt INTEGER NOT NULL
