@@ -639,10 +639,13 @@ serve<WSData>({
                   // Filter based on currently authenticated devices to be safe
                   const sharesList = allShares
                     .filter(s => principal.owned.has(s.deviceId))
-                    .map(s => ({
-                      ...s,
-                      deviceName: serverState.devices[s.deviceId]?.name ?? `Device ${s.deviceId}`,
-                    }));
+                    .map(s => {
+                      const groupMetadata = serverState.getGroupMetadata(s.deviceId);
+                      return {
+                        ...s,
+                        deviceName: groupMetadata?.name ?? serverState.devices[s.deviceId]?.name ?? `Device ${s.deviceId}`,
+                      };
+                    });
 
                   ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "shares_list", payload: sharesList, requestId })));
                   break;

@@ -227,9 +227,7 @@ export const DeviceListSidePanel: React.FC<{
       </Button>
     );
 
-    if (!isOpen) {
-      return toggleButton;
-    }
+    if (!isOpen) return toggleButton;
 
     return (
       <>
