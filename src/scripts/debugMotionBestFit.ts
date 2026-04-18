@@ -5,13 +5,7 @@ import { MotionEventSchema } from "@/types";
 import { parseDecodedMotionEvent } from "@/util/motionEventParsing";
 import { parseArgs } from "util";
 import { readFile } from "fs/promises";
-import { z } from "zod";
 import type { Vec2 } from "@/types";
-
-const MotionInputSchema = z.union([
-  MotionEventSchema,
-  z.object({ ev: MotionEventSchema }),
-]);
 
 function turnAnglesDeg(points: Vec2[]): number[] {
   if (points.length < 3) return [];
@@ -84,31 +78,30 @@ async function main() {
 
   if (!values.input) throw new Error("Missing --input path to a motion event TOON file.");
 
-  const parsed = parseDecodedMotionEvent(decode(await readFile(values.input, "utf-8")), MotionInputSchema);
+  const parsed = parseDecodedMotionEvent(decode(await readFile(values.input, "utf-8")), MotionEventSchema);
   if (!parsed) throw new Error("Failed to parse TOON file.");
-  const ev = "type" in parsed ? parsed : parsed.ev;
 
-  const rawPath = ev.path.map(p => p.geo);
-  const fitPath = computeBestFitMotionPath(ev.path);
+  const rawPath = parsed.path.map(p => p.geo);
+  const fitPath = computeBestFitMotionPath(parsed.path);
 
   const rawTurns = turnAnglesDeg(rawPath);
   const fitTurns = turnAnglesDeg(fitPath);
 
-  const fitProjections = ev.path.map((p) => {
+  const fitProjections = parsed.path.map((p) => {
     const best = nearestPointOnPolyline(p.geo, fitPath);
     const dist = length(sub(best, p.geo));
     return { best, dist };
   });
 
   const fitOffsets = fitProjections.map(item => item.dist);
-  const fitOffsetRatios = ev.path.map((p, idx) => {
+  const fitOffsetRatios = parsed.path.map((p, idx) => {
     const offset = fitOffsets[idx] ?? 0;
     const accuracy = Math.max(EPSILON, p.accuracy);
     return offset / accuracy;
   });
 
   const sharpThreshold = Number(values.sharp);
-  const radii = ev.path.map(p => Math.max(0, p.accuracy));
+  const radii = parsed.path.map(p => Math.max(0, p.accuracy));
   const fitViolations: { idx: number; overBy: number }[] = [];
   for (let i = 0; i < rawPath.length; i++) {
     const c = rawPath[i]!;
@@ -125,13 +118,13 @@ async function main() {
         sharpTurns: countSharpTurns(rawTurns, sharpThreshold),
         maxTurnDeg: Number(maxTurn(rawTurns).toFixed(2)),
         p95TurnDeg: Number(percentile(rawTurns, 0.95).toFixed(2)),
-        backtracks: countBacktracks(rawPath, ev.startAnchor, ev.endAnchor),
+        backtracks: countBacktracks(rawPath, parsed.startAnchor, parsed.endAnchor),
       },
       bestFit: {
         sharpTurns: countSharpTurns(fitTurns, sharpThreshold),
         maxTurnDeg: Number(maxTurn(fitTurns).toFixed(2)),
         p95TurnDeg: Number(percentile(fitTurns, 0.95).toFixed(2)),
-        backtracks: countBacktracks(fitPath, ev.startAnchor, ev.endAnchor),
+        backtracks: countBacktracks(fitPath, parsed.startAnchor, parsed.endAnchor),
         circleViolations: fitViolations.length,
         maxCircleViolationMeters: Number(Math.max(0, ...fitViolations.map(v => v.overBy)).toFixed(4)),
         meanFitOffsetMeters: Number(mean(fitOffsets).toFixed(3)),
@@ -140,7 +133,7 @@ async function main() {
         meanFitOffsetRatioToAccuracy: Number(mean(fitOffsetRatios).toFixed(3)),
       },
     },
-    perPoint: ev.path.map((p, idx) => {
+    perPoint: parsed.path.map((p, idx) => {
       const toCenter = fitProjections[idx]!.dist;
       return {
         idx,

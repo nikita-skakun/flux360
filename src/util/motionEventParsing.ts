@@ -22,13 +22,13 @@ export function parseDecodedMotionEvent<T>(
   decoded: unknown,
   schema: z.ZodType<T>
 ): T | null {
-  const evObj = decoded as Record<string, unknown>;
-  const normalizedEv = {
-    ...evObj,
-    path: normalizePointArray(evObj["path"]),
-    outliers: normalizePointArray(evObj["outliers"]),
-  };
+  const ev = (decoded as Record<string, unknown>)["ev"] as Record<string, unknown>;
 
-  const result = schema.safeParse(normalizedEv);
+  const result = schema.safeParse({
+    ...ev,
+    path: normalizePointArray(ev["path"]),
+    outliers: normalizePointArray(ev["outliers"]),
+  });
+
   return result.success ? result.data : null;
 }

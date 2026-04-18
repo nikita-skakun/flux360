@@ -4,12 +4,6 @@ import { MotionEventSchema } from "@/types";
 import { parseArgs } from "util";
 import { parseDecodedMotionEvent } from "@/util/motionEventParsing";
 import { readFile } from "fs/promises";
-import { z } from "zod";
-
-const MotionInputSchema = z.union([
-  MotionEventSchema,
-  z.object({ ev: MotionEventSchema }),
-]);
 
 async function main() {
   const { values } = parseArgs({
@@ -20,12 +14,10 @@ async function main() {
 
   if (!values.input) throw new Error("Missing --input path to a motion event TOON file.");
 
-  const parsed = parseDecodedMotionEvent(decode(await readFile(values.input, "utf-8")), MotionInputSchema);
+  const parsed = parseDecodedMotionEvent(decode(await readFile(values.input, "utf-8")), MotionEventSchema);
   if (!parsed) throw new Error("Failed to parse TOON file.");
 
-  const ev = "type" in parsed ? parsed : parsed.ev;
-
-  const path = [...ev.path, ...ev.outliers].sort((a, b) => a.timestamp - b.timestamp);
+  const path = [...parsed.path, ...parsed.outliers].sort((a, b) => a.timestamp - b.timestamp);
   if (path.length < 3) throw new Error("Not enough points to calculate neighbor metrics");
 
   const metrics = [];
