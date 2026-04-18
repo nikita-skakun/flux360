@@ -7,6 +7,7 @@ import { fromWebMercator } from "./util/webMercator";
 import { HistoryObservationBar } from "./ui/HistoryObservationBar";
 import { LoginPage } from "./ui/LoginPage";
 import { MapView } from "./ui/MapView";
+import { parseDecodedMotionEvent } from "./util/motionEventParsing";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { TimelinePanel } from "./ui/TimelinePanel";
 import { UnifiedEditModal } from "./ui/UnifiedEditModal";
@@ -129,56 +130,27 @@ export function App() {
       onDrop={(e) => {
         e.preventDefault();
 
-        const normalizePointArray = (arr: unknown): unknown => {
-          if (!Array.isArray(arr)) return arr;
-
-          return arr.map((entry) => {
-            if (!entry || typeof entry !== "object") return entry;
-
-            const point = entry as Record<string, unknown>;
-            if (Array.isArray(point["geo"])) return entry;
-
-            const lon = point["lon"];
-            const lat = point["lat"];
-            if (typeof lon !== "number" || typeof lat !== "number") return entry;
-
-            const { lon: _lon, lat: _lat, ...rest } = point;
-            return { ...rest, geo: [lon, lat] };
-          });
-        };
-
         void e.dataTransfer.files?.[0]?.text().then((text) => {
-          const decoded = decode(text);
-          if (!decoded || typeof decoded !== "object") return;
+          try {
+            const event = parseDecodedMotionEvent(decode(text), EngineEventSchema);
+            if (!event) return;
+            setSelectedTimelineEvent({ id: "debug-drop", item: event });
 
-          const ev = (decoded as Record<string, unknown>)["ev"];
-          if (!ev || typeof ev !== "object") return;
+            if ("bounds" in event) {
+              const { minX, minY, maxX, maxY } = event.bounds;
+              const sw = fromWebMercator([minX, minY]);
+              const ne = fromWebMercator([maxX, maxY]);
+              const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+              mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+              return;
+            }
 
-          const evObj = ev as Record<string, unknown>;
-          const parsedEvent = EngineEventSchema.safeParse({
-            ...evObj,
-            path: normalizePointArray(evObj["path"]),
-            outliers: normalizePointArray(evObj["outliers"]),
-          });
-          if (!parsedEvent.success) return;
-
-          const event = parsedEvent.data;
-          setSelectedTimelineEvent({ id: "debug-drop", item: event });
-
-          if ("bounds" in event) {
-            const { minX, minY, maxX, maxY } = event.bounds;
-            const sw = fromWebMercator([minX, minY]);
-            const ne = fromWebMercator([maxX, maxY]);
-            const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
-            mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
-            return;
+            const geo = fromWebMercator(event.mean);
+            const r = 0.001;
+            mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
+          } catch (err: unknown) {
+            console.error("Failed to parse dropped TOON", err);
           }
-
-          const geo = fromWebMercator(event.mean);
-          const r = 0.001;
-          mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
-        }).catch((err: unknown) => {
-          console.error("Failed to parse dropped TOON", err);
         });
       }}
     >

@@ -1,7 +1,8 @@
 import { computeBestFitMotionPath } from "@/util/motionBestFit";
 import { dot, EPSILON, length, nearestPointOnPolyline, sub } from "@/util/vec2";
-import { encode } from "@toon-format/toon";
+import { decode, encode } from "@toon-format/toon";
 import { MotionEventSchema } from "@/types";
+import { parseDecodedMotionEvent } from "@/util/motionEventParsing";
 import { parseArgs } from "util";
 import { readFile } from "fs/promises";
 import { z } from "zod";
@@ -81,11 +82,11 @@ async function main() {
     }
   });
 
-  if (!values.input) throw new Error("Missing --input path to a motion event JSON file.");
+  if (!values.input) throw new Error("Missing --input path to a motion event TOON file.");
 
-  const parsed = MotionInputSchema.parse(JSON.parse(await readFile(values.input, "utf-8")));
+  const parsed = parseDecodedMotionEvent(decode(await readFile(values.input, "utf-8")), MotionInputSchema);
+  if (!parsed) throw new Error("Failed to parse TOON file.");
   const ev = "type" in parsed ? parsed : parsed.ev;
-  if (ev.type !== "motion") throw new Error("Input JSON does not contain a motion event.");
 
   const rawPath = ev.path.map(p => p.geo);
   const fitPath = computeBestFitMotionPath(ev.path);

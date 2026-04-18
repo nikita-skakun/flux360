@@ -1,7 +1,8 @@
 import { calculateOutlierScore } from "@/util/motionOutliers";
-import { encode } from "@toon-format/toon";
+import { decode, encode } from "@toon-format/toon";
 import { MotionEventSchema } from "@/types";
 import { parseArgs } from "util";
+import { parseDecodedMotionEvent } from "@/util/motionEventParsing";
 import { readFile } from "fs/promises";
 import { z } from "zod";
 
@@ -17,19 +18,15 @@ async function main() {
     }
   });
 
-  if (!values.input) throw new Error("Missing --input path to a motion event JSON file.");
+  if (!values.input) throw new Error("Missing --input path to a motion event TOON file.");
 
-  const fileData = await readFile(values.input, "utf-8");
-  const parsed = MotionInputSchema.parse(JSON.parse(fileData));
+  const parsed = parseDecodedMotionEvent(decode(await readFile(values.input, "utf-8")), MotionInputSchema);
+  if (!parsed) throw new Error("Failed to parse TOON file.");
 
   const ev = "type" in parsed ? parsed : parsed.ev;
-  if (ev.type !== "motion") throw new Error("Input JSON does not contain a motion event.");
 
   const path = [...ev.path, ...ev.outliers].sort((a, b) => a.timestamp - b.timestamp);
-
-  if (path.length < 3) {
-    throw new Error("Not enough points to calculate neighbor metrics");
-  }
+  if (path.length < 3) throw new Error("Not enough points to calculate neighbor metrics");
 
   const metrics = [];
 
