@@ -1,7 +1,7 @@
 import { asWebMercatorCoord } from "@/types";
 import { filterMotionOutliers } from "@/util/motionOutliers";
-import { fromWebMercator, WORLD_R } from "@/util/webMercator";
-import { haversineDistance, computeBounds, getRadiusFromVariance } from "@/util/geo";
+import { WORLD_R } from "@/util/webMercator";
+import { computeBounds, getRadiusFromVariance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
 import { vlog } from "@/util/logger";
 import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState, WebMercatorCoord } from "@/types";
@@ -25,7 +25,11 @@ export class Engine {
   }
 
   private distanceBetweenWebMercator(a: Vec2, b: Vec2): number {
-    return haversineDistance(fromWebMercator(a), fromWebMercator(b));
+    const dx = a[0] - b[0];
+    const dy = a[1] - b[1];
+    const latRad = 2 * Math.atan(Math.exp(a[1] / WORLD_R)) - Math.PI / 2;
+    const cosLat = Math.cos(latRad);
+    return Math.sqrt(dx * dx + dy * dy) * cosLat;
   }
 
   processMeasurements(points: DevicePoint[]) {
@@ -57,7 +61,6 @@ export class Engine {
   private handleStationary(draft: StationaryDraft, p: DevicePoint, profile: MotionProfileConfig) {
     const stats = this.computeStats(draft.recent);
     const m2 = this.computeMahalanobis2(p.mean, stats.mean, stats.variance, p.accuracy);
-    const stationaryStartGeo = fromWebMercator(draft.stationaryStartAnchor);
 
     // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
     const distFromStart = this.distanceBetweenWebMercator(p.mean, draft.stationaryStartAnchor);
@@ -83,7 +86,7 @@ export class Engine {
       const dy = pt.mean[1] - stats.mean[1];
       const mag = Math.hypot(dx, dy);
       directions.push(mag > 0 ? [dx / mag, dy / mag] : [0, 0]);
-      if ((haversineDistance(fromWebMercator(pt.mean), stationaryStartGeo) - pt.accuracy) <= HARD_BREAKOUT_DISTANCE)
+      if ((this.distanceBetweenWebMercator(pt.mean, draft.stationaryStartAnchor) - pt.accuracy) <= HARD_BREAKOUT_DISTANCE)
         allPendingFar = false;
     }
 
@@ -136,8 +139,8 @@ export class Engine {
     draft.recent.push(p);
 
     const { cleanPath, newOutliers } = filterMotionOutliers(
-      draft.path, 
-      draft.outliers, 
+      draft.path,
+      draft.outliers,
       (p) => p.mean
     );
     draft.path = cleanPath;

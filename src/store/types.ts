@@ -35,7 +35,7 @@ export type StoreState = {
   eventsByDevice: Record<number, EngineEvent[]>;
 };
 
-export type StoreActions = {
+type StoreActions = {
   // Device/Group Management
   createGroup: (name: string, memberDeviceIds: number[], icon: string) => Promise<void>;
   deleteGroup: (groupId: number) => Promise<void>;

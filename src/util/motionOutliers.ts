@@ -1,4 +1,4 @@
-import { length, sub } from "./vec2";
+import { distance } from "./vec2";
 import type { Vec2 } from "@/types";
 
 export function calculateOutlierScore<T extends { timestamp: number }>(A: T, B: T, C: T, getGeo: (pt: T) => Vec2) {
@@ -9,20 +9,20 @@ export function calculateOutlierScore<T extends { timestamp: number }>(A: T, B: 
   const geoB = getGeo(B);
   const geoC = getGeo(C);
 
-  const distAB = length(sub(geoB, geoA));
-  const distBC = length(sub(geoC, geoB));
-  const distance = distAB + distBC;
-  const directDistance = length(sub(geoC, geoA));
+  const distAB = distance(geoB, geoA);
+  const distBC = distance(geoC, geoB);
+  const totalDistance = distAB + distBC;
+  const directDistance = distance(geoC, geoA);
 
   const directSpeed = duration > 0 ? (directDistance / duration) * 3.6 : 0;
-  const ratio = distance / Math.max(0.1, directDistance);
+  const ratio = totalDistance / Math.max(0.1, directDistance);
 
   const durationAB = (B.timestamp - A.timestamp) / 1000;
   const durationBC = (C.timestamp - B.timestamp) / 1000;
   const speedAB = durationAB > 0 ? (distAB / durationAB) * 3.6 : 0;
   const speedBC = durationBC > 0 ? (distBC / durationBC) * 3.6 : 0;
 
-  const speed = duration > 0 ? (distance / duration) * 3.6 : 0;
+  const speed = duration > 0 ? (totalDistance / duration) * 3.6 : 0;
 
   const liftAB = Math.max(0, speedAB - directSpeed);
   const liftBC = Math.max(0, speedBC - directSpeed);
@@ -30,7 +30,7 @@ export function calculateOutlierScore<T extends { timestamp: number }>(A: T, B: 
   const minLift = Math.min(liftAB, liftBC);
   const score = minLift * Math.pow(Math.max(0, ratio - 1), 2);
 
-  return { duration, distance, speed, directSpeed, ratio, score };
+  return { duration, distance: totalDistance, speed, directSpeed, ratio, score };
 }
 
 export function filterMotionOutliers<T extends { timestamp: number }>(

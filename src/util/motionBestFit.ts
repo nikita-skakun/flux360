@@ -1,4 +1,4 @@
-import { EPSILON, distancePointToSegment, sub, dot, length, nearestPointOnPolyline } from "@/util/vec2";
+import { EPSILON, distancePointToSegment, distancePointToPolyline } from "@/util/vec2";
 import type { Vec2, WebMercatorPosition } from "@/types";
 
 const BASE_SLACK_METERS = 0.2;
@@ -12,14 +12,17 @@ const baseAccuracyWeight = (radius: number): number => 50 / (50 + Math.max(0, ra
 
 // Calculate the angle (in degrees) between three points
 const calculateTurnAngleDeg = (prev: Vec2, curr: Vec2, next: Vec2): number => {
-  const v1 = sub(curr, prev);
-  const v2 = sub(next, curr);
-  const len1 = length(v1);
-  const len2 = length(v2);
+  const dx1 = curr[0] - prev[0];
+  const dy1 = curr[1] - prev[1];
+  const dx2 = next[0] - curr[0];
+  const dy2 = next[1] - curr[1];
+  const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+  const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
 
   if (len1 < EPSILON || len2 < EPSILON) return 0;
 
-  const cosAngle = dot(v1, v2) / (len1 * len2);
+  const dotVal = dx1 * dx2 + dy1 * dy2;
+  const cosAngle = dotVal / (len1 * len2);
   const clampedCos = Math.max(-1, Math.min(1, cosAngle));
   const angleDeg = Math.acos(clampedCos) * (180 / Math.PI);
   return Math.min(180, angleDeg);
@@ -217,11 +220,12 @@ export function computeBestFitMotionPath(path: WebMercatorPosition[]): Vec2[] {
 
   // Simplification 2: Greedily remove redundant vertices to minimize the path while preserving coverage.
   // This eliminates anchors that became redundant once specific points were inserted for coverage.
-  const calculateMaxExcess = (testPath: Vec2[]): number => {
+  let final = [...simplified];
+
+  const calculateMaxExcess = (skipIdx: number): number => {
     let maxExcess = 0;
     for (const p of path) {
-      const nearest = nearestPointOnPolyline(p.geo, testPath);
-      const d = length(sub(nearest, p.geo));
+      const d = distancePointToPolyline(p.geo[0], p.geo[1], final, skipIdx);
       const r = Math.max(0, p.accuracy);
       const slack = BASE_SLACK_METERS + ((1 - baseAccuracyWeight(r)) * Math.min(8, r * 0.12));
       const excess = d - (r + slack);
@@ -230,17 +234,15 @@ export function computeBestFitMotionPath(path: WebMercatorPosition[]): Vec2[] {
     return maxExcess;
   };
 
-  let final = [...simplified];
-  let currentMaxExcess = calculateMaxExcess(final);
+  let currentMaxExcess = calculateMaxExcess(-1);
 
   for (let i = 1; i < final.length - 1;) {
-    const candidate = final.filter((_, idx) => idx !== i);
-    const candidateMaxExcess = calculateMaxExcess(candidate);
+    const candidateMaxExcess = calculateMaxExcess(i);
 
     // Allow removal if it doesn't worsen the fit beyond a tiny tolerance, 
     // ensuring that pre-existing outlier points don't block simplification of the rest of the path.
     if (candidateMaxExcess <= Math.max(0, currentMaxExcess) + EPSILON) {
-      final = candidate;
+      final.splice(i, 1);
       currentMaxExcess = candidateMaxExcess;
     } else i++;
   }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const Vec2Schema = z.tuple([z.number(), z.number()]);
+const Vec2Schema = z.tuple([z.number(), z.number()]);
 export type Vec2 = z.infer<typeof Vec2Schema>;
 
 declare const WEB_MERCATOR_COORD_BRAND: unique symbol;
@@ -37,7 +37,7 @@ export const SessionSchema = z.object({
 });
 export type Session = z.infer<typeof SessionSchema>;
 
-export const DevicePointSchema = z.object({
+const DevicePointSchema = z.object({
   device: z.number(),
   sourceDeviceId: z.number().nullable(),
   geo: RawGpsCoordSchema,
@@ -57,7 +57,7 @@ export const RawGpsPositionSchema = z.object({
 });
 export type RawGpsPosition = z.infer<typeof RawGpsPositionSchema>;
 
-export const WebMercatorPositionSchema = z.object({
+const WebMercatorPositionSchema = z.object({
   device: z.number(),
   geo: WebMercatorCoordSchema,
   accuracy: z.number(),
@@ -116,7 +116,7 @@ export const EngineEventSchema = z.union([StationaryEventSchema, MotionEventSche
 export type EngineEvent = z.infer<typeof EngineEventSchema>;
 
 // Internal engine types
-export const StationaryDraftSchema = z.object({
+const StationaryDraftSchema = z.object({
   type: z.literal('stationary'),
   start: z.number(),
   stationaryStartAnchor: WebMercatorCoordSchema,
@@ -125,7 +125,7 @@ export const StationaryDraftSchema = z.object({
 });
 export type StationaryDraft = z.infer<typeof StationaryDraftSchema>;
 
-export const MotionDraftSchema = z.object({
+const MotionDraftSchema = z.object({
   type: z.literal('motion'),
   start: z.number(),
   stationaryCutoff: z.number(),
@@ -137,7 +137,7 @@ export const MotionDraftSchema = z.object({
 });
 export type MotionDraft = z.infer<typeof MotionDraftSchema>;
 
-export const EngineDraftSchema = z.union([StationaryDraftSchema, MotionDraftSchema]);
+const EngineDraftSchema = z.union([StationaryDraftSchema, MotionDraftSchema]);
 export type EngineDraft = z.infer<typeof EngineDraftSchema>;
 
 export const EngineStateSchema = z.object({
@@ -168,7 +168,7 @@ const AuthPayloadSchema = z.object({
   ownedDeviceIds: z.array(z.number()),
 });
 
-export const InitialStatePayloadSchema = z.object({
+const InitialStatePayloadSchema = z.object({
   entities: EntitiesSchema,
   activePointsByDevice: ActivePointsByDeviceSchema,
   eventsByDevice: EventsByDeviceSchema,
@@ -176,7 +176,7 @@ export const InitialStatePayloadSchema = z.object({
 });
 export type InitialStatePayload = z.infer<typeof InitialStatePayloadSchema>;
 
-export const DeviceShareSchema = z.object({
+const DeviceShareSchema = z.object({
   deviceId: z.number(),
   deviceName: z.string(),
   sharedWith: z.string(),

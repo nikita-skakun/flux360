@@ -216,7 +216,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         const imageKey = `${item.iconText}-${item.colorHex}-${darkMode ? 'dark' : 'light'}`;
-        renderPinImage(imageKey, item.iconText, item.color as Color);
+        renderPinImage(imageKey, item.iconText, item.color);
         individualsFeatures.push({
           type: 'Feature',
           geometry: { type: 'Point', coordinates: c.geo },
@@ -256,7 +256,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       const [markerLng, markerLat] = selComp?.geo ?? [clusterSum[0] / cl.size, clusterSum[1] / cl.size];
 
       const clusterKey = `cluster-${rep.iconText}-${rep.colorHex}-${cl.size}-${darkMode ? 'dark' : 'light'}`;
-      renderPinImage(clusterKey, rep.iconText, rep.color as Color, String(cl.size));
+      renderPinImage(clusterKey, rep.iconText, rep.color, String(cl.size));
 
       clustersFeatures.push({
         type: 'Feature',
