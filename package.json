@@ -7,7 +7,8 @@
     "dev": "bun --hot src/server.tsx",
     "debug-motion": "bun src/scripts/debugMotionBestFit.ts",
     "lint": "eslint src/**/*.ts src/**/*.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "bun build.ts"
   },
   "dependencies": {
     "@maptiler/sdk": "^4.0.2",
