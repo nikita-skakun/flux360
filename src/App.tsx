@@ -26,25 +26,22 @@ export function App() {
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
   const theme = useStore(state => state.settings.theme);
 
-  const isDark = useMemo(() => {
-    if (theme === "Dark") return true;
-    if (theme === "Light") return false;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  }, [theme]);
+  const [systemIsDark, setSystemIsDark] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
 
   useEffect(() => {
-    const updateDarkMode = () => {
-      const isDarkNow = theme === "Dark" || (theme === "Auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-      document.documentElement.classList.toggle("dark", isDarkNow);
-    };
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setSystemIsDark(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
-    updateDarkMode();
-    if (theme !== "Auto") return;
+  const isDark = theme === "Dark" || (theme === "Auto" && systemIsDark);
 
-    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    mediaQuery.addEventListener("change", updateDarkMode);
-    return () => mediaQuery.removeEventListener("change", updateDarkMode);
-  }, [theme]);
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", isDark);
+  }, [isDark]);
 
   const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
 
