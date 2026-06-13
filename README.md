@@ -35,23 +35,36 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 
 ## Usage
 
-Copy `config.sample.json` to `config.json`:
+Copy `.env.example` to `.env` and configure the environment variables:
 
-| Field | Description |
+| Environment Variable | Description |
 |---|---|
-| `traccarBaseUrl` | Hostname of your [Traccar](https://www.traccar.org) server |
-| `traccarSecure` | `true` for HTTPS/WSS, `false` for HTTP/WS |
-| `traccarApiToken` | Admin token for the Traccar server |
-| `maptilerApiKey` | [MapTiler](https://www.maptiler.com) API key |
-| `historyDays` | Number of days to pull during syncronization |
+| `TRACCAR_BASE_URL` | Hostname of your [Traccar](https://www.traccar.org) server |
+| `TRACCAR_SECURE` | `true` for HTTPS/WSS, `false` for HTTP/WS |
+| `MAPTILER_API_KEY` | [MapTiler](https://www.maptiler.com) API key |
+| `TRACCAR_API_TOKEN` | Admin token for the Traccar server |
+| `HISTORY_DAYS` | Number of days of historical tracking data to retain |
 
-Install dependancies:
+Install dependencies:
 ```bash
-bun run i
+bun install
 ```
 
-Run the server:
+Run the development server:
 ```bash
-bun run dev # runs on port 3000
+bun run dev # runs on port 6474
 ```
+
+## Docker Deployment
+
+To build and run the application inside a Docker container:
+
+1. Build and start the container using Docker Compose:
+   ```bash
+   docker compose up -d --build
+   ```
+
+2. The container mounts a local persistent volume at `/root/flux360` to store the SQLite database at `/app/data/flux360.sqlite`.
+3. The server runs and exposes port `6474` (bound locally to `127.0.0.1:6474` by default).
+
 

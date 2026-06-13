@@ -4,10 +4,10 @@
 - **Runtime**: Use `bun` for all operations.
   - Install: `bun add <package>`
   - Lint: `bun run lint`
-  - Typecheck: `bun run tsc --noEmit`
+  - Typecheck: `bun run typecheck`
 - **Restrictions**:
   - **NEVER** run `bun run dev` (locks terminal). Suggest the user run it.
-  - **NEVER** read `config.json` directly. Ask the user to handle secrets.
+  - **NEVER** read `.env` directly. Ask the user to handle secrets.
 
 ## 2. Coding Standards
 - **TypeScript**:

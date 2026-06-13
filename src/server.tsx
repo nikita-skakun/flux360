@@ -44,13 +44,14 @@ interface Principal {
 interface WSData {
   isAlive: boolean;
   principal: Principal | null;
+  clientIp: string;
 }
 
 // Handle CLI flags
 const { values } = parseArgs({
   options: {
     verbose: { type: "boolean", short: "v" },
-    port: { type: "string", short: "p", default: "3000" },
+    port: { type: "string", short: "p", default: "6474" },
   }
 });
 
@@ -59,7 +60,7 @@ const port = parseInt(values.port, 10);
 
 let config: Config;
 try {
-  config = await loadConfig();
+  config = loadConfig();
 } catch (e) {
   console.error("Error:", e instanceof Error ? e.message : String(e));
   process.exit(1);
@@ -241,10 +242,18 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
 const currentBaseUrl = config.traccarBaseUrl;
 const currentToken = config.traccarApiToken;
 
+function getClientIP(request: Request, server: Server<WSData>): string {
+  return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    ?? request.headers.get("x-real-ip")?.trim()
+    ?? server.requestIP(request)?.address
+    ?? "127.0.0.1";
+}
+
 const wsRouteHandler = (request: Request, server: Server<WSData>) => {
   vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
+  const clientIp = getClientIP(request, server);
   const upgraded = server.upgrade(request, {
-    data: { isAlive: true, principal: null }
+    data: { isAlive: true, principal: null, clientIp }
   });
   vlog(`[WS] Upgrade result: ${upgraded}`);
   if (upgraded) return undefined;
@@ -256,34 +265,51 @@ serve<WSData>({
   routes: isProduction
     ? {
       "/api/ws": wsRouteHandler,
-      "/*": async (request: Request) => {
+      "/*": async (request: Request, server: Server<WSData>) => {
         const pathname = new URL(request.url).pathname;
-        let file = Bun.file(`dist${pathname}`);
+        if (pathname === "/favicon.ico") {
+          return new Response(null, { status: 204 });
+        }
+        if (pathname === "/" || pathname === "/index.html") {
+          const file = Bun.file("dist/index.html");
+          if (await file.exists()) return new Response(file);
+        }
+
+        const file = Bun.file(`dist${pathname}`);
         if (await file.exists()) return new Response(file);
-        file = Bun.file(`dist${pathname}/index.html`);
-        if (await file.exists()) return new Response(file);
-        return new Response(Bun.file("dist/index.html"));
+
+        const clientIp = getClientIP(request, server);
+        console.warn(`SEC_404: ${clientIp} ${pathname}`);
+        return new Response("Not Found", { status: 404 });
       }
     }
     : {
       "/api/ws": wsRouteHandler,
+      "/src/**": indexHtml,
       "/assets/**": Bun.file("src/assets"),
-      "/*": indexHtml,
+      "/": indexHtml,
+      "/index.html": indexHtml,
+      "/index.css": indexHtml,
+      "/client.tsx": indexHtml,
+      "/*": (request: Request, server: Server<WSData>) => {
+        const pathname = new URL(request.url).pathname;
+        if (pathname === "/favicon.ico") {
+          return new Response(null, { status: 204 });
+        }
+        const clientIp = getClientIP(request, server);
+        console.warn(`SEC_404: ${clientIp} ${pathname}`);
+        return new Response("Not Found", { status: 404 });
+      }
     },
 
   websocket: {
     async message(ws: ServerWebSocket<WSData>, message) {
-      if (typeof message === "string" && message === '{"type":"pong"}') {
-        ws.data.isAlive = true;
-        return;
-      }
       try {
         const data = ClientMessageSchema.parse(JSON.parse(message as string));
         ws.data.isAlive = true; // Any message indicates the client is alive
 
         switch (data.type) {
           case "pong":
-            // Already handled above, but here for completeness
             break;
           case "login": {
             const { username: inputUsername, password } = data.payload;
@@ -297,6 +323,7 @@ serve<WSData>({
               });
 
               if (!sessionRes.ok) {
+                console.warn(`SEC_AUTH_FAIL: ${ws.data.clientIp}`);
                 ws.send(JSON.stringify({ type: "error", message: "Invalid credentials", requestId }));
                 return;
               }

@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 import { rm } from "fs/promises";
 import path from "path";
 import tailwindPlugin from "bun-plugin-tailwind";

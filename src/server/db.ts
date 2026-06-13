@@ -1,6 +1,9 @@
 import { Database } from "bun:sqlite";
+import { mkdirSync } from "fs";
 
-export const db = new Database("flux360.sqlite");
+mkdirSync("data", { recursive: true });
+
+export const db = new Database("data/flux360.sqlite");
 
 db.run("PRAGMA foreign_keys = ON;");
 

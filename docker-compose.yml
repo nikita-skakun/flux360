@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    image: ghcr.io/nikita-skakun/flux360:latest
+    container_name: flux360
+    ports:
+      - "127.0.0.1:6474:6474"
+    volumes:
+      - /root/flux360:/app/data:rw
+    env_file:
+      - .env
+    restart: unless-stopped
+    logging:
+      driver: journald
+      options:
+        tag: "switchified-app" # Required for fail2ban log identification; must remain exactly as defined
