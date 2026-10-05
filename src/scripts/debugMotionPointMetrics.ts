@@ -2,7 +2,7 @@ import { calculateOutlierScore } from "@/util/motionOutliers";
 import { decode, encode } from "@toon-format/toon";
 import { MotionEventSchema } from "@/types";
 import { parseArgs } from "util";
-import { parseDecodedMotionEvent } from "@/util/motionEventParsing";
+import { parseDecodedMotionEvent } from "@/util/motionEventCodec";
 import { readFile } from "fs/promises";
 
 async function main() {

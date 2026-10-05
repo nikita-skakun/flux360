@@ -156,6 +156,7 @@ export class ServerState {
     const result = buildEngineSnapshotsFromByDevice(rawByDevice, groupEngines, { [groupId]: profile });
 
     this.clearGroupRuntime(groupId);
+    this.allPosById[groupId] = memberHistory;
     this.engines[groupId] = groupEngines[groupId] ?? new Engine();
     this.activePointsByDevice[groupId] = result.positionsByDevice[groupId] ?? [];
     this.eventsByDevice[groupId] = (result.eventsByDevice[groupId] ?? []).sort((a, b) => b.start - a.start);
@@ -430,8 +431,8 @@ export class ServerState {
       .run(updates.name, updates.icon, updates.color, updates.motionProfile, dbGroupId);
     if (result.changes === 0) return false;
 
-    this.clearGroupRuntime(groupId);
     this.reloadGroupsFromDB(false);
+    this.refreshGroupFromMembers(groupId);
     return true;
   }
 
@@ -480,8 +481,8 @@ export class ServerState {
     this.reloadGroupsFromDB(false);
   }
 
-  handlePositions(pts: RawGpsPosition[]) {
-    if (pts.length === 0) return null;
+  handlePositions(pts: RawGpsPosition[]): boolean {
+    if (pts.length === 0) return false;
 
     // Snapshot processedKeys at start so we can distinguish between
     // positions already processed before this call vs. positions in this batch.
@@ -524,15 +525,16 @@ export class ServerState {
 
     // 3. Prune old data
     const cutoff = Date.now() - this.historyMs;
-    const splitIdx = this.positionsAll.findIndex(p => p.timestamp > cutoff);
-    for (let i = 0; i < splitIdx; i++) {
+    const firstLive = this.positionsAll.findIndex(p => p.timestamp > cutoff);
+    const pruneCount = firstLive === -1 ? this.positionsAll.length : firstLive;
+    for (let i = 0; i < pruneCount; i++) {
       const p = this.positionsAll[i];
       if (!p) continue;
       const k = dedupeKey(p);
       this.processedKeys.delete(k);
       this.knownKeys.delete(k);
     }
-    if (splitIdx > 0) this.positionsAll = this.positionsAll.slice(splitIdx);
+    if (pruneCount > 0) this.positionsAll = this.positionsAll.slice(pruneCount);
 
     for (const [id, list] of numericEntries(this.allPosById)) {
       const split = list.findIndex(p => p.timestamp > cutoff);
@@ -550,6 +552,7 @@ export class ServerState {
 
     const posById: Record<number, RawGpsPosition[]> = {};
     for (const p of pts) {
+      if (p.timestamp <= cutoff) continue;
       const key = dedupeKey(p);
       if (this.processedKeys.has(key)) continue;
       this.processedKeys.add(key);
@@ -573,7 +576,7 @@ export class ServerState {
       for (const p of trailing) this.processedKeys.add(dedupeKey(p));
     }
 
-    if (Object.keys(posById).length === 0) return null;
+    if (Object.keys(posById).length === 0) return false;
 
     // Replay for out-of-order data
     for (const [id, newPos] of numericEntries(posById)) {
@@ -589,18 +592,20 @@ export class ServerState {
         engine.restoreSnapshot(cp.snapshot);
         this.engineCheckpoints[id] = checkpoints.slice(0, cpIndex + 1);
         db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ? AND timestamp > ?`, [id, cp.timestamp]);
+        // Replay forward from the restored point. Positions already processed
+        // BEFORE this call are filtered so this batch is not counted twice.
+        const replayed = this.replayPositionsForEntity(id, cp.timestamp);
+        posById[id] = replayed.filter(p => !alreadyProcessedBefore.has(dedupeKey(p)));
       } else {
+        // This point predates every checkpoint, so the engine cannot be rewound
+        // far enough to accept it incrementally. Rebuild from scratch instead:
+        // the only correct state is one derived from every raw position.
         this.engines[id] = new Engine();
         this.engineCheckpoints[id] = [];
         db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ?`, [id]);
+        vlog(`[ServerState] Entity ${id}: point at ${new Date(first.timestamp).toISOString()} predates all checkpoints, rebuilding from raw positions`);
+        posById[id] = this.replayPositionsForEntity(id, 0);
       }
-
-      const replayFrom = cp?.timestamp ?? 0;
-      const replayed = this.replayPositionsForEntity(id, replayFrom);
-      // Filter replay positions to only include those not already processed BEFORE this call.
-      // Using alreadyProcessedBefore ensures positions arriving in THIS batch are not filtered out.
-      // This makes incremental processing identical to bulk processing.
-      posById[id] = replayed.filter(p => !alreadyProcessedBefore.has(dedupeKey(p)));
     }
 
     const rawByDevice: Record<number, DevicePoint[]> = {};
@@ -650,7 +655,6 @@ export class ServerState {
       db.transaction(() => pendingCheckpointWrites.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
     }
 
-    const beforeCount = pts[0]?.device !== undefined ? (this.eventsByDevice[pts[0].device]?.length ?? 0) : 0;
     Object.assign(this.activePointsByDevice, result.positionsByDevice);
     Object.assign(this.eventsByDevice, result.eventsByDevice);
 
@@ -658,12 +662,8 @@ export class ServerState {
       this.eventsByDevice[id]?.sort((a, b) => b.start - a.start);
     }
 
-    if (pts[0]?.device !== undefined) {
-      const afterCount = this.eventsByDevice[pts[0].device]?.length ?? 0;
-      vlog(`[ServerState] handlePositions: ${pts.length} pts. Events: ${beforeCount} -> ${afterCount}`);
-    }
-
-    return { engineStates: result.engineStatesByDevice, events: result.eventsByDevice };
+    vlog(`[ServerState] handlePositions: ${pts.length} pts across ${Object.keys(posById).length} entities`);
+    return true;
   }
 
   /**

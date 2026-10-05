@@ -7,7 +7,7 @@ type ClusterPopupProps = {
   x: number;
   y: number;
   items: DevicePoint[];
-  animationState: 'idle' | 'entering' | 'visible' | 'exiting';
+  animationState: 'entering' | 'visible' | 'exiting';
   onClose: () => void;
   onSelectDevice: (id: number) => void;
   darkMode: boolean;

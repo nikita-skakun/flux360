@@ -3,7 +3,7 @@ import { computeBounds } from "@/util/geo";
 import { Engine } from "@/engine/engine";
 import { fromWebMercator } from "@/util/webMercator";
 import { numericEntries } from "@/util/record";
-import type { DevicePoint, MotionProfileName, EngineEvent, EngineState, RawGpsPosition } from "@/types";
+import type { DevicePoint, MotionProfileName, EngineEvent, RawGpsPosition } from "@/types";
 
 export function normalizePosition(raw: unknown): RawGpsPosition | null {
   const parsed = RawTraccarPositionSchema.safeParse(raw);
@@ -25,7 +25,7 @@ export function buildEngineSnapshotsFromByDevice(
   byDevice: Record<number, DevicePoint[]>,
   engines: Record<number, Engine>,
   motionProfiles: Record<number, MotionProfileName>
-): { positionsByDevice: Record<number, DevicePoint[]>; engineStatesByDevice: Record<number, EngineState[]>; eventsByDevice: Record<number, EngineEvent[]> } {
+): { positionsByDevice: Record<number, DevicePoint[]>; eventsByDevice: Record<number, EngineEvent[]> } {
   try {
     // 1. Process measurements for all devices in this batch
     for (const [deviceId, arr] of numericEntries(byDevice)) {
@@ -41,7 +41,6 @@ export function buildEngineSnapshotsFromByDevice(
 
     // 2. Build current state for all engines
     const positionsByDevice: Record<number, DevicePoint[]> = {};
-    const engineStatesByDevice: Record<number, EngineState[]> = {};
     const eventsByDevice: Record<number, EngineEvent[]> = {};
 
     for (const [deviceId, engine] of numericEntries(engines)) {
@@ -55,7 +54,6 @@ export function buildEngineSnapshotsFromByDevice(
           continue;
         }
 
-        engineStatesByDevice[deviceId] = [snapshot];
         const draft = snapshot.draft;
         const endTs = snapshot.lastTimestamp ?? Date.now();
 
@@ -118,16 +116,16 @@ export function buildEngineSnapshotsFromByDevice(
 
         eventsByDevice[deviceId] = events;
       } catch (innerError) {
+        // Fall back to the engine's own finalized history and leave the previous
+        // active point in place, so one bad draft cannot erase a device's timeline.
         console.error(`Error processing snapshot for device ${deviceId}:`, innerError);
-        positionsByDevice[deviceId] = [];
-        eventsByDevice[deviceId] = [];
-        engineStatesByDevice[deviceId] = [];
+        eventsByDevice[deviceId] = [...engine.closed];
       }
     }
 
-    return { positionsByDevice, engineStatesByDevice, eventsByDevice };
+    return { positionsByDevice, eventsByDevice };
   } catch (e) {
     console.error("Error building engine snapshots:", e);
-    return { positionsByDevice: {}, engineStatesByDevice: {}, eventsByDevice: {} };
+    return { positionsByDevice: {}, eventsByDevice: {} };
   }
 }

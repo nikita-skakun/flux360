@@ -16,7 +16,6 @@ export function drawPin(
   iconText: string,
   iconColor: Color,
   darkMode: boolean,
-  isSelected = false,
   badgeText: string | null = null
 ) {
   const bodyHeight = pinRadius * 1.5;
@@ -56,7 +55,7 @@ export function drawPin(
   ctx.fill();
 
   // Outline
-  ctx.lineWidth = isSelected ? 3 : 2;
+  ctx.lineWidth = 2;
   ctx.strokeStyle = rgbaString(iconColor, 0.7);
   ctx.lineJoin = "round";
   ctx.stroke();

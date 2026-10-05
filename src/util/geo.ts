@@ -1,11 +1,5 @@
 import type { Bounds, Vec2 } from "@/types";
 
-export function distance(a: Vec2, b: Vec2): number {
-  const dx = a[0] - b[0];
-  const dy = a[1] - b[1];
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
 export function getRadiusFromVariance(variance: number): number {
   return Math.sqrt(Math.max(1e-6, variance));
 }
@@ -20,4 +14,12 @@ export function computeBounds(points: Vec2[]): Bounds {
     if (y > maxY) maxY = y;
   }
   return { minX, minY, maxX, maxY };
+}
+
+export function paddedLngLatBounds(sw: Vec2, ne: Vec2): [Vec2, Vec2] {
+  const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
+  return [
+    [sw[0] - padding, sw[1] - padding],
+    [ne[0] + padding, ne[1] + padding]
+  ];
 }

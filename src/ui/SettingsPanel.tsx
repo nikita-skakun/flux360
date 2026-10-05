@@ -21,9 +21,6 @@ export const SettingsPanel = React.memo(function SettingsPanel({
       <div className="w-full flex flex-col gap-2">
         <div className="p-2 rounded-lg bg-muted/90 border border-border transition-colors duration-300">
           <div className="flex items-start justify-between gap-2">
-            <div className="flex flex-col gap-2">
-            </div>
-
             <div className="flex items-center gap-2">
               <ThemeToggle />
               <Button

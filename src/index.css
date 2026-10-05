@@ -138,27 +138,7 @@ body::before {
   pointer-events: none;
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion) {
-
-  *,
-  ::before,
-  ::after {
-    animation: none !important;
-  }
-}
-
-.hide-ui .fixed,
-.hide-ui .absolute.top-8.right-8,
-.hide-ui .maplibregl-ctrl {
-  display: none !important;
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-bottom-left {
+  display: none;
 }

@@ -2,7 +2,7 @@ import { computeBestFitMotionPath } from "@/util/motionBestFit";
 import { dot, EPSILON, length, nearestPointOnPolyline, sub } from "@/util/vec2";
 import { decode, encode } from "@toon-format/toon";
 import { MotionEventSchema } from "@/types";
-import { parseDecodedMotionEvent } from "@/util/motionEventParsing";
+import { parseDecodedMotionEvent } from "@/util/motionEventCodec";
 import { parseArgs } from "util";
 import { readFile } from "fs/promises";
 import type { Vec2 } from "@/types";

@@ -99,8 +99,7 @@ export class TraccarAdminClient {
     });
 
     if (!res.ok) {
-      console.error(`[TraccarAdminClient] Fetch failed for device ${deviceId} with HTTP ${res.status}: ${res.statusText}`);
-      return [];
+      throw new Error(`[TraccarAdminClient] History fetch failed for device ${deviceId} with HTTP ${res.status}: ${res.statusText}`);
     }
 
     const normalized = (await res.json() as unknown[])

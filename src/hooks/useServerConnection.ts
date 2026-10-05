@@ -13,7 +13,7 @@ export function useServerConnection() {
   // -1 means auth succeeded for current socket, >=0 counts pre-auth closes.
   const preAuthRetryCountRef = useRef(0);
 
-  const { auth, setInitialState, setOwnedDeviceIds, updatePositions, updateConfig } = useStore();
+  const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
 
   useEffect(() => {
     const connect = () => {
@@ -62,19 +62,20 @@ export function useServerConnection() {
         }
 
         // 3. Unsolicited push notifications
+        const store = useStore.getState();
         switch (message.type) {
           case 'auth_success':
             preAuthRetryCountRef.current = -1;
-            setOwnedDeviceIds(message.payload.ownedDeviceIds);
+            store.setOwnedDeviceIds(message.payload.ownedDeviceIds);
             break;
           case 'initial_state':
-            setInitialState(message.payload);
+            store.setInitialState(message.payload);
             break;
           case 'positions_update':
-            updatePositions(message.payload);
+            store.updatePositions(message.payload);
             break;
           case 'config_update':
-            updateConfig(message.payload);
+            store.updateConfig(message.payload);
             break;
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));
@@ -104,7 +105,7 @@ export function useServerConnection() {
         }
 
         // If we've reached the limit and were supposed to be authenticated, force a logout to resolve the stale session.
-        if (auth.isAuthenticated) {
+        if (useStore.getState().auth.isAuthenticated) {
           console.error('Handshake failed repeatedly. Session state may be invalid. Logging out...');
           useStore.getState().logout();
           return;
@@ -132,15 +133,15 @@ export function useServerConnection() {
         wsRef.current = null;
       }
     };
-  }, [setInitialState, setOwnedDeviceIds, updatePositions, updateConfig]);
+  }, []);
 
   // Trigger authentication reactive to the isAuthenticated state without reconnecting
   useEffect(() => {
-    if (auth.isAuthenticated && wsRef.current?.readyState === WebSocket.OPEN) {
+    if (isAuthenticated && wsRef.current?.readyState === WebSocket.OPEN) {
       const state = useStore.getState();
       if (state.settings.sessionToken) {
         wsRef.current.send(JSON.stringify({ type: 'authenticate', token: state.settings.sessionToken }));
       }
     }
-  }, [auth.isAuthenticated]);
+  }, [isAuthenticated]);
 }

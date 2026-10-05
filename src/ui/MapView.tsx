@@ -3,8 +3,9 @@ import { CLUSTER_DISTANCE_PX, computeClusters } from "@/util/clustering";
 import { ClusterPopup } from "./ClusterPopup";
 import { colorForDeltaSeconds, getColorForDevice } from "@/util/color";
 import { computeBestFitMotionPath } from "@/util/motionBestFit";
-import { distance, getRadiusFromVariance } from "@/util/geo";
+import { getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
+import { distance } from "@/util/vec2";
 import { fromWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, config, MapMouseEvent } from "@maptiler/sdk";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
@@ -122,8 +123,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
 
-  const bestFitPathCacheRef = useRef<Record<string, Vec2[]>>({});
-
   const buildAccuracyCircleCoords = (center: Vec2, radius: number, sides = 64): Vec2[] => {
     return Array.from({ length: sides + 1 }, (_, j) => {
       const angle = (j * 2 * Math.PI) / sides;
@@ -143,16 +142,11 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     pinCanvas.height = 48;
     const pctx = pinCanvas.getContext("2d");
     if (pctx) {
-      drawPin(pctx, 24, 36, PIN_R, iconText, color, darkMode, false, label);
+      drawPin(pctx, 24, 36, PIN_R, iconText, color, darkMode, label);
       const imageData = pctx.getImageData(0, 0, pinCanvas.width, pinCanvas.height);
       if (imageData) map.addImage(imageKey, imageData);
     }
   };
-
-  // Reset cached best-fit paths when selected history path changes
-  useEffect(() => {
-    bestFitPathCacheRef.current = {};
-  }, [selectedHistoryItem]);
 
   const updateLayers = useCallback(() => {
     const map = mapRef.current;
@@ -391,12 +385,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     } else {
       const m = selectedHistoryItem;
       if (m.path.length > 1) {
-        const key = `motion-${m.start}-${m.end}`;
-        const cached = bestFitPathCacheRef.current[key];
-        const bestFitPath = cached ?? computeBestFitMotionPath(m.path);
-
-        if (!cached && !m.isDraft) bestFitPathCacheRef.current[key] = bestFitPath;
-
         historyFeatures.push({
           type: 'Feature',
           geometry: { type: 'LineString', coordinates: m.path.map(p => fromWebMercator(p.geo)) },
@@ -405,7 +393,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
         historyFeatures.push({
           type: 'Feature',
-          geometry: { type: 'LineString', coordinates: bestFitPath.map(fromWebMercator) },
+          geometry: { type: 'LineString', coordinates: computeBestFitMotionPath(m.path).map(fromWebMercator) },
           properties: { isAnchor: false, pathKind: 'bestfit' },
         });
 
@@ -743,7 +731,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
   return (
     <div style={{ height: "100vh", position: "relative", width: "100%" }}>
-      <style>{`.maplibregl-ctrl-attrib{display:none} .maplibregl-ctrl-bottom-left{display:none}`}</style>
       <div ref={containerRef} style={{ position: "absolute", inset: 0 }} />
       <div style={{ position: "absolute", top: 8, right: 8, zIndex: 10 }}>{overlay}</div>
       {clusterPopup && (

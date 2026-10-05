@@ -1,4 +1,4 @@
-import { ClientMessageSchema, TraccarDeviceSchema, ServerMessageSchema } from "@/types";
+import { ClientMessageSchema, TraccarDeviceSchema } from "@/types";
 import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { loadConfig } from "./util/config";
@@ -37,6 +37,7 @@ const activeWebSockets = new Set<ServerWebSocket<WSData>>();
 interface Principal {
   username: string;
   traccarToken: string;
+  traccarDeviceIds: Set<number>;
   allowed: Set<number>;
   owned: Set<number>;
 }
@@ -90,6 +91,33 @@ function isSQLiteConstraintError(err: unknown) {
 
 const serverState = new ServerState(config.historyDays);
 
+function recomputePrincipalPermissions(principal: Principal): void {
+  const shared = db.query("SELECT deviceId, sharedBy FROM device_shares WHERE sharedWith = ?").all(principal.username) as { deviceId: number, sharedBy: string }[];
+  const sharedWithMeIds = new Set(shared.map(s => s.deviceId));
+  const sharedByDeviceId = new Map(shared.map(s => [s.deviceId, s.sharedBy]));
+
+  const ownedPhysicalDeviceIds = new Set([...principal.traccarDeviceIds].filter(id => {
+    const sharedBy = sharedByDeviceId.get(id);
+    return sharedBy === undefined || sharedBy === principal.username;
+  }));
+  const allowedPhysicalDeviceIds = new Set([...principal.traccarDeviceIds, ...sharedWithMeIds]);
+
+  const ownedGroupRows = db.query(`SELECT id FROM groups WHERE owner = ?`).all(principal.username) as { id: number }[];
+  const ownedGroupIds = new Set(ownedGroupRows.map(row => -row.id));
+  const visibleGroupIds = new Set(serverState.getConfigProjection(allowedPhysicalDeviceIds).groups.map(group => group.id));
+
+  principal.owned = new Set([...ownedPhysicalDeviceIds, ...ownedGroupIds]);
+  principal.allowed = new Set([...allowedPhysicalDeviceIds, ...visibleGroupIds, ...ownedGroupIds]);
+}
+
+function refreshPrincipal(username: string): void {
+  for (const ws of activeWebSockets) {
+    const principal = ws.data.principal;
+    if (principal?.username !== username) continue;
+    recomputePrincipalPermissions(principal);
+  }
+}
+
 // Helper to broadcast device/group metadata (authorized subset only)
 function broadcastConfig(targetUsername: string | null) {
   const cache = new Map<string, string>();
@@ -120,7 +148,7 @@ function broadcastConfig(targetUsername: string | null) {
         isOwner: principal.owned.has(g.id)
       }));
 
-      msg = JSON.stringify(ServerMessageSchema.parse({
+      msg = JSON.stringify({
         type: "config_update",
         payload: {
           devices: relevantDevices,
@@ -128,7 +156,7 @@ function broadcastConfig(targetUsername: string | null) {
           allowedDeviceIds: Array.from(allowedEntityIds),
           ownedDeviceIds: Array.from(principal.owned)
         }
-      }));
+      });
       cache.set(cacheKey, msg);
     }
 
@@ -165,9 +193,9 @@ function broadcastUpdate(deviceIds: number[]) {
       const events: Record<number, EngineEvent[]> = {};
       for (const id of visibleIds) {
         if (serverState.activePointsByDevice[id]) activePoints[id] = serverState.activePointsByDevice[id];
-        if (serverState.eventsByDevice[id]) events[id] = serverState.eventsByDevice[id] ?? [];
+        if (serverState.eventsByDevice[id]) events[id] = serverState.eventsByDevice[id];
       }
-      msg = JSON.stringify(ServerMessageSchema.parse({ type: "positions_update", payload: { activePoints, events } }));
+      msg = JSON.stringify({ type: "positions_update", payload: { activePoints, events } });
       cache.set(cacheKey, msg);
     }
 
@@ -196,26 +224,25 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
           vlog(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
           for (const id of devicesToBackfill) {
             if (serverState.backfilled.has(id) || serverState.inProgressBackfills.has(id)) continue;
-            serverState.inProgressBackfills.add(id);
 
             const lastTs = serverState.engines[id]?.lastTimestamp ?? null;
             const firstTs = serverState.positionsAll.find(p => p.device === id)?.timestamp ?? null;
 
             // Fetch head delta if we have reliable data, otherwise full window
-            const isDelta = lastTs && firstTs && firstTs < backfillCutoff + (10 * 60000);
-            const from = isDelta ? (lastTs + 1) : backfillCutoff;
+            const isDelta = lastTs !== null && firstTs !== null && firstTs < backfillCutoff + (10 * 60000);
+            const from = isDelta ? lastTs + 1 : backfillCutoff;
 
             if (Date.now() - from < 60000) continue;
 
+            serverState.inProgressBackfills.add(id);
             try {
               vlog(`[Server] Device ${id} backfill: type=${isDelta ? "DELTA" : "FULL"}, from=${new Date(from).toISOString()}`);
               const history = await traccarClient!.fetchHistory(id, from, Date.now());
               if (history.length > 0 && serverState.handlePositions(history)) {
                 broadcastUpdate([id]);
               }
-              await new Promise(r => setTimeout(r, 200)); // Gentle delay for Traccar API
+              await new Promise(r => setTimeout(r, 200));
 
-              // Only record backfill as complete after successfully fetching and processing history
               serverState.backfilled.add(id);
             } catch (err) {
               console.error(`[Server] History backfill failed for device ${id}:`, err);
@@ -333,7 +360,7 @@ serve<WSData>({
               void refreshTraccarUsersCache(traccarToken, `login:${user.login}`);
 
               const token = sessionStore.createSession(user.login, traccarToken);
-              ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "login_success", token, requestId })));
+              ws.send(JSON.stringify({ type: "login_success", token, requestId }));
             } catch (e) {
               console.error("[WS Login] Error:", e);
               ws.send(JSON.stringify({ type: "error", message: "Login failed", requestId }));
@@ -346,7 +373,7 @@ serve<WSData>({
 
             const session = sessionStore.getSession(data.token);
             if (!session) {
-              ws.send(JSON.stringify({ type: "error", message: "Session expired", requestId: null }));
+              ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
               ws.close(1008, "Session expired");
               return;
             }
@@ -360,49 +387,29 @@ serve<WSData>({
             });
 
             if (!devicesRes.ok) {
-              ws.send(JSON.stringify({ type: "error", message: "Session expired", requestId: null }));
+              ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
               sessionStore.deleteSession(data.token);
               ws.close(1008, "Session expired");
               return;
             }
 
             const devices = TraccarDeviceSchema.array().parse(await devicesRes.json());
-            const traccarDeviceIds = new Set(devices.map(d => d.id));
-
-            // Add shared devices by looking up shares for this user's Traccar ID
-            const shared = db.query("SELECT deviceId, sharedBy FROM device_shares WHERE sharedWith = ?").all(username) as { deviceId: number, sharedBy: string }[];
-            const sharedWithMeIds = new Set(shared.map(s => s.deviceId));
-            const sharedByDeviceId = new Map(shared.map(s => [s.deviceId, s.sharedBy]));
-
-            // Owned devices are those in Traccar that weren't explicitly shared WITH me by SOMEONE ELSE.
-            // If I shared it with myself, or if it was just in my Traccar account, I'm the owner.
-            const ownedPhysicalDeviceIds = new Set([...traccarDeviceIds].filter(id => {
-              const sharedBy = sharedByDeviceId.get(id);
-              return sharedBy === undefined || sharedBy === username;
-            }));
-            const allowedPhysicalDeviceIds = new Set([...traccarDeviceIds, ...sharedWithMeIds]);
 
             // Update server state with device metadata
             serverState.handleDevices(devices);
 
-            const ownedGroupRows = db.query(`SELECT id FROM groups WHERE owner = ?`).all(username) as { id: number }[];
-            const ownedGroupIds = new Set(ownedGroupRows.map(row => -row.id));
-            const visibleGroups = serverState.getConfigProjection(allowedPhysicalDeviceIds).groups;
-            const visibleGroupIds = new Set(visibleGroups.map(group => group.id));
-
-            const ownedDeviceIds = new Set<number>([...ownedPhysicalDeviceIds, ...ownedGroupIds]);
-            const allowedDeviceIds = new Set<number>([
-              ...allowedPhysicalDeviceIds,
-              ...visibleGroupIds,
-              ...ownedGroupIds,
-            ]);
-
-            ws.data.principal = {
+            const principal: Principal = {
               username,
               traccarToken,
-              allowed: allowedDeviceIds,
-              owned: ownedDeviceIds
+              traccarDeviceIds: new Set(devices.map(d => d.id)),
+              allowed: new Set(),
+              owned: new Set()
             };
+            recomputePrincipalPermissions(principal);
+            ws.data.principal = principal;
+
+            const ownedDeviceIds = principal.owned;
+            const allowedDeviceIds = principal.allowed;
 
             // Proactively refresh users cache on auth if empty to prevent 'User not found' on share
             if (traccarUsersCache.length === 0) {
@@ -443,18 +450,18 @@ serve<WSData>({
                 }
               }
               if (serverState.eventsByDevice[id]) {
-                filteredEvents[id] = serverState.eventsByDevice[id] ?? [];
+                filteredEvents[id] = serverState.eventsByDevice[id];
               }
             }
 
             // Send auth success with ownedDeviceIds (separate message)
-            ws.send(JSON.stringify(ServerMessageSchema.parse({
+            ws.send(JSON.stringify({
               type: "auth_success",
               payload: { ownedDeviceIds: Array.from(ownedDeviceIds) }
-            })));
+            }));
 
             // Send initial state with entities and activity data (ownership in entities, no separate metadata)
-            const payloadStr = JSON.stringify(ServerMessageSchema.parse({
+            const payloadStr = JSON.stringify({
               type: "initial_state",
               payload: {
                 entities: entitiesWithOwner,
@@ -462,7 +469,7 @@ serve<WSData>({
                 eventsByDevice: filteredEvents,
                 maptilerApiKey: config.maptilerApiKey,
               }
-            }));
+            });
             ws.send(payloadStr);
             vlog(`[WS] Sending 'initial_state' of size: ${payloadStr.length} bytes for ${username}`);
             break;
@@ -514,11 +521,10 @@ serve<WSData>({
                     throw new SafeError("Failed to create group");
                   }
 
-                  principal.allowed.add(createdGroup.id);
-                  principal.owned.add(createdGroup.id);
+                  refreshPrincipal(username);
                   broadcastConfig(null);
                   broadcastUpdate([createdGroup.id, ...memberDeviceIds]);
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({
+                  ws.send(JSON.stringify({
                     type: "create_success",
                     device: {
                       id: createdGroup.id,
@@ -527,7 +533,7 @@ serve<WSData>({
                       attributes: {}
                     },
                     requestId
-                  })));
+                  }));
                   break;
                 }
                 case "update_device": {
@@ -540,7 +546,7 @@ serve<WSData>({
                     const ok = serverState.updateGroupMetadata(deviceId, updates);
                     if (!ok) throw new SafeError("Group not found");
                     broadcastConfig(null);
-                    ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId, requestId })));
+                    ws.send(JSON.stringify({ type: "update_success", deviceId, requestId }));
                     break;
                   }
 
@@ -574,7 +580,7 @@ serve<WSData>({
 
                   serverState.upsertDeviceMetadata(deviceId, updates);
                   broadcastConfig(null);
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId, requestId })));
+                  ws.send(JSON.stringify({ type: "update_success", deviceId, requestId }));
                   break;
                 }
                 case "delete_group": {
@@ -584,11 +590,10 @@ serve<WSData>({
                   const memberDeviceIds = serverState.getGroupMembers(groupId);
                   if (!serverState.deleteGroup(groupId)) throw new SafeError("Group not found");
 
-                  principal.allowed.delete(groupId);
-                  principal.owned.delete(groupId);
+                  refreshPrincipal(principal.username);
                   broadcastConfig(null);
                   if (memberDeviceIds.length > 0) broadcastUpdate(memberDeviceIds);
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "delete_success", groupId, requestId })));
+                  ws.send(JSON.stringify({ type: "delete_success", groupId, requestId }));
                   break;
                 }
                 case "add_device_to_group":
@@ -616,9 +621,10 @@ serve<WSData>({
                     throw err;
                   }
 
+                  refreshPrincipal(principal.username);
                   broadcastConfig(null);
                   broadcastUpdate([deviceId, groupId]);
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "update_success", deviceId: groupId, requestId })));
+                  ws.send(JSON.stringify({ type: "update_success", deviceId: groupId, requestId }));
                   break;
                 }
                 case "share_device": {
@@ -639,11 +645,11 @@ serve<WSData>({
                   db.query("INSERT OR IGNORE INTO device_shares (deviceId, sharedWith, sharedBy, sharedAt) VALUES (?, ?, ?, ?)")
                     .run(deviceId, targetUser.login, principal.username, Date.now());
 
-                  // For sharing, the target user will get new permissions on next auth
+                  refreshPrincipal(targetUser.login);
                   broadcastConfig(targetUser.login);
                   broadcastUpdate([deviceId]);
 
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "share_success", deviceId, sharedWith: targetUser.login, requestId })));
+                  ws.send(JSON.stringify({ type: "share_success", deviceId, sharedWith: targetUser.login, requestId }));
                   break;
                 }
                 case "unshare_device": {
@@ -652,10 +658,10 @@ serve<WSData>({
 
                   db.query("DELETE FROM device_shares WHERE deviceId = ? AND sharedWith = ?")
                     .run(deviceId, targetUsername);
-                  // For unsharing, the target user will lose permissions on next auth
+                  refreshPrincipal(targetUsername);
                   broadcastConfig(targetUsername);
 
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "unshare_success", deviceId, username: targetUsername, requestId })));
+                  ws.send(JSON.stringify({ type: "unshare_success", deviceId, username: targetUsername, requestId }));
                   break;
                 }
                 case "get_shares": {
@@ -674,7 +680,7 @@ serve<WSData>({
                       };
                     });
 
-                  ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "shares_list", payload: sharesList, requestId })));
+                  ws.send(JSON.stringify({ type: "shares_list", payload: sharesList, requestId }));
                   break;
                 }
               }
@@ -685,13 +691,13 @@ serve<WSData>({
               }
               const consoleError = err instanceof Error ? err.stack : String(err);
               console.error(`[WS RPC Error] ${data.type}:`, consoleError);
-              ws.send(JSON.stringify(ServerMessageSchema.parse({ type: "error", message, requestId })));
+              ws.send(JSON.stringify({ type: "error", message, requestId }));
             }
           }
         }
       } catch (e) {
         if (e instanceof z.ZodError) {
-          ws.send(JSON.stringify({ type: "error", message: "Invalid request data", requestId: null }));
+          ws.send(JSON.stringify({ type: "error", message: "Invalid request data" }));
         } else {
           console.error("Invalid WS message", e);
         }

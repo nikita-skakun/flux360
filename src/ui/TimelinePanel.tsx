@@ -1,4 +1,5 @@
 import { encode } from '@toon-format/toon';
+import { toWireEvent } from '@/util/motionEventCodec';
 import { humanDurationSince, useTimeAgo } from '@/util/time';
 import { List, useDynamicRowHeight } from 'react-window';
 import { MapPin, Activity, Check, Copy } from 'lucide-react';
@@ -140,11 +141,12 @@ const Row = ({ index, style, dynamicRowHeight, ...props }: RowProps): React.Reac
   }, [dynamicRowHeight]);
 
   const ev = props.events[index];
+  const isCurrent = ev !== undefined && ev.id.startsWith('draft-');
+  const draftDuration = useTimeAgo(ev?.item.start ?? 0, false, isCurrent);
+
   if (!ev) return null;
 
   const isSelected = props.selectedEventId === ev.id;
-  const isCurrent = ev.id.startsWith('draft-');
-  const draftDuration = useTimeAgo(ev.item.start, false, isCurrent);
   const durationStr = isCurrent ? draftDuration : humanDurationSince(ev.item.start, ev.item.end);
 
   return (
@@ -244,48 +246,9 @@ export const TimelinePanel: React.FC<Props> = ({
       e.stopPropagation();
       if (selectedDeviceId == null) return;
 
-      const roundValue = (value: unknown): unknown => {
-        if (typeof value === 'number') return Math.round(value * 100) / 100;
-        if (Array.isArray(value)) return value.map(roundValue);
-        if (value && typeof value === 'object') {
-          const objectValue = value as Record<string, unknown>;
-          return Object.fromEntries(
-            Object.entries(objectValue).map(([key, item]) => [key, roundValue(item)]),
-          );
-        }
-        return value;
-      };
-
-      const convertPointArray = (value: unknown): unknown => {
-        if (!Array.isArray(value)) return value;
-
-        return value.map((entry: unknown): unknown => {
-          if (!entry || typeof entry !== 'object') return entry;
-
-          const point = entry as Record<string, unknown>;
-          const geo = point['geo'];
-          if (!Array.isArray(geo) || geo.length < 2) return entry;
-
-          const rest = Object.fromEntries(
-            Object.entries(point).filter(([key]) => key !== 'geo')
-          );
-          return { ...rest, lon: geo[0] as number, lat: geo[1] as number };
-        });
-      };
-
-      const roundedEvent = roundValue(ev.item);
-      const normalizedEvent =
-        roundedEvent && typeof roundedEvent === 'object'
-          ? {
-              ...(roundedEvent as Record<string, unknown>),
-              path: convertPointArray((roundedEvent as Record<string, unknown>)['path']),
-              outliers: convertPointArray((roundedEvent as Record<string, unknown>)['outliers']),
-            }
-          : roundedEvent;
-
       const exportData = {
         id: selectedDeviceId,
-        ev: normalizedEvent,
+        ev: toWireEvent(ev.item),
         at: new Date().toISOString(),
       };
 

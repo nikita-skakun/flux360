@@ -20,7 +20,7 @@ function registerCallback(requestId: string, cb: (resp: unknown) => void) {
 }
 
 function clearPendingRequests() {
-  for (const [_, entry] of pending.entries()) {
+  for (const entry of pending.values()) {
     clearTimeout(entry.timer);
     entry.cb({ type: "error", message: "Connection closed" });
   }

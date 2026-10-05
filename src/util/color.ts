@@ -65,16 +65,15 @@ function lerpColor(a: Color, b: Color, t: number): Color {
   ];
 }
 
+const DELTA_GREEN = parseHexColor("#22c55e") ?? [34, 197, 94];
+const DELTA_BLUE = parseHexColor("#2563eb") ?? [37, 99, 235];
+const DELTA_YELLOW = parseHexColor("#eab308") ?? [234, 179, 8];
+const DELTA_RED = parseHexColor("#ef4444") ?? [239, 68, 68];
+
 export function colorForDeltaSeconds(deltaSec: number): string {
-  const GREEN = parseHexColor("#22c55e");
-  const BLUE = parseHexColor("#2563eb");
-  const YELLOW = parseHexColor("#eab308");
-  const RED = parseHexColor("#ef4444");
+  if (deltaSec <= 30) return rgbToHex(...lerpColor(DELTA_GREEN, DELTA_BLUE, deltaSec / 30));
+  if (deltaSec <= 60) return rgbToHex(...lerpColor(DELTA_BLUE, DELTA_YELLOW, (deltaSec - 30) / 30));
+  if (deltaSec <= 180) return rgbToHex(...lerpColor(DELTA_YELLOW, DELTA_RED, (deltaSec - 60) / 120));
 
-  if (!GREEN || !BLUE || !YELLOW || !RED) return "#ef4444";
-  if (deltaSec <= 30) return rgbToHex(...lerpColor(GREEN, BLUE, deltaSec / 30));
-  if (deltaSec <= 60) return rgbToHex(...lerpColor(BLUE, YELLOW, (deltaSec - 30) / 30));
-  if (deltaSec <= 180) return rgbToHex(...lerpColor(YELLOW, RED, (deltaSec - 60) / 120));
-
-  return "#ef4444";
+  return rgbToHex(...DELTA_RED);
 }

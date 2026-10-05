@@ -1,6 +1,6 @@
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { colorForDevice, isLightHexColor } from "@/util/color";
+import { colorForDevice, isLightHexColor, rgbToHex } from "@/util/color";
 import { createPortal } from "react-dom";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ICON_OPTIONS } from "@/util/constants";
@@ -47,8 +47,7 @@ export const UnifiedEditModal: React.FC<Props> = ({ onClose, type, id }) => {
     }
   }, [showColorPicker]);
 
-  const rgb = colorForDevice(id);
-  const defaultHex = `#${rgb.map(c => c.toString(16).padStart(2, '0')).join('')}`;
+  const defaultHex = rgbToHex(...colorForDevice(id));
   const displayIcon = icon.trim();
   const swatchTextColor = isLightHexColor(color ?? defaultHex) ? "text-black" : "text-white";
 

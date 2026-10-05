@@ -66,5 +66,3 @@ To build and run the application inside a Docker container:
 
 2. The container mounts a local persistent volume at `/root/flux360` to store the SQLite database at `/app/data/flux360.sqlite`.
 3. The server runs and exposes port `6474` (bound locally to `127.0.0.1:6474` by default).
-
-

@@ -1,5 +1,5 @@
-import { asWebMercatorCoord, EngineEventSchema } from "./types";
-import { computeBounds } from "./util/geo";
+import { EngineEventSchema } from "./types";
+import { computeBounds, paddedLngLatBounds } from "./util/geo";
 import { decode } from "@toon-format/toon";
 import { DeviceListSidePanel } from "./ui/DeviceListSidePanel";
 import { DeviceOverlay } from "./ui/DeviceOverlay";
@@ -7,7 +7,7 @@ import { fromWebMercator } from "./util/webMercator";
 import { HistoryObservationBar } from "./ui/HistoryObservationBar";
 import { LoginPage } from "./ui/LoginPage";
 import { MapView } from "./ui/MapView";
-import { parseDecodedMotionEvent } from "./util/motionEventParsing";
+import { parseDecodedMotionEvent } from "./util/motionEventCodec";
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { TimelinePanel } from "./ui/TimelinePanel";
 import { UnifiedEditModal } from "./ui/UnifiedEditModal";
@@ -96,11 +96,7 @@ export function App() {
     if (allPoints.length === 0) return;
 
     const bounds = computeBounds(allPoints);
-    const sw = asWebMercatorCoord([bounds.minX, bounds.minY]);
-    const ne = asWebMercatorCoord([bounds.maxX, bounds.maxY]);
-    const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
-
-    mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+    mapViewRef.current?.flyToBounds(paddedLngLatBounds([bounds.minX, bounds.minY], [bounds.maxX, bounds.maxY]));
   }, [pulsingDeviceIds, activePointsByDevice]);
 
   const allDevicesForSelection = useMemo(() => {
@@ -135,16 +131,14 @@ export function App() {
 
             if ("bounds" in event) {
               const { minX, minY, maxX, maxY } = event.bounds;
-              const sw = fromWebMercator([minX, minY]);
-              const ne = fromWebMercator([maxX, maxY]);
-              const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
-              mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+              mapViewRef.current?.flyToBounds(
+                paddedLngLatBounds(fromWebMercator([minX, minY]), fromWebMercator([maxX, maxY]))
+              );
               return;
             }
 
-            const geo = fromWebMercator(event.mean);
-            const r = 0.001;
-            mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
+            const mean = fromWebMercator(event.mean);
+            mapViewRef.current?.flyToBounds(paddedLngLatBounds(mean, mean));
           } catch (err: unknown) {
             console.error("Failed to parse dropped TOON", err);
           }
@@ -213,15 +207,16 @@ export function App() {
                 setSelectedTimelineEvent(event);
 
                 if (event.item.type === "stationary") {
-                  const geo = fromWebMercator(event.item.mean);
-                  const r = 0.001; // roughly 100m padding
-                  mapViewRef.current?.flyToBounds([[geo[0] - r, geo[1] - r], [geo[0] + r, geo[1] + r]]);
+                  const mean = fromWebMercator(event.item.mean);
+                  mapViewRef.current?.flyToBounds(paddedLngLatBounds(mean, mean));
                 } else {
                   const s = event.item;
-                  const sw = fromWebMercator([s.bounds.minX, s.bounds.minY]);
-                  const ne = fromWebMercator([s.bounds.maxX, s.bounds.maxY]);
-                  const padding = Math.max(0.001, (ne[0] - sw[0]) * 0.1, (ne[1] - sw[1]) * 0.1);
-                  mapViewRef.current?.flyToBounds([[sw[0] - padding, sw[1] - padding], [ne[0] + padding, ne[1] + padding]]);
+                  mapViewRef.current?.flyToBounds(
+                    paddedLngLatBounds(
+                      fromWebMercator([s.bounds.minX, s.bounds.minY]),
+                      fromWebMercator([s.bounds.maxX, s.bounds.maxY])
+                    )
+                  );
                 }
               }}
               selectedEventId={selectedTimelineEvent?.id ?? null}
