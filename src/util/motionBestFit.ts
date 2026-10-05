@@ -1,4 +1,6 @@
 import { EPSILON, distancePointToSegment, distancePointToPolyline } from "@/util/vec2";
+import { cosLatitude } from "@/util/webMercator";
+import { asWebMercatorCoord } from "@/types";
 import type { Vec2, WebMercatorPosition } from "@/types";
 
 const BASE_SLACK_METERS = 0.2;
@@ -36,7 +38,23 @@ type MotionAnchor = {
   sourceEnd: number;
 };
 
+/**
+ * Smooths a motion path into a best-fit polyline.
+ *
+ * Web Mercator is conformal, so scaling both axes by cos(latitude) yields a metric
+ * working space where the _METERS thresholds below are true metres. Without that
+ * scaling they were compared against raw Mercator distances and merged anchors at
+ * roughly two thirds of the stated distance at mid latitudes.
+ */
 export function computeBestFitMotionPath(path: WebMercatorPosition[]): Vec2[] {
+  if (path.length < 2) return path.map(p => p.geo);
+  const scale = cosLatitude(path[0]!.geo[1]);
+  const inverse = 1 / scale;
+  return computeBestFitMotionPathMetric(path.map(p => ({ ...p, geo: asWebMercatorCoord([p.geo[0] * scale, p.geo[1] * scale]) })))
+    .map(v => [v[0] * inverse, v[1] * inverse] as Vec2);
+}
+
+function computeBestFitMotionPathMetric(path: WebMercatorPosition[]): Vec2[] {
   if (path.length < 2) return path.map(p => p.geo);
 
   const n = path.length;
