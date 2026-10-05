@@ -1,5 +1,6 @@
 import type { Bounds, Vec2 } from "@/types";
 
+/** Radius in metres, since variance is metres squared. */
 export function getRadiusFromVariance(variance: number): number {
   return Math.sqrt(Math.max(1e-6, variance));
 }

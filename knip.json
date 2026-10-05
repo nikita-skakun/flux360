@@ -7,6 +7,7 @@
     "src/server.tsx",
     "src/client.tsx",
     "src/index.css",
-    "src/scripts/*.ts"
+    "src/scripts/*.ts",
+    "src/test/**/*.ts"
   ]
 }

@@ -48,6 +48,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   const mapRef = useRef<MaptilerMap | null>(null);
   const hasFittedInitially = useRef(false);
   const activePointsRef = useRef<DevicePoint[]>(activePoints);
+  const lastHistoryKeyRef = useRef<string | null>(null);
   const flyToDeviceRef = useRef<(id: number) => void>(() => undefined);
   const onSelectDeviceRef = useRef<(id: number) => void>(() => undefined);
 
@@ -367,6 +368,14 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       throw e;
     }
 
+    const historyKey = selectedHistoryItem
+      ? (selectedHistoryItem.isDraft && selectedHistoryItem.type === 'motion'
+        ? `draft-${selectedHistoryItem.start}-${selectedHistoryItem.path.length}`
+        : `${selectedHistoryItem.type}-${selectedHistoryItem.start}-${selectedHistoryItem.end}`)
+      : 'none';
+    if (historyKey === lastHistoryKeyRef.current) return;
+    lastHistoryKeyRef.current = historyKey;
+
     if (!selectedHistoryItem) {
       const historySource = map.getSource('history-source');
       if (historySource)
@@ -528,6 +537,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
 
     mapRef.current = map;
     listenersAttached.current = false;
+    lastHistoryKeyRef.current = null;
 
     return () => {
       map.remove();
@@ -698,7 +708,10 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     const map = mapRef.current;
     if (!map) return;
 
-    const onStyleData = () => { updateLayersRef.current(); };
+    const onStyleData = () => {
+      lastHistoryKeyRef.current = null;
+      updateLayersRef.current();
+    };
 
     map.on('styledata', onStyleData);
     return () => { map?.off('styledata', onStyleData); };

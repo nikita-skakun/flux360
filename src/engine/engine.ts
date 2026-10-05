@@ -1,13 +1,16 @@
 import { asWebMercatorCoord } from "@/types";
 import { filterMotionOutliers } from "@/util/motionOutliers";
-import { WORLD_R } from "@/util/webMercator";
+import { cosLatitude, metricDistance } from "@/util/webMercator";
 import { computeBounds, getRadiusFromVariance } from "@/util/geo";
 import { MOTION_PROFILES, ENGINE_WINDOW_SIZE, PENDING_THRESHOLD, MIN_PATH_POINTS, HARD_BREAKOUT_DISTANCE, SETTLING_WINDOW_CAP } from "./motionDetector";
 import { vlog } from "@/util/logger";
 import type { DevicePoint, MotionProfileName, Vec2, EngineEvent, EngineDraft, StationaryDraft, MotionDraft, MotionEvent, EngineState, WebMercatorCoord } from "@/types";
 import type { MotionProfileConfig } from "./motionDetector";
 
-const MIN_CLUSTER_VARIANCE = 2.0;
+// Both are metres squared, the same space as the metre radii in the motion profiles.
+// They used to be Web Mercator units, which silently made every comparison against
+// them latitude dependent.
+const MIN_CLUSTER_VARIANCE = 1.0;
 const MAX_CLUSTER_VARIANCE = 400.0;
 
 export class Engine {
@@ -15,21 +18,21 @@ export class Engine {
   closed: EngineEvent[] = [];
   lastTimestamp: number | null = null;
   public motionProfile: MotionProfileName = "person";
+  private changed = false;
+  private members: number[] | undefined;
 
   setMotionProfile(profile: MotionProfileName) {
     this.motionProfile = profile;
   }
 
-  private getProfile(): MotionProfileConfig {
-    return MOTION_PROFILES[this.motionProfile];
+  consumeChanged(): boolean {
+    const wasChanged = this.changed;
+    this.changed = false;
+    return wasChanged;
   }
 
-  private distanceBetweenWebMercator(a: Vec2, b: Vec2): number {
-    const dx = a[0] - b[0];
-    const dy = a[1] - b[1];
-    const latRad = 2 * Math.atan(Math.exp(a[1] / WORLD_R)) - Math.PI / 2;
-    const cosLat = Math.cos(latRad);
-    return Math.sqrt(dx * dx + dy * dy) * cosLat;
+  private getProfile(): MotionProfileConfig {
+    return MOTION_PROFILES[this.motionProfile];
   }
 
   processMeasurements(points: DevicePoint[]) {
@@ -63,7 +66,7 @@ export class Engine {
     const m2 = this.computeMahalanobis2(p.mean, stats.mean, stats.variance, p.accuracy);
 
     // Hard breakout check: if we are too far from the ORIGINAL anchor, force motion
-    const distFromStart = this.distanceBetweenWebMercator(p.mean, draft.stationaryStartAnchor);
+    const distFromStart = metricDistance(p.mean, draft.stationaryStartAnchor);
     const isFar = (distFromStart - p.accuracy) > HARD_BREAKOUT_DISTANCE;
 
     if (m2 < profile.stationaryMahalanobisThreshold && !isFar) {
@@ -86,7 +89,7 @@ export class Engine {
       const dy = pt.mean[1] - stats.mean[1];
       const mag = Math.hypot(dx, dy);
       directions.push(mag > 0 ? [dx / mag, dy / mag] : [0, 0]);
-      if ((this.distanceBetweenWebMercator(pt.mean, draft.stationaryStartAnchor) - pt.accuracy) <= HARD_BREAKOUT_DISTANCE)
+      if ((metricDistance(pt.mean, draft.stationaryStartAnchor) - pt.accuracy) <= HARD_BREAKOUT_DISTANCE)
         allPendingFar = false;
     }
 
@@ -95,7 +98,7 @@ export class Engine {
     let isFastEnough = true;
     if (firstPending && draft.pending.length > 1) {
       const lastPending = draft.pending[draft.pending.length - 1]!;
-      const dist = this.distanceBetweenWebMercator(firstPending.mean, lastPending.mean);
+      const dist = metricDistance(firstPending.mean, lastPending.mean);
 
       // If they've moved less than HARD_BREAKOUT, we demand a minimum speed to prevent slow drift
       if (dist < HARD_BREAKOUT_DISTANCE) {
@@ -130,7 +133,7 @@ export class Engine {
     if (draft.recent.length < 10) return;
 
     const newStats = this.computeStats(draft.recent);
-    const distToAnchor = this.distanceBetweenWebMercator(newStats.mean, draft.stationaryStartAnchor);
+    const distToAnchor = metricDistance(newStats.mean, draft.stationaryStartAnchor);
     if (distToAnchor > profile.maxStationaryRadius) draft.stationaryStartAnchor = newStats.mean; // Update anchor to prevent drag
   }
 
@@ -158,7 +161,7 @@ export class Engine {
     const settleStart = draft.recent[0]!.timestamp;
     const settleStats = this.computeStats(draft.recent);
     const totalDistance = this.computePathLength(draft.path.map(p => p.mean));
-    const startEndDist = this.distanceBetweenWebMercator(draft.startAnchor, settleStats.mean);
+    const startEndDist = metricDistance(draft.startAnchor, settleStats.mean);
     const maxDev = this.maxDeviation(draft.path, draft.startAnchor);
 
     const settleDurationSeconds = (draft.recent[draft.recent.length - 1]!.timestamp - draft.start) / 1000;
@@ -234,6 +237,7 @@ export class Engine {
         isDraft: false,
         bounds: computeBounds(path.map(p => p.geo))
       });
+      this.changed = true;
       vlog(`[Engine] Closed motion event for device. History size: ${this.closed.length}`);
 
       // Start new stationary
@@ -295,11 +299,12 @@ export class Engine {
     }
 
     const mean: WebMercatorCoord = asWebMercatorCoord([sumX / points.length, sumY / points.length]);
+    const cosLat = cosLatitude(mean[1]);
 
     let sumDistSq = 0;
     for (const point of points) {
-      const dx = point.mean[0] - mean[0];
-      const dy = point.mean[1] - mean[1];
+      const dx = (point.mean[0] - mean[0]) * cosLat;
+      const dy = (point.mean[1] - mean[1]) * cosLat;
       sumDistSq += dx * dx + dy * dy;
     }
 
@@ -308,28 +313,26 @@ export class Engine {
   }
 
   private computeMahalanobis2(pos: Vec2, mean: Vec2, clusterVariance: number, pointAccuracy: number): number {
-    const dx = pos[0] - mean[0];
-    const dy = pos[1] - mean[1];
-    const latRad = 2 * Math.atan(Math.exp(pos[1] / WORLD_R)) - Math.PI / 2;
-    return (dx * dx + dy * dy) / (clusterVariance + (pointAccuracy / Math.cos(latRad)) ** 2);
+    const cosLat = cosLatitude(pos[1]);
+    const dx = (pos[0] - mean[0]) * cosLat;
+    const dy = (pos[1] - mean[1]) * cosLat;
+    return (dx * dx + dy * dy) / (clusterVariance + pointAccuracy * pointAccuracy);
   }
 
   public computePathLength(path: Vec2[]): number {
     let total = 0;
     for (let i = 1; i < path.length; i++)
-      total += this.distanceBetweenWebMercator(path[i - 1]!, path[i]!);
+      total += metricDistance(path[i - 1]!, path[i]!);
     return total;
   }
 
   private maxDeviation(path: DevicePoint[], anchor: Vec2): number {
-    let maxD2 = 0;
+    let maxSq = 0;
     for (const point of path) {
-      const dx = point.mean[0] - anchor[0];
-      const dy = point.mean[1] - anchor[1];
-      const distSq = dx * dx + dy * dy;
-      if (distSq > maxD2) maxD2 = distSq;
+      const d = metricDistance(point.mean, anchor);
+      if (d * d > maxSq) maxSq = d * d;
     }
-    return Math.sqrt(maxD2);
+    return Math.sqrt(maxSq);
   }
 
   getState(): EngineState | null {
@@ -341,24 +344,40 @@ export class Engine {
     };
   }
 
+  setClosed(events: EngineEvent[]) {
+    this.closed = events;
+    this.changed = true;
+  }
+
+  setMembers(members: number[] | undefined) {
+    this.members = members;
+  }
+
   createSnapshot(): EngineState {
-    vlog(`[Engine] Creating snapshot. History size: ${this.closed.length}`);
-    return JSON.parse(JSON.stringify({
-      draft: this.draft,
-      closed: this.closed,
+    return {
+      // Clone, because the engine keeps mutating this draft after the snapshot is
+      // taken and a checkpoint must describe the moment it was written.
+      draft: this.draft ? structuredClone(this.draft) : null,
+      closed: [],
       lastTimestamp: this.lastTimestamp,
-    })) as EngineState;
+      members: this.members ? [...this.members] : undefined,
+      closedUpTo: this.closed.reduce((max, ev) => Math.max(max, ev.end), 0),
+    };
   }
 
   restoreSnapshot(state: EngineState) {
-    this.draft = state.draft;
-    this.closed = (state.closed ?? []).map(ev => ({ ...ev, isDraft: ev.isDraft ?? false }));
+    // Clone rather than adopt. The engine mutates its draft in place, so sharing the
+    // snapshot's object would corrupt the very checkpoint being restored from.
+    this.draft = state.draft ? structuredClone(state.draft) : null;
     this.lastTimestamp = state.lastTimestamp ?? this.draft?.start ?? null;
-    vlog(`[Engine] Restored snapshot. History size: ${this.closed.length}`);
   }
 
   pruneHistory(horizon: number) {
-    this.closed = this.closed.filter(ev => ev.end > horizon);
+    const kept = this.closed.filter(ev => ev.end > horizon);
+    if (kept.length !== this.closed.length) {
+      this.closed = kept;
+      this.changed = true;
+    }
   }
 
   refineHistory() {
@@ -373,7 +392,7 @@ export class Engine {
 
       if (current?.type === 'motion' && next?.type === 'stationary' && nextNext?.type === 'motion') {
         const gapDuration = next.end - next.start;
-        const bridgeDistance = this.distanceBetweenWebMercator(current.endAnchor, nextNext.startAnchor);
+        const bridgeDistance = metricDistance(current.endAnchor, nextNext.startAnchor);
 
         // If the stationary variance is saturated and both motions bridge the same anchor,
         // treat this stop as low-confidence noise and allow a wider merge window.
@@ -402,6 +421,7 @@ export class Engine {
           bounds: computeBounds(mergedPath.map(p => p.geo))
         };
         this.closed.splice(i, 3, merged);
+        this.changed = true;
       } else {
         i++;
       }

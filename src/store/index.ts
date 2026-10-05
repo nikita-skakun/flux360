@@ -9,6 +9,7 @@ const initialState: StoreState = {
   entities: {},
   settings: {
     maptilerApiKey: '',
+    historyDays: 2,
     theme: 'Auto',
     sessionToken: null,
   },
@@ -39,7 +40,11 @@ export const useStore = create<Store>()(
           entities: payload.entities,
           activePointsByDevice: payload.activePointsByDevice,
           eventsByDevice: payload.eventsByDevice,
-          settings: { ...state.settings, maptilerApiKey: payload.maptilerApiKey }
+          settings: {
+            ...state.settings,
+            maptilerApiKey: payload.maptilerApiKey,
+            historyDays: payload.historyDays
+          }
         }));
       },
 

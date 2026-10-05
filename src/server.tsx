@@ -34,6 +34,21 @@ const TraccarUserSchema = z.object({
 let traccarUsersCache: Array<z.infer<typeof TraccarUserSchema>> = [];
 const activeWebSockets = new Set<ServerWebSocket<WSData>>();
 
+const LOGIN_WINDOW_MS = 60_000;
+const LOGIN_MAX_ATTEMPTS = 10;
+const loginAttempts = new Map<string, { count: number; resetAt: number }>();
+
+function isLoginRateLimited(clientIp: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(clientIp);
+  if (!entry || now > entry.resetAt) {
+    loginAttempts.set(clientIp, { count: 1, resetAt: now + LOGIN_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > LOGIN_MAX_ATTEMPTS;
+}
+
 interface Principal {
   username: string;
   traccarToken: string;
@@ -82,6 +97,12 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
     console.error(`[Users Cache] Background refresh error (${reason}):`, e);
   }
 }
+
+const hostHeader = (() => {
+  const configured = process.env["TRUSTED_HOST"];
+  if (configured && configured.length > 0) return configured;
+  return `localhost:${port}`;
+})();
 
 function isSQLiteConstraintError(err: unknown) {
   if (!(err instanceof Error)) return false;
@@ -205,53 +226,82 @@ function broadcastUpdate(deviceIds: number[]) {
 
 // Helper to start/restart admin client
 let traccarClient: TraccarAdminClient | null = null;
+
+/** Positions newer than this would not be worth a round trip. */
+const HISTORY_FETCH_MIN_GAP_MS = 60_000;
+/** Spacing between sequential Traccar history requests. */
+const HISTORY_FETCH_SPACING_MS = 50;
+/** A failed fetch is retried after this delay, then kept queued until it lands. */
+const HISTORY_FETCH_RETRY_MS = 5_000;
+
+/**
+ * Per-device ranges that still need to come from Traccar. Requests are coalesced
+ * and drained by one sequential pump, so a burst of out-of-order points cannot
+ * queue the same device twice or stampede the Traccar API.
+ */
+const desiredHistory = new Map<number, { from: number; to: number }>();
+let pumpingHistory = false;
+
+function requestHistory(deviceId: number, from: number, to: number) {
+  const existing = desiredHistory.get(deviceId);
+  desiredHistory.set(deviceId, {
+    from: Math.min(from, existing?.from ?? from),
+    to: Math.max(to, existing?.to ?? to),
+  });
+  void pumpHistory();
+}
+
+function queueHistory(requests: { deviceId: number; from: number; to: number }[]) {
+  for (const req of requests) requestHistory(req.deviceId, req.from, req.to);
+}
+
+async function pumpHistory() {
+  if (pumpingHistory) return;
+  pumpingHistory = true;
+  try {
+    while (desiredHistory.size > 0) {
+      const entry = desiredHistory.entries().next().value;
+      if (!entry) break;
+      const [deviceId, range] = entry;
+      desiredHistory.delete(deviceId);
+      try {
+        const history = await traccarClient!.fetchHistory(deviceId, range.from, range.to);
+        if (history.length > 0 && serverState.handlePositions(history)) {
+          broadcastUpdate([deviceId]);
+          queueHistory(serverState.drainHistoryRequests());
+        }
+      } catch (err) {
+        console.error(`[Server] History fetch failed for device ${deviceId}:`, err);
+        // Keep the range queued. Without this a group whose runtime was cleared by a
+        // failed rebuild would stay empty until something else happened to request it.
+        requestHistory(deviceId, range.from, range.to);
+        await new Promise(r => setTimeout(r, HISTORY_FETCH_RETRY_MS));
+        continue;
+      }
+      await new Promise(r => setTimeout(r, HISTORY_FETCH_SPACING_MS));
+    }
+  } finally {
+    pumpingHistory = false;
+  }
+}
+
 function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
   if (traccarClient) traccarClient.close();
 
   traccarClient = new TraccarAdminClient(baseUrl, secure, token, {
     onDevicesReceived: (devices: TraccarDevice[]) => {
       serverState.handleDevices(devices);
+      queueHistory(serverState.drainHistoryRequests());
 
-      const historyMs = config.historyDays * 24 * 60 * 60 * 1000;
-      const backfillCutoff = Date.now() - historyMs;
-
-      const devicesToBackfill = devices
-        .map(d => d.id)
-        .filter((id): id is number => !serverState.backfilled.has(id) && !serverState.inProgressBackfills.has(id));
-
-      if (devicesToBackfill.length > 0) {
-        void (async () => {
-          vlog(`[Server] Starting persistent sequential backfill for ${devicesToBackfill.length} devices...`);
-          for (const id of devicesToBackfill) {
-            if (serverState.backfilled.has(id) || serverState.inProgressBackfills.has(id)) continue;
-
-            const lastTs = serverState.engines[id]?.lastTimestamp ?? null;
-            const firstTs = serverState.positionsAll.find(p => p.device === id)?.timestamp ?? null;
-
-            // Fetch head delta if we have reliable data, otherwise full window
-            const isDelta = lastTs !== null && firstTs !== null && firstTs < backfillCutoff + (10 * 60000);
-            const from = isDelta ? lastTs + 1 : backfillCutoff;
-
-            if (Date.now() - from < 60000) continue;
-
-            serverState.inProgressBackfills.add(id);
-            try {
-              vlog(`[Server] Device ${id} backfill: type=${isDelta ? "DELTA" : "FULL"}, from=${new Date(from).toISOString()}`);
-              const history = await traccarClient!.fetchHistory(id, from, Date.now());
-              if (history.length > 0 && serverState.handlePositions(history)) {
-                broadcastUpdate([id]);
-              }
-              await new Promise(r => setTimeout(r, 200));
-
-              serverState.backfilled.add(id);
-            } catch (err) {
-              console.error(`[Server] History backfill failed for device ${id}:`, err);
-            } finally {
-              serverState.inProgressBackfills.delete(id);
-            }
-          }
-          vlog(`[Server] Sequential backfill complete.`);
-        })();
+      // Catch the engine up from its checkpoint watermark. A device with no state
+      // gets the whole retained window.
+      const retainedFrom = Date.now() - config.historyDays * 24 * 60 * 60 * 1000;
+      for (const device of devices) {
+        const lastTs = serverState.engines[device.id]?.lastTimestamp ?? null;
+        const from = lastTs !== null ? lastTs + 1 : retainedFrom;
+        if (Date.now() - from < HISTORY_FETCH_MIN_GAP_MS) continue;
+        vlog(`[Server] Device ${device.id} backfill from ${new Date(from).toISOString()}`);
+        requestHistory(device.id, from, Date.now());
       }
 
       broadcastConfig(null);
@@ -260,6 +310,7 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
       if (serverState.handlePositions(positions)) {
         broadcastUpdate(Array.from(new Set(positions.map(p => p.device))));
       }
+      queueHistory(serverState.drainHistoryRequests());
     }
   });
   traccarClient.connect();
@@ -269,6 +320,21 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
 const currentBaseUrl = config.traccarBaseUrl;
 const currentToken = config.traccarApiToken;
 
+/**
+ * Same-origin guard for the websocket upgrade. Non-browser clients send no
+ * Origin header at all and are allowed through; only a browser-supplied
+ * mismatched origin is rejected.
+ */
+function isAllowedOrigin(origin: string): boolean {
+  let host: string;
+  try {
+    host = new URL(origin).host;
+  } catch {
+    return false;
+  }
+  return host === hostHeader;
+}
+
 function getClientIP(request: Request, server: Server<WSData>): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     ?? request.headers.get("x-real-ip")?.trim()
@@ -277,7 +343,14 @@ function getClientIP(request: Request, server: Server<WSData>): string {
 }
 
 const wsRouteHandler = (request: Request, server: Server<WSData>) => {
-  vlog(`[WS] Upgrade request received. Origin: ${request.headers.get("origin")}`);
+  const origin = request.headers.get("origin");
+  vlog(`[WS] Upgrade request received. Origin: ${origin}`);
+
+  if (origin && !isAllowedOrigin(origin)) {
+    console.warn(`SEC_WS_ORIGIN: ${getClientIP(request, server)} ${origin}`);
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const clientIp = getClientIP(request, server);
   const upgraded = server.upgrade(request, {
     data: { isAlive: true, principal: null, clientIp }
@@ -341,6 +414,11 @@ serve<WSData>({
           case "login": {
             const { username: inputUsername, password } = data.payload;
             const { requestId } = data;
+            if (isLoginRateLimited(ws.data.clientIp)) {
+              console.warn(`SEC_LOGIN_RATE: ${ws.data.clientIp}`);
+              ws.send(JSON.stringify({ type: "error", message: "Too many login attempts, try again later", requestId }));
+              return;
+            }
             try {
               const params = new URLSearchParams({ email: inputUsername, password });
               const sessionRes = await fetch(`${apiBase}/session`, {
@@ -436,7 +514,7 @@ serve<WSData>({
                 return [numericId, { ...entity, isOwner: ownedDeviceIds.has(numericId) }];
               })
             );
-            const cutoff = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
+            const cutoff = Date.now() - config.historyDays * 24 * 60 * 60 * 1000;
 
             // Only include snapshots for root entities that have been seen within the last 48 hours
             const filteredPoints: Record<number, DevicePoint[]> = {};
@@ -468,6 +546,7 @@ serve<WSData>({
                 activePointsByDevice: filteredPoints,
                 eventsByDevice: filteredEvents,
                 maptilerApiKey: config.maptilerApiKey,
+                historyDays: config.historyDays,
               }
             });
             ws.send(payloadStr);

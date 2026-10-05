@@ -26,6 +26,7 @@ type Props = {
   selectedDeviceId: number | null;
   selectedEventId: string | null;
   eventsByDevice: Record<number, EngineEvent[]>;
+  historyDays: number;
   onSelectEvent: (event: TimelineEvent) => void;
 };
 
@@ -236,9 +237,11 @@ export const TimelinePanel: React.FC<Props> = ({
   eventsByDevice,
   onSelectEvent,
   selectedEventId,
+  historyDays,
 }) => {
+  const windowMs = historyDays * 24 * 60 * 60 * 1000;
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
-  const [cutoff, setCutoff] = React.useState(() => Date.now() - 48 * 60 * 60 * 1000);
+  const [cutoff, setCutoff] = React.useState(() => Date.now() - windowMs);
   const [dayBucket, setDayBucket] = React.useState(() => Math.floor(Date.now() / 86400000));
 
   const handleCopy = useCallback(
@@ -264,11 +267,11 @@ export const TimelinePanel: React.FC<Props> = ({
   React.useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
-      setCutoff(now - 48 * 60 * 60 * 1000);
+      setCutoff(now - windowMs);
       setDayBucket(Math.floor(now / 86400000));
     }, 60000);
     return () => clearInterval(interval);
-  }, []);
+  }, [windowMs]);
 
   const todayStr = useMemo(() => new Date(dayBucket * 86400000).toDateString(), [dayBucket]);
   const yesterdayStr = useMemo(() => new Date(dayBucket * 86400000 - 86400000).toDateString(), [dayBucket]);
@@ -306,10 +309,10 @@ export const TimelinePanel: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col p-2 rounded-lg bg-muted/90 text-foreground backdrop-blur-sm border border-border transition-colors duration-300 max-h-[350px] overflow-hidden flex-shrink-0">
-      <h3 className="text-sm font-medium mb-2 px-1">Past 48 Hours</h3>
+      <h3 className="text-sm font-medium mb-2 px-1">Past {historyDays} Days</h3>
       {events.length === 0 ? (
         <div className="text-xs text-muted-foreground p-4 text-center">
-          No events found in the last 48 hours.
+          No events found in this window.
         </div>
       ) : (
         <List

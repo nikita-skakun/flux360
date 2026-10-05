@@ -45,17 +45,17 @@ const DevicePointSchema = z.object({
   timestamp: z.number(),
   accuracy: z.number(),
   anchorStartTimestamp: z.number(),
+  // STUB: no producer computes this yet; it is currently always 0 or 1.0.
   confidence: z.number(),
 });
 export type DevicePoint = z.infer<typeof DevicePointSchema>;
 
-export const RawGpsPositionSchema = z.object({
-  device: z.number(),
-  geo: RawGpsCoordSchema,
-  accuracy: z.number(),
-  timestamp: z.number(),
-});
-export type RawGpsPosition = z.infer<typeof RawGpsPositionSchema>;
+export type RawGpsPosition = {
+  device: number;
+  geo: RawGpsCoord;
+  accuracy: number;
+  timestamp: number;
+};
 
 const WebMercatorPositionSchema = z.object({
   device: z.number(),
@@ -144,6 +144,12 @@ export const EngineStateSchema = z.object({
   draft: EngineDraftSchema.nullable(),
   closed: z.array(EngineEventSchema),
   lastTimestamp: z.number().nullable(),
+  members: z.array(z.number()).optional(),
+  // The latest event end that was already closed when this snapshot was taken. The
+  // snapshot timestamp cannot serve that role: a checkpoint taken mid-motion has a
+  // draft whose predecessor event closes at the motion's start, so events created
+  // after the checkpoint can still end before it.
+  closedUpTo: z.number().optional(),
 });
 export type EngineState = z.infer<typeof EngineStateSchema>;
 
@@ -173,6 +179,7 @@ const InitialStatePayloadSchema = z.object({
   activePointsByDevice: ActivePointsByDeviceSchema,
   eventsByDevice: EventsByDeviceSchema,
   maptilerApiKey: z.string(),
+  historyDays: z.number(),
 });
 export type InitialStatePayload = z.infer<typeof InitialStatePayloadSchema>;
 

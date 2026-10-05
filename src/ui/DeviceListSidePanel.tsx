@@ -106,8 +106,6 @@ export const DeviceListSidePanel: React.FC<{
       };
     }, [contextMenu]);
 
-    const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-    const isRecent = (d: AppDevice) => d.lastSeen !== null && d.lastSeen > Date.now() - THIRTY_DAYS_MS;
     const sortDevices = (list: AppDevice[]) => [...list].sort((a, b) => a.name.localeCompare(b.name));
     const selectedCreateDeviceSet = useMemo(() => new Set(selectedCreateDevices), [selectedCreateDevices]);
 
@@ -115,7 +113,7 @@ export const DeviceListSidePanel: React.FC<{
       if (!isOpen) return [];
       const top = rootIds
         .map(id => entities[id])
-        .filter((e): e is AppDevice => !!e && isRecent(e));
+        .filter((e): e is AppDevice => !!e);
       return sortDevices(top);
     }, [isOpen, rootIds, entities]);
 
@@ -160,7 +158,7 @@ export const DeviceListSidePanel: React.FC<{
       const displayName = device.name;
       const children = (device.memberDeviceIds ?? [])
         .map(id => entities[id])
-        .filter((d: AppDevice | undefined): d is AppDevice => !!d && isRecent(d));
+        .filter((d: AppDevice | undefined): d is AppDevice => !!d);
 
       const sortedChildren = sortDevices(children);
 

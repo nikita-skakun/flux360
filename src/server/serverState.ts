@@ -2,7 +2,7 @@ import { buildEngineSnapshotsFromByDevice } from "./serverUtils";
 import { CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINTS } from "@/engine/motionDetector";
 import { db } from "./db";
 import { Engine } from "@/engine/engine";
-import { EngineStateSchema, MotionProfileNameSchema, RawGpsPositionSchema } from "@/types";
+import { EngineStateSchema, EngineEventSchema, MotionProfileNameSchema } from "@/types";
 import { numericEntries } from "@/util/record";
 import { rgbToHex, colorForDevice } from "@/util/color";
 import { toWebMercator } from "@/util/webMercator";
@@ -13,6 +13,22 @@ function dedupeKey(p: { device: number; timestamp: number; geo: Vec2 }) {
   return `${p.device}:${p.timestamp}:${p.geo[1]}:${p.geo[0]}`;
 }
 
+function eventFingerprint(ev: EngineEvent): string {
+  return `${ev.type}|${ev.start}|${ev.end}`;
+}
+
+const PRUNE_INTERVAL_MS = 60_000;
+
+/**
+ * How much raw history stays resident in RAM for dedupe and incremental ingest.
+ * Everything older lives in SQLite and is read back on demand, so resident memory
+ * scales with the hot window rather than with the retention window.
+ */
+const HOT_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/** Minimum spacing between full-history rebuild requests for one entity. */
+const HISTORY_REQUEST_COOLDOWN_MS = 5 * 60 * 1000;
+
 export class ServerState {
   devices: Record<number, AppDevice> = {};
   groups: AppDevice[] = [];
@@ -20,10 +36,12 @@ export class ServerState {
   groupIds = new Set<number>();
   engines: Record<number, Engine> = {};
   engineCheckpoints: Record<number, { timestamp: number; snapshot: EngineState }[]> = {};
-  knownKeys = new Set<string>();
-  processedKeys = new Set<string>();
-  backfilled = new Set<number>();
-  inProgressBackfills = new Set<number>();
+  // windowedKeys tracks what is already reflected in the resident position index.
+  // consumedKeys tracks what the engine has already been fed. These diverge for an
+  // entity whose batch is deferred waiting on history: its positions are windowed but
+  // deliberately not consumed, so they stay replayable.
+  windowedKeys = new Set<string>();
+  consumedKeys = new Set<string>();
   deviceMetadataById: Record<number, DeviceMetadata> = {};
   private rawTraccarDevices: Record<number, TraccarDevice> = {};
 
@@ -31,11 +49,179 @@ export class ServerState {
   eventsByDevice: Record<number, EngineEvent[]> = {};
   positionsAll: RawGpsPosition[] = [];
   private allPosById: Record<number, RawGpsPosition[]> = {};
+  private historyRequests = new Map<number, { from: number; to: number }>();
+  private lastHistoryRequestAt = new Map<number, number>();
   private historyMs: number;
+  private eventRows: Record<number, Map<string, number>> = {};
+  private lastPruneAt = 0;
+  private lastEnginePruneAt = 0;
+  private profileCache: Record<number, MotionProfileName> | null = null;
+
+  private currentProfiles(): Record<number, MotionProfileName> {
+    if (this.profileCache) return this.profileCache;
+    const profiles: Record<number, MotionProfileName> = {};
+    for (const [id, device] of numericEntries(this.devices)) {
+      profiles[id] = device.effectiveMotionProfile;
+    }
+    for (const group of this.groups) {
+      profiles[group.id] = group.motionProfile ?? ((group.memberDeviceIds?.some(mId => profiles[mId] === "car")) ? "car" : "person");
+    }
+    this.profileCache = profiles;
+    return profiles;
+  }
+
+  private invalidateProfileCache() {
+    this.profileCache = null;
+  }
+
+  /**
+   * Age out resident positions and their dedupe keys on a timer. This scan is
+   * O(resident positions), so running it per batch made every ingest cost scale
+   * with the whole resident window. Traccar holds the older history.
+   */
+  private prunePositions() {
+    const now = Date.now();
+    if (now - this.lastPruneAt < PRUNE_INTERVAL_MS) return;
+    this.lastPruneAt = now;
+
+    const cutoff = now - HOT_WINDOW_MS;
+    while (this.positionsAll.length > 0 && this.positionsAll[0]!.timestamp <= cutoff) {
+      const p = this.positionsAll.shift();
+      if (!p) break;
+      const k = dedupeKey(p);
+      this.consumedKeys.delete(k);
+      this.windowedKeys.delete(k);
+    }
+
+    for (const [id, list] of numericEntries(this.allPosById)) {
+      const split = list.findIndex(p => p.timestamp > cutoff);
+      if (split === -1) delete this.allPosById[id];
+      else if (split > 0) this.allPosById[id] = list.slice(split);
+    }
+  }
+
+  /**
+   * Age out finished events on a timer rather than on every position batch.
+   * Pruning is O(history), so running it per batch made every ingest cost scale
+   * with total retained history rather than with the batch itself.
+   */
+  private pruneEngines() {
+    const now = Date.now();
+    if (now - this.lastEnginePruneAt < PRUNE_INTERVAL_MS) return;
+    this.lastEnginePruneAt = now;
+    const cutoff = now - this.historyMs - (24 * 60 * 60 * 1000);
+    for (const engine of Object.values(this.engines)) {
+      engine.pruneHistory(cutoff);
+    }
+  }
+
+  private loadEventRows() {
+    this.eventRows = {};
+    const rows = db.query(`SELECT id, entityId, type, start, end FROM events`).all() as
+      { id: number, entityId: number, type: string, start: number, end: number }[];
+    for (const row of rows) {
+      const map = this.eventRows[row.entityId] ??= new Map();
+      map.set(`${row.type}|${row.start}|${row.end}`, row.id);
+    }
+  }
+
+  loadClosedEvents(entityId: number, endAt: number = Number.MAX_SAFE_INTEGER): EngineEvent[] {
+    const rows = db.query(
+      `SELECT eventJson FROM events WHERE entityId = ? AND end <= ? ORDER BY start ASC`
+    ).all(entityId, endAt) as { eventJson: string }[];
+
+    const out: EngineEvent[] = [];
+    for (const row of rows) {
+      const parsed = EngineEventSchema.safeParse(JSON.parse(row.eventJson));
+      if (parsed.success) out.push(parsed.data);
+      else console.error(`[ServerState] Discarding unreadable event row for entity ${entityId}`, parsed.error);
+    }
+    return out;
+  }
+
+  private insertEventRow(entityId: number, ev: EngineEvent): number {
+    const result = db.query(
+      `INSERT INTO events (entityId, type, start, end, eventJson) VALUES (?, ?, ?, ?, ?)`
+    ).run(entityId, ev.type, ev.start, ev.end, JSON.stringify(ev));
+    return Number(result.lastInsertRowid);
+  }
+
+  private deleteEventRows(entityId: number, rowIds: number[]) {
+    if (rowIds.length === 0) return;
+    const placeholders = rowIds.map(() => "?").join(",");
+    db.query(`DELETE FROM events WHERE entityId = ? AND id IN (${placeholders})`).run(entityId, ...rowIds);
+  }
+
+  private syncEventsForEntity(entityId: number, engine: Engine) {
+    const rows = this.eventRows[entityId] ?? new Map<string, number>();
+    const desired = new Set<string>();
+    const toInsert: EngineEvent[] = [];
+
+    for (const ev of engine.closed) {
+      const fp = eventFingerprint(ev);
+      desired.add(fp);
+      if (!rows.has(fp)) toInsert.push(ev);
+    }
+
+    const staleRowIds: number[] = [];
+    for (const [fp, rowId] of rows) {
+      if (!desired.has(fp)) staleRowIds.push(rowId);
+    }
+
+    if (staleRowIds.length === 0 && toInsert.length === 0) return;
+
+    db.transaction(() => {
+      this.deleteEventRows(entityId, staleRowIds);
+      for (const ev of toInsert) {
+        const fp = eventFingerprint(ev);
+        rows.set(fp, this.insertEventRow(entityId, ev));
+      }
+    })();
+
+    if (rows.size === 0) delete this.eventRows[entityId];
+    else this.eventRows[entityId] = rows;
+  }
 
   static toDbGroupId(appGroupId: number) {
     if (appGroupId >= 0) return null;
     return -appGroupId;
+  }
+
+  /** The raw device ids a derived entity is built from. A group is its members. */
+  private sourceDeviceIds(id: number): number[] {
+    if (!this.groupIds.has(id)) return [id];
+    return Array.from(new Set(this.groups.find(group => group.id === id)?.memberDeviceIds ?? []));
+  }
+
+  /**
+   * Resident positions for an entity between two timestamps. A device that was
+   * simply not reporting leaves a gap that the engine already tolerates, so an
+   * empty result is normal and callers must not read it as an error.
+   */
+  private positionsBetween(id: number, from: number, until: number): RawGpsPosition[] {
+    const list = this.allPosById[id];
+    if (!list || list.length === 0) return [];
+    const start = this.firstAfterTimestamp(list, from);
+    const out: RawGpsPosition[] = [];
+    for (let i = start; i < list.length; i++) {
+      const p = list[i];
+      if (!p || p.timestamp >= until) break;
+      out.push(p);
+    }
+    return out;
+  }
+
+  /** True when the hot window reaches back at or before `timestamp` for this entity. */
+  private windowCovers(id: number, timestamp: number): boolean {
+    const list = this.allPosById[id];
+    return !!list && list.length > 0 && list[0]!.timestamp <= timestamp;
+  }
+
+  private joinSourcePositions(deviceIds: number[], from: number, until: number): RawGpsPosition[] {
+    const out: RawGpsPosition[] = [];
+    for (const deviceId of deviceIds) out.push(...this.positionsBetween(deviceId, from, until));
+    if (deviceIds.length > 1) out.sort((a, b) => a.timestamp - b.timestamp);
+    return out;
   }
 
   private firstAfterTimestamp(list: RawGpsPosition[], timestamp: number) {
@@ -49,21 +235,21 @@ export class ServerState {
     return lo;
   }
 
-  private replayPositionsForEntity(id: number, replayFrom: number) {
-    const replayIds = this.groupIds.has(id)
-      ? Array.from(new Set(this.groups.find(g => g.id === id)?.memberDeviceIds ?? []))
-      : [id];
-
-    const replay: RawGpsPosition[] = [];
-    for (const replayId of replayIds) {
-      const history = this.allPosById[replayId];
-      if (!history || history.length === 0) continue;
-      const start = this.firstAfterTimestamp(history, replayFrom);
-      if (start < history.length) replay.push(...history.slice(start));
+  /** Queue a range that must be fetched from Traccar and drained by the server loop. */
+  requestHistory(deviceIds: number[], from: number, to: number) {
+    for (const deviceId of deviceIds) {
+      const pending = this.historyRequests.get(deviceId);
+      this.lastHistoryRequestAt.set(deviceId, Date.now());
+      if (!pending || from < pending.from) {
+        this.historyRequests.set(deviceId, { from, to: Math.max(to, pending?.to ?? 0) });
+      }
     }
+  }
 
-    if (replayIds.length > 1) replay.sort((a, b) => a.timestamp - b.timestamp);
-    return replay;
+  drainHistoryRequests(): { deviceId: number; from: number; to: number }[] {
+    const out = Array.from(this.historyRequests, ([deviceId, range]) => ({ deviceId, ...range }));
+    this.historyRequests.clear();
+    return out;
   }
 
   private clearGroupRuntime(groupId: number) {
@@ -72,10 +258,29 @@ export class ServerState {
     delete this.engines[groupId];
     delete this.engineCheckpoints[groupId];
     delete this.allPosById[groupId];
+    delete this.eventRows[groupId];
     db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ?`, [groupId]);
+    db.run(`DELETE FROM events WHERE entityId = ?`, [groupId]);
+  }
+
+  /**
+   * A group checkpoint stays valid while its membership is unchanged, since the
+   * merged member stream it was derived from is unchanged too.
+   */
+  private groupCheckpointMatches(groupId: number, memberDeviceIds: number[]): boolean {
+    const latest = this.engineCheckpoints[groupId]?.at(-1);
+    if (!latest) return false;
+    const engine = this.engines[groupId];
+    if (!engine || !latest.snapshot.lastTimestamp) return false;
+
+    const previous = latest.snapshot.members;
+    if (!previous) return false;
+    if (previous.length !== memberDeviceIds.length) return false;
+    return previous.every((id, i) => id === memberDeviceIds[i]);
   }
 
   private rebuildGroupDerivedFields() {
+    this.invalidateProfileCache();
     for (const group of this.groups) {
       const members = group.memberDeviceIds ?? [];
 
@@ -102,64 +307,24 @@ export class ServerState {
     }
   }
 
-  private rebuildPositionIndexFromAllPositions() {
-    this.allPosById = {};
-    for (const p of this.positionsAll) {
-      const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
-      for (const id of ids) {
-        this.allPosById[id] ??= [];
-        this.allPosById[id].push(p);
-      }
-    }
-  }
-
-  private refreshGroupFromMembers(groupId: number) {
+  private refreshGroupFromMembers(groupId: number, force: boolean = true) {
     const group = this.groups.find(g => g.id === groupId);
-    if (!group) {
+    const memberDeviceIds = Array.from(new Set(group?.memberDeviceIds ?? [])).sort((a, b) => a - b);
+
+    if (!group || memberDeviceIds.length === 0) {
       this.clearGroupRuntime(groupId);
       return;
     }
 
-    const memberDeviceIds = Array.from(new Set(group.memberDeviceIds ?? []));
-    if (memberDeviceIds.length === 0) {
-      this.clearGroupRuntime(groupId);
-      return;
-    }
+    if (!force && this.groupCheckpointMatches(groupId, memberDeviceIds)) return;
 
-    const profile = group.motionProfile ?? (
-      memberDeviceIds.some(memberId => this.devices[memberId]?.effectiveMotionProfile === "car") ? "car" : "person"
-    );
-
-    const memberHistory = memberDeviceIds
-      .flatMap(memberId => this.allPosById[memberId] ?? [])
-      .sort((a, b) => a.timestamp - b.timestamp);
-
-    if (memberHistory.length === 0) {
-      this.clearGroupRuntime(groupId);
-      return;
-    }
-
-    const rawByDevice: Record<number, DevicePoint[]> = {
-      [groupId]: memberHistory.map(position => ({
-        mean: toWebMercator(position.geo),
-        accuracy: position.accuracy,
-        geo: position.geo,
-        device: groupId,
-        timestamp: position.timestamp,
-        anchorStartTimestamp: position.timestamp,
-        confidence: 0,
-        sourceDeviceId: position.device,
-      }))
-    };
-
-    const groupEngines: Record<number, Engine> = {};
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, groupEngines, { [groupId]: profile });
-
+    // Group events are derived from member positions, which live in Traccar now. Clear
+    // the runtime and queue the members instead of deriving here: the normal ingest
+    // path rebuilds the group, because a group's batches are built from member
+    // positions anyway. While the history is in flight the group has no events, which
+    // is visible but correct.
     this.clearGroupRuntime(groupId);
-    this.allPosById[groupId] = memberHistory;
-    this.engines[groupId] = groupEngines[groupId] ?? new Engine();
-    this.activePointsByDevice[groupId] = result.positionsByDevice[groupId] ?? [];
-    this.eventsByDevice[groupId] = (result.eventsByDevice[groupId] ?? []).sort((a, b) => b.start - a.start);
+    this.requestHistory(memberDeviceIds, Date.now() - this.historyMs, Date.now());
   }
 
   private reloadGroupsFromDB(rebuildHistory: boolean) {
@@ -185,7 +350,6 @@ export class ServerState {
 
     // Rebuild history if explicitly requested OR if membership changed
     if (rebuildHistory || hasAnyMembershipChange) {
-      this.rebuildPositionIndexFromAllPositions();
       for (const group of this.groups) {
         this.refreshGroupFromMembers(group.id);
       }
@@ -290,6 +454,10 @@ export class ServerState {
     this.historyMs = historyDays * 24 * 60 * 60 * 1000;
     vlog(`[ServerState] Restoring engine checkpoints...`);
 
+    this.loadEventRows();
+
+    const legacyClosed = new Map<number, EngineEvent[]>();
+
     // 1. Restore Checkpoints
     (db.query(`SELECT deviceId, timestamp, snapshotJson FROM engine_checkpoints ORDER BY timestamp ASC`).all())
       .forEach(row => {
@@ -301,52 +469,65 @@ export class ServerState {
           const snapshot = EngineStateSchema.parse(JSON.parse(typedRow.snapshotJson));
           checkpoints.push({ timestamp: typedRow.timestamp, snapshot });
           this.engines[deviceId]?.restoreSnapshot(snapshot);
+          this.engines[deviceId]?.setMembers(snapshot.members);
+          if (snapshot.closed.length > 0) {
+            legacyClosed.set(deviceId, snapshot.closed as EngineEvent[]);
+          }
         } catch (err) {
           console.error("Failed to parse/validate snapshot for device", deviceId, err);
         }
       });
 
-    vlog(`[ServerState] Restoring recent positions...`);
-    // 2. Restore recent raw positions so `positionsAll` is populated
-    const cutoff = Date.now() - this.historyMs;
-    const posRows = db.query(`SELECT deviceId, geoLon, geoLat, accuracy, timestamp FROM position_events WHERE timestamp > ? ORDER BY timestamp ASC`).all(cutoff);
-    for (const row of posRows) {
-      const typedRow = row as { deviceId: number, geoLon: number, geoLat: number, accuracy: number, timestamp: number };
-      const deviceId = typedRow.deviceId;
-      const parsed = RawGpsPositionSchema.safeParse({
-        device: deviceId,
-        geo: [typedRow.geoLon, typedRow.geoLat],
-        accuracy: typedRow.accuracy,
-        timestamp: typedRow.timestamp
-      });
-      if (!parsed.success) {
-        console.error("Failed to validate position from DB:", parsed.error);
-        continue;
+    // 1b. Hydrate finished events. The events table is authoritative; checkpoints
+    // written before that table existed still carry their own closed list, so
+    // fall back to those and sync them forward once.
+    for (const [entityId, engine] of numericEntries(this.engines)) {
+      let closed = this.loadClosedEvents(entityId);
+      if (closed.length === 0) {
+        closed = legacyClosed.get(entityId) ?? [];
       }
-      const p = parsed.data;
-      this.allPosById[deviceId] ??= [];
-      this.allPosById[deviceId].push(p);
-      this.positionsAll.push(p);
-
-      const tKey = dedupeKey(p);
-      this.knownKeys.add(tKey);
-      // Mark ALL restored positions as processed to prevent replay duplication.
-      // Positions from DB are historical and should not be reprocessed on restart.
-      this.processedKeys.add(tKey);
+      engine.setClosed(closed);
+      this.syncEventsForEntity(entityId, engine);
     }
+
+    vlog(`[ServerState] Restoring recent positions...`);
+    // 2. The hot window starts empty. Traccar is the source for history, and the
+    // server loop fetches anything the engine is missing.
+    vlog(`[ServerState] Restored 0 hot positions. ${Object.keys(this.engines).length} engines ready.`);
 
     this.groups = this.loadGroupsFromDB();
     this.rebuildGroupDerivedFields();
     for (const group of this.groups) {
-      this.refreshGroupFromMembers(group.id);
+      this.refreshGroupFromMembers(group.id, false);
     }
 
-    vlog(`[ServerState] Restored ${posRows.length} trailing positions. ${Object.keys(this.engines).length} engines ready.`);
+    this.hydrateTimeline();
+  }
+
+  /**
+   * Populate the wire-facing timeline and active points from current engine
+   * state, without processing any measurements. Runs once at boot so clients
+   * receive history on `initial_state` instead of waiting for the first fix.
+   */
+  private hydrateTimeline() {
+    const profiles: Record<number, MotionProfileName> = {};
+    for (const [id, device] of numericEntries(this.devices)) {
+      profiles[id] = device.effectiveMotionProfile;
+    }
+    for (const group of this.groups) {
+      profiles[group.id] = group.effectiveMotionProfile;
+    }
+
+    const result = buildEngineSnapshotsFromByDevice({}, this.engines, profiles, Object.keys(this.engines).map(Number));
+    Object.assign(this.activePointsByDevice, result.positionsByDevice);
+    Object.assign(this.eventsByDevice, result.eventsByDevice);
+
+    for (const id of Object.keys(this.eventsByDevice)) {
+      this.eventsByDevice[Number(id)]?.sort((a, b) => b.start - a.start);
+    }
   }
 
   handleDevices(devices: TraccarDevice[]) {
-    const isFirst = Object.keys(this.rawTraccarDevices).length === 0;
-
     for (const d of devices) {
       if (!d.id) continue;
       this.rawTraccarDevices[d.id] = d;
@@ -364,12 +545,8 @@ export class ServerState {
 
     // Replace materialized devices to avoid stale data from users/devices no longer visible.
     this.devices = this.materializeAppDevices();
+    this.invalidateProfileCache();
     this.reloadGroupsFromDB(false);
-
-    if (isFirst && this.positionsAll.length > 0) {
-      vlog(`[ServerState] Initial catch-up for ${this.positionsAll.length} positions...`);
-      this.rebuildPositionIndexFromAllPositions();
-    }
 
     vlog(`[ServerState] Handled ${devices.length} updates. Total: ${Object.keys(this.devices).length}`);
   }
@@ -427,19 +604,25 @@ export class ServerState {
     const dbGroupId = ServerState.toDbGroupId(groupId);
     if (dbGroupId === null) return false;
 
+    const previousProfile = this.groups.find(group => group.id === groupId)?.motionProfile ?? null;
+
     const result = db.query(`UPDATE groups SET name = ?, icon = ?, color = ?, motionProfile = ? WHERE id = ?`)
       .run(updates.name, updates.icon, updates.color, updates.motionProfile, dbGroupId);
     if (result.changes === 0) return false;
 
     this.reloadGroupsFromDB(false);
-    this.refreshGroupFromMembers(groupId);
+    // A rename, icon or colour change does not alter what the engine derived from the
+    // member stream, so the group's events stay valid. Only a profile change does.
+    if ((updates.motionProfile ?? null) !== previousProfile) {
+      this.refreshGroupFromMembers(groupId);
+    }
     return true;
   }
 
   addDeviceToGroup(groupId: number, deviceId: number): boolean {
     const dbGroupId = ServerState.toDbGroupId(groupId);
     if (dbGroupId === null) return false;
-    const groupExists = db.query(`SELECT 1 as exists FROM groups WHERE id = ?`).get(dbGroupId) as { exists: number } | null;
+    const groupExists = db.query(`SELECT 1 AS found FROM groups WHERE id = ?`).get(dbGroupId) as { found: number } | null;
     if (!groupExists) return false;
 
     db.query(`INSERT INTO group_members (groupId, deviceId) VALUES (?, ?)`).run(dbGroupId, deviceId);
@@ -452,7 +635,7 @@ export class ServerState {
   removeDeviceFromGroup(groupId: number, deviceId: number): boolean {
     const dbGroupId = ServerState.toDbGroupId(groupId);
     if (dbGroupId === null) return false;
-    const groupExists = db.query(`SELECT 1 as exists FROM groups WHERE id = ?`).get(dbGroupId) as { exists: number } | null;
+    const groupExists = db.query(`SELECT 1 AS found FROM groups WHERE id = ?`).get(dbGroupId) as { found: number } | null;
     if (!groupExists) return false;
 
     db.query(`DELETE FROM group_members WHERE groupId = ? AND deviceId = ?`).run(dbGroupId, deviceId);
@@ -478,107 +661,86 @@ export class ServerState {
 
     this.deviceMetadataById[deviceId] = updates;
     this.devices = this.materializeAppDevices();
+    this.invalidateProfileCache();
     this.reloadGroupsFromDB(false);
   }
 
   handlePositions(pts: RawGpsPosition[]): boolean {
     if (pts.length === 0) return false;
 
-    // Snapshot processedKeys at start so we can distinguish between
-    // positions already processed before this call vs. positions in this batch.
-    // This prevents out-of-order replay from filtering out new batch positions.
-    const alreadyProcessedBefore = new Set(this.processedKeys);
-
+    // Dedupe memory is bounded to the hot window. Older positions are not retained;
+    // if Traccar redelivers one it is simply reprocessed.
+    const hotCutoff = Date.now() - HOT_WINDOW_MS;
     const newPts = pts.filter(p => {
+      if (p.timestamp <= hotCutoff) return true;
       const k = dedupeKey(p);
-      if (this.knownKeys.has(k)) return false;
-      this.knownKeys.add(k);
+      if (this.windowedKeys.has(k)) return false;
+      this.windowedKeys.add(k);
       return true;
     });
 
     if (newPts.length > 0) {
-      // 1. Save to Database
-      db.transaction(() => {
-        const stmt = db.prepare(`INSERT INTO position_events (deviceId, geoLon, geoLat, accuracy, timestamp) VALUES (?, ?, ?, ?, ?)`);
-        for (const p of newPts) {
-          stmt.run(p.device, p.geo[0], p.geo[1], p.accuracy, p.timestamp);
-        }
-      })();
-
-      // 2. Update memory index
-      this.positionsAll.push(...newPts);
-      this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
-
-      const touchedIds = new Set<number>();
+      // Ingest is normally already in timestamp order, so only re-sort when a batch
+      // actually arrives out of order. The index carries an entry per raw device and
+      // per group that device belongs to.
+      let needsSort = false;
+      let lastTs = this.positionsAll.length > 0 ? this.positionsAll[this.positionsAll.length - 1]!.timestamp : -Infinity;
       for (const p of newPts) {
-        const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
-        for (const id of ids) {
-          this.allPosById[id] ??= [];
-          this.allPosById[id].push(p);
-          touchedIds.add(id);
+        if (p.timestamp <= hotCutoff) continue;
+        if (p.timestamp < lastTs) needsSort = true;
+        if (p.timestamp > lastTs) lastTs = p.timestamp;
+        this.positionsAll.push(p);
+
+        for (const id of [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])]) {
+          const list = this.allPosById[id] ??= [];
+          const previous = list[list.length - 1];
+          list.push(p);
+          if (previous && previous.timestamp > p.timestamp) list.sort((a, b) => a.timestamp - b.timestamp);
         }
       }
-      for (const id of touchedIds) {
-        this.allPosById[id]?.sort((a, b) => a.timestamp - b.timestamp);
-      }
+      if (needsSort) this.positionsAll.sort((a, b) => a.timestamp - b.timestamp);
     }
 
-    // 3. Prune old data
     const cutoff = Date.now() - this.historyMs;
-    const firstLive = this.positionsAll.findIndex(p => p.timestamp > cutoff);
-    const pruneCount = firstLive === -1 ? this.positionsAll.length : firstLive;
-    for (let i = 0; i < pruneCount; i++) {
-      const p = this.positionsAll[i];
-      if (!p) continue;
-      const k = dedupeKey(p);
-      this.processedKeys.delete(k);
-      this.knownKeys.delete(k);
-    }
-    if (pruneCount > 0) this.positionsAll = this.positionsAll.slice(pruneCount);
+    this.prunePositions();
 
-    for (const [id, list] of numericEntries(this.allPosById)) {
-      const split = list.findIndex(p => p.timestamp > cutoff);
-      if (split === -1) delete this.allPosById[id];
-      else if (split > 0) this.allPosById[id] = list.slice(split);
-    }
-
-    if (Math.random() < 0.05) db.run("DELETE FROM position_events WHERE timestamp < ?", [cutoff]);
-
-    // 4. Compute Engine State
-    const profiles: Record<number, MotionProfileName> = {};
-    for (const [id, d] of numericEntries(this.devices)) {
-      profiles[id] = d.effectiveMotionProfile;
-    }
+    const profiles = this.currentProfiles();
 
     const posById: Record<number, RawGpsPosition[]> = {};
+    const seenThisCall = new Set<string>();
     for (const p of pts) {
       if (p.timestamp <= cutoff) continue;
       const key = dedupeKey(p);
-      if (this.processedKeys.has(key)) continue;
-      this.processedKeys.add(key);
-      const ids = [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])];
-      for (const id of ids) {
+      if (this.consumedKeys.has(key) || seenThisCall.has(key)) continue;
+      seenThisCall.add(key);
+      for (const id of [p.device, ...(this.deviceToGroupsMap[p.device] ?? [])]) {
         posById[id] ??= [];
         posById[id].push(p);
       }
     }
 
-    // Bootstrap trailing points for touched IDs
+    // Fill the gap between the engine watermark and this batch from the hot window.
+    // An empty gap just means the device was not reporting, which the engine accepts.
     for (const [id, batch] of numericEntries(posById)) {
       const engine = this.engines[id];
-      const lastTs = engine?.lastTimestamp ?? 0;
-      const history = this.allPosById[id] ?? [];
-      const batchKeys = new Set(batch.map(dedupeKey));
+      if (!engine) continue;
+      const trailing = this.joinSourcePositions(this.sourceDeviceIds(id), engine.lastTimestamp ?? 0, batch[0]?.timestamp ?? Number.MAX_SAFE_INTEGER);
+      if (trailing.length === 0) continue;
 
-      const trailing = history.filter(p => p.timestamp > lastTs && !batchKeys.has(dedupeKey(p)));
-      if (!trailing.length) continue;
       posById[id] = [...batch, ...trailing].sort((a, b) => a.timestamp - b.timestamp);
-      for (const p of trailing) this.processedKeys.add(dedupeKey(p));
+    }
+    // A group's batch interleaves several member devices, so it must be ordered
+    // before the engine sees it. Feeding it out of order produces different
+    // events than the same data on the rebuild path.
+    for (const id of Object.keys(posById)) {
+      const list = posById[Number(id)];
+      if (list && list.length > 1) list.sort((a, b) => a.timestamp - b.timestamp);
     }
 
     if (Object.keys(posById).length === 0) return false;
 
     // Replay for out-of-order data
+    const awaitingHistory = new Set<number>();
     for (const [id, newPos] of numericEntries(posById)) {
       const engine = this.engines[id];
       const first = newPos[0];
@@ -589,22 +751,55 @@ export class ServerState {
       const cp = cpIndex >= 0 ? checkpoints[cpIndex] : null;
 
       if (cp) {
+        // Rewinding means replaying every position from the checkpoint forward, so
+        // the window has to reach back that far. If it does not, the range has to
+        // come from Traccar and this entity waits for the next pass.
+        if (!this.windowCovers(id, cp.timestamp)) {
+          this.requestHistory(this.sourceDeviceIds(id), cp.timestamp, Date.now());
+          awaitingHistory.add(id);
+          continue;
+        }
         engine.restoreSnapshot(cp.snapshot);
+        engine.setMembers(cp.snapshot.members);
+        // Restore only the events that had already closed at snapshot time. The
+        // checkpoint timestamp is the engine watermark, which is later than that
+        // boundary, so using it would also load events the restored draft is about to
+        // re-derive.
+        engine.setClosed(this.loadClosedEvents(id, cp.snapshot.closedUpTo ?? cp.timestamp));
         this.engineCheckpoints[id] = checkpoints.slice(0, cpIndex + 1);
         db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ? AND timestamp > ?`, [id, cp.timestamp]);
-        // Replay forward from the restored point. Positions already processed
-        // BEFORE this call are filtered so this batch is not counted twice.
-        const replayed = this.replayPositionsForEntity(id, cp.timestamp);
-        posById[id] = replayed.filter(p => !alreadyProcessedBefore.has(dedupeKey(p)));
+        // The engine was rolled back, so every position from the checkpoint forward has
+        // to be replayed, including ones a previous call already fed. Filtering those
+        // out would leave the engine missing everything between the checkpoint and now.
+        posById[id] = this.joinSourcePositions(this.sourceDeviceIds(id), cp.timestamp, Number.MAX_SAFE_INTEGER);
+      } else if (Date.now() - (this.lastHistoryRequestAt.get(id) ?? 0) < HISTORY_REQUEST_COOLDOWN_MS) {
+        // A rebuild was requested recently. Clearing again would throw away the replay
+        // in flight, so leave the entity alone until that fetch lands.
+        continue;
       } else {
-        // This point predates every checkpoint, so the engine cannot be rewound
-        // far enough to accept it incrementally. Rebuild from scratch instead:
-        // the only correct state is one derived from every raw position.
+        // This point predates every checkpoint, so the engine cannot be rewound far
+        // enough to accept it incrementally. Drop the engine and ask Traccar for the
+        // retained range; the next pass rebuilds from every raw position.
         this.engines[id] = new Engine();
         this.engineCheckpoints[id] = [];
+        delete this.allPosById[id];
         db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ?`, [id]);
-        vlog(`[ServerState] Entity ${id}: point at ${new Date(first.timestamp).toISOString()} predates all checkpoints, rebuilding from raw positions`);
-        posById[id] = this.replayPositionsForEntity(id, 0);
+        vlog(`[ServerState] Entity ${id}: point at ${new Date(first.timestamp).toISOString()} predates all checkpoints, requesting retained history`);
+        this.requestHistory(this.sourceDeviceIds(id), cutoff, Date.now());
+        awaitingHistory.add(id);
+        continue;
+      }
+    }
+
+    for (const id of awaitingHistory) delete posById[id];
+
+    // Marking happens only once every entity that will actually be fed is known. Doing
+    // it earlier swallowed a batch that had to wait for history, because that batch's
+    // keys were already spent by the time the fetched range arrived. Positions older
+    // than the hot window stay unmarked so dedupe memory remains bounded.
+    for (const [, arr] of numericEntries(posById)) {
+      for (const p of arr) {
+        if (p.timestamp > hotCutoff) this.consumedKeys.add(dedupeKey(p));
       }
     }
 
@@ -626,16 +821,26 @@ export class ServerState {
     for (const g of this.groups) {
       motionProfiles[g.id] = g.motionProfile ?? ((g.memberDeviceIds?.some(mId => profiles[mId] === "car")) ? "car" : "person");
     }
+    const result = buildEngineSnapshotsFromByDevice(rawByDevice, this.engines, motionProfiles, Object.keys(rawByDevice).map(Number));
 
-    const result = buildEngineSnapshotsFromByDevice(rawByDevice, this.engines, motionProfiles);
+    // A group checkpoint records its member list, so stamp the current members on
+    // every group engine we touch. Without this a restart can never match, and the
+    // group would be re-derived from Traccar on every boot.
+    for (const id of Object.keys(rawByDevice).map(Number)) {
+      if (this.groupIds.has(id)) this.engines[id]?.setMembers(this.sourceDeviceIds(id));
+    }
+
+    this.pruneEngines();
+
+    for (const [id, engine] of numericEntries(this.engines)) {
+      if (engine.consumeChanged()) this.syncEventsForEntity(id, engine);
+    }
 
     // Prune and Checkpoint
-    const checkpointCutoff = Date.now() - this.historyMs - (24 * 60 * 60 * 1000);
     const pendingCheckpointWrites: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
 
     for (const [id, engine] of numericEntries(this.engines)) {
       if (!engine.lastTimestamp) continue;
-      engine.pruneHistory(checkpointCutoff);
       const checkpoints = this.engineCheckpoints[id] ?? [];
       const lastCp = checkpoints[checkpoints.length - 1];
       if (lastCp && (engine.lastTimestamp - lastCp.timestamp) <= CHECKPOINT_INTERVAL_MS) continue;
@@ -657,7 +862,6 @@ export class ServerState {
 
     Object.assign(this.activePointsByDevice, result.positionsByDevice);
     Object.assign(this.eventsByDevice, result.eventsByDevice);
-
     for (const id in this.eventsByDevice) {
       this.eventsByDevice[id]?.sort((a, b) => b.start - a.start);
     }

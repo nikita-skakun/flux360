@@ -1,7 +1,17 @@
-import { distance } from "./vec2";
+import { cosLatitude } from "./webMercator";
 import type { Vec2 } from "@/types";
 
-export function calculateOutlierScore<T extends { timestamp: number }>(A: T, B: T, C: T, getGeo: (pt: T) => Vec2) {
+export function calculateOutlierScore<T extends { timestamp: number }>(
+  A: T, B: T, C: T, getGeo: (pt: T) => Vec2, cosLat: number
+) {
+  // A, B and C are neighbours, so one scale factor for the whole triple is enough.
+  // Deriving it per distance call made the projection maths dominate the score.
+  const planarDistance = (p: Vec2, q: Vec2) => {
+    const dx = p[0] - q[0];
+    const dy = p[1] - q[1];
+    return Math.sqrt(dx * dx + dy * dy) * cosLat;
+  };
+
   const durationMs = C.timestamp - A.timestamp;
   const duration = durationMs > 0 ? durationMs / 1000 : 0;
 
@@ -9,10 +19,12 @@ export function calculateOutlierScore<T extends { timestamp: number }>(A: T, B: 
   const geoB = getGeo(B);
   const geoC = getGeo(C);
 
-  const distAB = distance(geoB, geoA);
-  const distBC = distance(geoC, geoB);
+  // Distances are metric, so the 3.6 below really does produce km/h and the score
+  // threshold is not latitude dependent.
+  const distAB = planarDistance(geoB, geoA);
+  const distBC = planarDistance(geoC, geoB);
   const totalDistance = distAB + distBC;
-  const directDistance = distance(geoC, geoA);
+  const directDistance = planarDistance(geoC, geoA);
 
   const directSpeed = duration > 0 ? (directDistance / duration) * 3.6 : 0;
   const ratio = totalDistance / Math.max(0.1, directDistance);
@@ -33,50 +45,40 @@ export function calculateOutlierScore<T extends { timestamp: number }>(A: T, B: 
   return { duration, distance: totalDistance, speed, directSpeed, ratio, score };
 }
 
+/**
+ * Outlier filter over a timestamp-ordered path.
+ *
+ * Coordinates are Web Mercator and distances are metric, matching the engine.
+ * Each internal point is scored against the last accepted point and its
+ * successor, and a rejected point never becomes an anchor for later scoring, so
+ * runs of consecutive outliers are all caught. The path arrives already sorted,
+ * so this avoids the re-sort and merged copy that made a long motion quadratic
+ * on every step. `previousOutliers` is appended to in place and returned.
+ */
 export function filterMotionOutliers<T extends { timestamp: number }>(
   currentPath: T[],
   previousOutliers: T[] = [],
   getGeo: (pt: T) => Vec2,
   threshold: number = 100
-): { cleanPath: T[], newOutliers: T[] } {
-  // 1. Combine and sort
-  const combined = [...currentPath, ...previousOutliers].sort((a, b) => a.timestamp - b.timestamp);
+): { cleanPath: T[]; newOutliers: T[] } {
+  const n = currentPath.length;
+  if (n < 3) return { cleanPath: currentPath, newOutliers: previousOutliers };
 
-  if (combined.length < 3) {
-    return { cleanPath: combined, newOutliers: [] };
-  }
+  const cleanPath: T[] = [currentPath[0]!];
+  const cosLat = cosLatitude(getGeo(currentPath[0]!)[1]);
+  let anchorIndex = 0;
 
-  const cleanPath: T[] = [];
-  const startPt = combined[0];
-  if (!startPt) return { cleanPath, newOutliers: [] };
-
-  cleanPath.push(startPt);
-  const newOutliers: T[] = [];
-
-  // We only check internal points against the currently accepted previous point.
-  // This helps handle sequences of outliers better without complex multi-pass logic.
-  let A = startPt;
-
-  for (let i = 1; i < combined.length - 1; i++) {
-    const B = combined[i];
-    const C = combined[i + 1];
-
-    if (!A || !B || !C) continue;
-
-    const { score } = calculateOutlierScore(A, B, C, getGeo);
-
+  for (let i = 1; i < n - 1; i++) {
+    const point = currentPath[i]!;
+    const { score } = calculateOutlierScore(currentPath[anchorIndex]!, point, currentPath[i + 1]!, getGeo, cosLat);
     if (score > threshold) {
-      newOutliers.push(B);
-      // We do NOT update A, so the next point is checked against the same valid anchor A
-    } else {
-      cleanPath.push(B);
-      A = B;
+      previousOutliers.push(point);
+      continue;
     }
+    cleanPath.push(point);
+    anchorIndex = i;
   }
 
-  // The last point is never filtered as a midpoint.
-  const lastPt = combined[combined.length - 1];
-  if (lastPt) cleanPath.push(lastPt);
-
-  return { cleanPath, newOutliers };
+  cleanPath.push(currentPath[n - 1]!);
+  return { cleanPath, newOutliers: previousOutliers };
 }

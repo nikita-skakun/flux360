@@ -11,10 +11,6 @@ const ICON_PENCIL = <Pencil className="h-4 w-4" />;
 const ICON_USER_PLUS = <UserPlus className="h-4 w-4" />;
 const ICON_CLOSE = <X className="h-4 w-4" />;
 
-// UI confidence thresholds for display
-const CONFIDENCE_HIGH_THRESHOLD = 0.8;
-const CONFIDENCE_MEDIUM_THRESHOLD = 0.5;
-
 type Props = {
   selectedDeviceId: number | null;
   activePointsByDevice: Record<number, DevicePoint[]>;
@@ -209,7 +205,7 @@ function DeviceOverlayComponent({
             {mostRecentSourceName && <div className="text-muted-foreground/70 text-xs mt-0.5">Latest from: {mostRecentSourceName}</div>}
           </div>
         )}
-        <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m · {(chosen.confidence >= CONFIDENCE_HIGH_THRESHOLD ? "High" : chosen.confidence >= CONFIDENCE_MEDIUM_THRESHOLD ? "Medium" : "Low")} confidence ({chosen.confidence.toFixed(2)})</div>
+        <div className="text-xs text-muted-foreground">Accuracy: {typeof chosen.accuracy === 'number' ? Math.round(chosen.accuracy) : ""} m</div>
         <div className="text-xs text-muted-foreground">At location for: <DurationDisplay timestamp={chosen.anchorStartTimestamp} addSuffix={false} /></div>
       </div>
 

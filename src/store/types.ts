@@ -9,6 +9,7 @@ export type StoreState = {
   // Settings slice (persisted)
   settings: {
     maptilerApiKey: string;
+    historyDays: number;
     theme: ThemeOptions;
     sessionToken: string | null;
   };

@@ -24,10 +24,11 @@ export function normalizePosition(raw: unknown): RawGpsPosition | null {
 export function buildEngineSnapshotsFromByDevice(
   byDevice: Record<number, DevicePoint[]>,
   engines: Record<number, Engine>,
-  motionProfiles: Record<number, MotionProfileName>
+  motionProfiles: Record<number, MotionProfileName>,
+  entityIds: number[]
 ): { positionsByDevice: Record<number, DevicePoint[]>; eventsByDevice: Record<number, EngineEvent[]> } {
   try {
-    // 1. Process measurements for all devices in this batch
+    // 1. Process measurements for the entities this batch touched.
     for (const [deviceId, arr] of numericEntries(byDevice)) {
       let engine = engines[deviceId];
       if (!engine) {
@@ -38,12 +39,14 @@ export function buildEngineSnapshotsFromByDevice(
       engine.processMeasurements(arr);
       engine.refineHistory();
     }
-
-    // 2. Build current state for all engines
+    // 2. Build current state for the requested engines only. Rebuilding every
+    // engine made each batch cost scale with the size of the whole fleet.
     const positionsByDevice: Record<number, DevicePoint[]> = {};
     const eventsByDevice: Record<number, EngineEvent[]> = {};
 
-    for (const [deviceId, engine] of numericEntries(engines)) {
+    for (const deviceId of entityIds) {
+      const engine = engines[deviceId];
+      if (!engine) continue;
       try {
         const snapshot = engine.getState();
         const events = [...engine.closed];
@@ -79,6 +82,7 @@ export function buildEngineSnapshotsFromByDevice(
             geo: fromWebMercator(stats.mean),
             accuracy: Math.sqrt(stats.variance),
             anchorStartTimestamp: draft.start,
+            // STUB: hardcoded 1.0, this is not a real confidence and nothing reads it yet.
             confidence: 1.0,
             sourceDeviceId: null
           }];
@@ -106,6 +110,7 @@ export function buildEngineSnapshotsFromByDevice(
             geo: fromWebMercator(lastPt.mean),
             accuracy: Math.sqrt(stats.variance),
             anchorStartTimestamp: draft.start,
+            // STUB: hardcoded 1.0, this is not a real confidence and nothing reads it yet.
             confidence: 1.0,
             sourceDeviceId: null
           }];

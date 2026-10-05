@@ -24,6 +24,7 @@ export function App() {
 
   const entities = useStore(state => state.entities);
   const maptilerApiKey = useStore(state => state.settings.maptilerApiKey);
+  const historyDays = useStore(state => state.settings.historyDays);
   const theme = useStore(state => state.settings.theme);
 
   const [systemIsDark, setSystemIsDark] = useState(
@@ -203,6 +204,7 @@ export function App() {
             <TimelinePanel
               selectedDeviceId={selectedDeviceId}
               eventsByDevice={eventsByDevice}
+              historyDays={historyDays}
               onSelectEvent={(event) => {
                 setSelectedTimelineEvent(event);
 

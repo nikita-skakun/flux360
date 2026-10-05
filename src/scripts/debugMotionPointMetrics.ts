@@ -1,4 +1,5 @@
 import { calculateOutlierScore } from "@/util/motionOutliers";
+import { cosLatitude } from "@/util/webMercator";
 import { decode, encode } from "@toon-format/toon";
 import { MotionEventSchema } from "@/types";
 import { parseArgs } from "util";
@@ -29,7 +30,7 @@ async function main() {
 
     if (!A || !B || !C) continue;
 
-    const { duration, distance, speed, directSpeed, ratio, score } = calculateOutlierScore(A, B, C, (p) => p.geo);
+    const { duration, distance, speed, directSpeed, ratio, score } = calculateOutlierScore(A, B, C, (p) => p.geo, cosLatitude(B.geo[1]));
 
     metrics.push({
       idx: i,

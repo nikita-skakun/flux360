@@ -20,7 +20,8 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 - **Movement Smoothing**: Real-time filtering of movement events reduces jitter and path deviations, providing a continuous and accurate trajectory.
 - **Settling Logic**: Automatically detects when motion has ceased by analyzing recent position points. If points are clustered and movement appears random (noise), the engine establishes a stable stationary position at the centroid, smoothing transitions in noisy environments.
 - **Device Sharing**: Securely share access to specific devices with other users.
-- **Persistent History & Backfilling**: Automatically backfills missing historical data from Traccar on startup, maintaining a rolling window of high-resolution position snapshots.
+- **Persistent History & Backfilling**: Automatically backfills missing historical data from Traccar on startup. Derived events are stored as rows in the `events` table, so history is queryable by entity and time range without replaying raw positions.
+- **Bounded Restart State**: Engine checkpoints carry only the in-progress event, not a copy of history, so startup cost is independent of how much history is retained.
 - **Device Grouping**: Aggregate multiple devices into virtual groups for combined tracking (e.g., family or fleet views).
 - **Timeline Panel**: Visualizes the past 24 hours of stationary and moving events, allowing users to replay historical map paths.
 - **Interactive Mapping**: MapTiler SDK-based map with visual overlays for accuracy circles, device icons, history observation bounds, and clustering.
@@ -37,13 +38,12 @@ A real-time GPS tracking visualization tool that connects to Traccar servers for
 
 Copy `.env.example` to `.env` and configure the environment variables:
 
-| Environment Variable | Description |
-|---|---|
-| `TRACCAR_BASE_URL` | Hostname of your [Traccar](https://www.traccar.org) server |
-| `TRACCAR_SECURE` | `true` for HTTPS/WSS, `false` for HTTP/WS |
-| `MAPTILER_API_KEY` | [MapTiler](https://www.maptiler.com) API key |
-| `TRACCAR_API_TOKEN` | Admin token for the Traccar server |
-| `HISTORY_DAYS` | Number of days of historical tracking data to retain |
+- `TRACCAR_BASE_URL`: hostname of your [Traccar](https://www.traccar.org) server.
+- `TRACCAR_SECURE`: `true` for HTTPS/WSS, `false` for HTTP/WS.
+- `MAPTILER_API_KEY`: [MapTiler](https://www.maptiler.com) API key.
+- `TRACCAR_API_TOKEN`: admin token for the Traccar server.
+- `HISTORY_DAYS`: days of history to retain. This is the single source of truth for retention: position pruning, event pruning, the timeline window, and the client all derive from it.
+- `TRUSTED_HOST`: optional `host:port` used to validate websocket origins when the server is not on `localhost`.
 
 Install dependencies:
 ```bash
@@ -54,6 +54,35 @@ Run the development server:
 ```bash
 bun run dev # runs on port 6474
 ```
+
+## Architecture
+
+State lives in three places, each with one job:
+
+- **Traccar** is the system of record for raw GPS positions. Flux360 stores no copy of them. It keeps only a two hour hot window in RAM for deduplication and incremental ingest, and fetches any other range from `fetchHistory`.
+- **`events`** holds derived stationary and motion events as rows, indexed by entity and time range. This is the only state that cannot be re-derived, because Traccar does not know what the engine concluded.
+- **`engine_checkpoints`** holds only the in-progress event plus a timestamp, one small snapshot per entity per interval.
+
+A group checkpoint also records its member list, so a restart with unchanged membership reuses the group's derived events instead of re-deriving them.
+
+When a needed range is not resident, the engine records a history request rather than feeding itself a hole. The server loop drains those requests, coalesces them per device, and fetches them sequentially so a burst of out-of-order points cannot stampede the Traccar API.
+
+An out-of-order observation older than the hot window queues a rebuild from Traccar rather than discarding the entity's history. Derived events stay durable in the `events` table while that fetch is in flight.
+
+The database runs in WAL mode with `synchronous = NORMAL`, because a full fsync per position batch otherwise shows up as sporadic 150 to 200 ms stalls.
+
+Coordinates are stored as Web Mercator, but every distance, radius, velocity and variance the engine compares against a threshold is in metres. Web Mercator is conformal, so ground distance is planar distance multiplied by `cos(latitude)`; `metricDistance` and `cosLatitude` in `src/util/webMercator.ts` are the only places that conversion should happen. Mixing the two spaces makes thresholds silently latitude dependent.
+
+## Development
+
+Run the synthetic test suite and the benchmark harness:
+
+```bash
+bun run test
+bun run bench 10 7
+```
+
+The tests use generated tracks only. No real location data is stored in this repository.
 
 ## Docker Deployment
 
