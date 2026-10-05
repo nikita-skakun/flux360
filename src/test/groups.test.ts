@@ -16,7 +16,7 @@ function pairHistory() {
     parkSeconds: 1500,
     speedMps: 13.9,
     accuracy: 6,
-    jitter: 0.000004,
+    parkJitterMeters: 0.5,
     cycles: 6,
   };
   // Two trackers at effectively the same place on the same route, which is the

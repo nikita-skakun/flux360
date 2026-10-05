@@ -23,7 +23,7 @@ function drive() {
     parkSeconds: 1800,
     speedMps: 13.9,
     accuracy: 6,
-    jitter: 0.000004,
+    parkJitterMeters: 0.5,
     lon0: 10,
     lat0: 50,
     cycles: 3,

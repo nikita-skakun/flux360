@@ -80,7 +80,10 @@ Run the synthetic test suite and the benchmark harness:
 ```bash
 bun run test
 bun run bench 10 7
+bun run bench 5 7 google
 ```
+
+`bench` takes a device count, a day count, and an optional channel. Channels describe how a real source reports: `dense` is the synthetic 10 second, 6 metre baseline, while `phone`, `airtag` and `google` vary cadence from 15 seconds to a median of an hour and accuracy from 5 to 70 metres. The sparse channels are the realistic case, and they behave very differently, so benchmark both.
 
 The tests use generated tracks only. No real location data is stored in this repository.
 

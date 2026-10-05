@@ -18,7 +18,7 @@ function sixHourDrive(device = 1, lon0 = 10, lat0 = 50) {
     parkSeconds: 1800,
     speedMps: 13.9,
     accuracy: 6,
-    jitter: 0.000004,
+    parkJitterMeters: 0.5,
     lon0,
     lat0,
     cycles: 8,

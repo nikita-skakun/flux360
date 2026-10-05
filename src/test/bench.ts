@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync, rmSync } from "node:fs";
-import { makeDevice, synthTrack } from "./synth";
+import { CHANNELS, makeDevice, synthTrack } from "./synth";
+import type { ChannelName } from "./synth";
 import { asRawGpsCoord } from "@/types";
 import { buildEngineSnapshotsFromByDevice } from "@/server/serverUtils";
 import type { RawGpsPosition, TraccarDevice } from "@/types";
@@ -11,26 +12,28 @@ const DAY = 24 * HOUR;
 type Config = {
   devices: number;
   days: number;
+  channel: ChannelName | "dense";
   sampleMs: number;
+  accuracy: number;
 };
 
 function buildTracks(cfg: Config, startTime: number): RawGpsPosition[] {
   const out: RawGpsPosition[] = [];
-  const cycleSamples = Math.round((3000 * 1000) / cfg.sampleMs);
-  const cycles = Math.ceil((cfg.days * DAY) / (cycleSamples * cfg.sampleMs));
+  const cycles = Math.ceil((cfg.days * DAY) / (3000 * 1000));
   for (let d = 0; d < cfg.devices; d++) {
     out.push(...synthTrack({
       device: d + 1,
       startTime,
-      sampleMs: cfg.sampleMs,
       driveSeconds: 1200,
       parkSeconds: 1800,
       speedMps: 13.9,
-      accuracy: 6,
-      jitter: 0.000004,
+      parkJitterMeters: 0.5,
+      sampleMs: cfg.sampleMs,
+      accuracy: cfg.accuracy,
       lon0: 10 + d * 0.01,
       lat0: 50 + d * 0.01,
       cycles,
+      ...(cfg.channel === "dense" ? {} : { channel: cfg.channel }),
     }));
   }
   return out;
@@ -91,7 +94,7 @@ async function run(cfg: Config) {
   const sampleFor = (i: number): RawGpsPosition[] => {
     const device = (i % cfg.devices) + 1;
     const geo = lastGeo.get(device) ?? asRawGpsCoord([10, 50]);
-    return [{ device, timestamp: 0, geo, accuracy: 6 }];
+    return [{ device, timestamp: 0, geo, accuracy: cfg.accuracy }];
   };
 
   const WARMUP = 60;
@@ -137,7 +140,7 @@ async function run(cfg: Config) {
   const cpBytes = checkpointBytes(st);
   const eventBytes = dbBytes(dbPath, "events");
 
-  console.log(`\n=== ${cfg.devices} devices x ${cfg.days} days @ ${cfg.sampleMs / 1000}s ===`);
+  console.log(`\n=== ${cfg.devices} devices x ${cfg.days} days, channel ${cfg.channel} @ ${cfg.sampleMs / 1000}s, accuracy ${cfg.accuracy}m ===`);
   console.log(`raw positions ingested : ${ingestedPositions.toLocaleString()}`);
   console.log(`events derived         : ${events.toLocaleString()}`);
   console.log(`bulk ingest            : ${ingestMs.toFixed(0)}ms`);
@@ -189,4 +192,12 @@ async function run(cfg: Config) {
 
 const DEVICES = Number(process.argv[2] ?? "10");
 const DAYS = Number(process.argv[3] ?? "2");
-await run({ devices: DEVICES, days: DAYS, sampleMs: 10_000 });
+const CHANNEL = (process.argv[4] ?? "dense") as Config["channel"];
+const profile = CHANNEL === "dense" ? null : CHANNELS[CHANNEL];
+await run({
+  devices: DEVICES,
+  days: DAYS,
+  channel: CHANNEL,
+  sampleMs: profile?.sampleMs ?? 10_000,
+  accuracy: profile ? (profile.accuracyMin + profile.accuracyMax) / 2 : 6,
+});
