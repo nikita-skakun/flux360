@@ -1,4 +1,7 @@
 import { ClientMessageSchema, TraccarDeviceSchema } from "@/types";
+import { readLabels, removeLabel, upsertLabel } from "@/labels/store";
+import { checkPlacement } from "@/labels/validation";
+import { isAllowedOrigin } from "./server/originGuard";
 import { db } from "./server/db";
 import { getTraccarApiBase } from "./server/traccarUrlUtils";
 import { loadConfig } from "./util/config";
@@ -97,12 +100,6 @@ async function refreshTraccarUsersCache(authToken: string, reason: string): Prom
     console.error(`[Users Cache] Background refresh error (${reason}):`, e);
   }
 }
-
-const hostHeader = (() => {
-  const configured = process.env["TRUSTED_HOST"];
-  if (configured && configured.length > 0) return configured;
-  return `localhost:${port}`;
-})();
 
 function isSQLiteConstraintError(err: unknown) {
   if (!(err instanceof Error)) return false;
@@ -320,21 +317,6 @@ function initTraccarClient(baseUrl: string, secure: boolean, token: string) {
 const currentBaseUrl = config.traccarBaseUrl;
 const currentToken = config.traccarApiToken;
 
-/**
- * Same-origin guard for the websocket upgrade. Non-browser clients send no
- * Origin header at all and are allowed through; only a browser-supplied
- * mismatched origin is rejected.
- */
-function isAllowedOrigin(origin: string): boolean {
-  let host: string;
-  try {
-    host = new URL(origin).host;
-  } catch {
-    return false;
-  }
-  return host === hostHeader;
-}
-
 function getClientIP(request: Request, server: Server<WSData>): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
     ?? request.headers.get("x-real-ip")?.trim()
@@ -360,7 +342,7 @@ const wsRouteHandler = (request: Request, server: Server<WSData>) => {
   return new Response("Upgrade failed", { status: 400 });
 };
 
-serve<WSData>({
+const server = serve<WSData>({
   port,
   routes: isProduction
     ? {
@@ -460,14 +442,34 @@ serve<WSData>({
 
             const devicesUrl = `${apiBase}/devices`;
 
-            const devicesRes = await fetch(devicesUrl, {
-              headers: { "Authorization": `Bearer ${traccarToken}`, "Accept": "application/json" }
-            });
+            let devicesRes: Response;
+            try {
+              devicesRes = await fetch(devicesUrl, {
+                headers: { "Authorization": `Bearer ${traccarToken}`, "Accept": "application/json" }
+              });
+            } catch (error) {
+              // Traccar being unreachable says nothing about whether this session is
+              // valid, so the session is left alone and the client is told to retry.
+              console.error(`[WS] Device lookup failed for ${username}:`, error);
+              ws.send(JSON.stringify({ type: "error", message: "Tracking backend is unavailable" }));
+              ws.close(1011, "Upstream unavailable");
+              return;
+            }
 
-            if (!devicesRes.ok) {
+            // Only a rejection of the credential itself ends the session. A 403 can also
+            // mean the account lacks permission rather than that the token is dead, but
+            // holding a session that cannot do anything is worse than asking to log in.
+            if (devicesRes.status === 401 || devicesRes.status === 403) {
               ws.send(JSON.stringify({ type: "error", message: "Session expired" }));
               sessionStore.deleteSession(data.token);
               ws.close(1008, "Session expired");
+              return;
+            }
+
+            if (!devicesRes.ok) {
+              console.error(`[WS] Device lookup for ${username} returned HTTP ${devicesRes.status}`);
+              ws.send(JSON.stringify({ type: "error", message: "Tracking backend is unavailable" }));
+              ws.close(1011, "Upstream unavailable");
               return;
             }
 
@@ -743,6 +745,58 @@ serve<WSData>({
                   ws.send(JSON.stringify({ type: "unshare_success", deviceId, username: targetUsername, requestId }));
                   break;
                 }
+                case "list_labels": {
+                  const { entityId } = data.payload;
+                  ensureOwned(entityId);
+                  ws.send(JSON.stringify({
+                    type: "labels_list",
+                    payload: { entityId, labels: readLabels(entityId) },
+                    requestId
+                  }));
+                  break;
+                }
+                case "get_history": {
+                  const { entityId, from, to } = data.payload;
+                  ensureOwned(entityId);
+                  if (!traccarClient) throw new SafeError("Tracking backend is not connected");
+                  const memberIds = entityId < 0 ? serverState.getGroupMembers(entityId) : [entityId];
+                  if (memberIds.length === 0) throw new SafeError("This entity has no devices");
+
+                  const fixes: { device: number; geo: [number, number]; accuracy: number; timestamp: number }[] = [];
+                  for (const memberId of memberIds) {
+                    for (const fix of await traccarClient.fetchHistory(memberId, from, to)) {
+                      fixes.push({ device: fix.device, geo: [fix.geo[0], fix.geo[1]], accuracy: fix.accuracy, timestamp: fix.timestamp });
+                    }
+                  }
+                  fixes.sort((a, b) => a.timestamp - b.timestamp);
+                  ws.send(JSON.stringify({ type: "history_chunk", payload: { entityId, fixes }, requestId }));
+                  break;
+                }
+                case "set_label": {
+                  const { label } = data.payload;
+                  ensureOwned(label.deviceId);
+                  const existing = readLabels(label.deviceId);
+                  const placement = checkPlacement(existing.filter(other => other.id !== label.id), label);
+                  if (!placement.ok) throw new SafeError(placement.reason);
+                  upsertLabel(label);
+                  ws.send(JSON.stringify({
+                    type: "labels_list",
+                    payload: { entityId: label.deviceId, labels: readLabels(label.deviceId) },
+                    requestId
+                  }));
+                  break;
+                }
+                case "remove_label": {
+                  const { entityId, id } = data.payload;
+                  ensureOwned(entityId);
+                  removeLabel(entityId, id);
+                  ws.send(JSON.stringify({
+                    type: "labels_list",
+                    payload: { entityId, labels: readLabels(entityId) },
+                    requestId
+                  }));
+                  break;
+                }
                 case "get_shares": {
                   const allShares = db.query(
                     `SELECT deviceId, sharedWith, sharedAt FROM device_shares WHERE sharedBy = ?`
@@ -819,3 +873,30 @@ setInterval(() => {
 }, 30000); // 30 seconds
 
 console.log(`🚀 Server running at http://localhost:${port}`);
+
+let shuttingDown = false;
+
+// Docker sends SIGTERM and waits ten seconds for the process to leave before SIGKILL.
+// The server runs as PID 1 in the container, and the kernel will not apply the default
+// terminate action to PID 1 unless a handler is installed, so without this the signal
+// is silently dropped and every restart costs the full grace period.
+function shutdown(signal: "SIGTERM" | "SIGINT"): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal}, shutting down.`);
+
+  try {
+    void server.stop(true);
+    traccarClient?.close();
+    serverState.flush();
+    db.close();
+    console.log("Shutdown complete.");
+  } catch (error) {
+    console.error("Shutdown failed:", error);
+  }
+
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

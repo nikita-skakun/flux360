@@ -4,6 +4,11 @@ import { numericEntries } from '@/util/record';
 import { persist } from 'zustand/middleware';
 import type { DeviceShare, DeviceMetadata } from '@/types';
 import type { Store, StoreState, ThemeOptions } from './types';
+import { applyOpToLabels, invertOp, opEntityId, popUndo, pushOp } from '@/labels/undo';
+import { mergeFixes } from '@/labels/fixes';
+import { checkPlacement } from '@/labels/validation';
+import type { Label, StripFix } from '@/labels/types';
+import type { LabelOp } from '@/labels/undo';
 
 const initialState: StoreState = {
   entities: {},
@@ -23,9 +28,14 @@ const initialState: StoreState = {
     selectedDeviceId: null,
     isSidePanelOpen: true,
     editingTarget: null,
+    isLabelMode: false,
   },
   activePointsByDevice: {},
   eventsByDevice: {},
+  labelsByEntity: {},
+  historyFixesByEntity: {},
+  labelHistory: [],
+  labelError: null,
 };
 
 export const useStore = create<Store>()(
@@ -206,6 +216,110 @@ export const useStore = create<Store>()(
             isSidePanelOpen: open,
           }
         }));
+      },
+
+      setLabelMode: (enabled: boolean) => {
+        set(state => ({
+          ui: {
+            ...state.ui,
+            isLabelMode: enabled,
+          }
+        }));
+      },
+
+      setLabelError: (message: string | null) => {
+        set({ labelError: message });
+      },
+
+      loadLabels: async (entityId: number) => {
+        const response = await sendRPC<{ payload: { labels: Label[] } }>('list_labels', { entityId });
+        set(state => ({
+          labelsByEntity: { ...state.labelsByEntity, [entityId]: response.payload.labels },
+        }));
+      },
+
+      loadHistory: async (entityId: number, from: number, to: number) => {
+        const response = await sendRPC<{ payload: { fixes: StripFix[] } }>('get_history', { entityId, from, to });
+        set(state => {
+          const existing = state.historyFixesByEntity[entityId] ?? [];
+          return {
+            historyFixesByEntity: {
+              ...state.historyFixesByEntity,
+              [entityId]: mergeFixes(existing, response.payload.fixes),
+            },
+          };
+        });
+      },
+
+      runLabelOp: async (op: LabelOp) => {
+        const entityId = opEntityId(op);
+        const before = get().labelsByEntity[entityId] ?? [];
+
+        set(state => ({
+          labelsByEntity: { ...state.labelsByEntity, [entityId]: applyOpToLabels(before, op) },
+          labelError: null,
+        }));
+
+        try {
+          const response = await sendRPC<{ payload: { labels: Label[] } }>(
+            op.kind === 'remove' ? 'remove_label' : 'set_label',
+            op.kind === 'remove' ? { entityId, id: op.label.id } : { label: op.kind === 'update' ? op.after : op.label }
+          );
+          set(state => ({
+            labelsByEntity: { ...state.labelsByEntity, [entityId]: response.payload.labels },
+          }));
+        } catch (error) {
+          set(state => ({
+            labelsByEntity: { ...state.labelsByEntity, [entityId]: before },
+            labelError: error instanceof Error ? error.message : String(error),
+          }));
+          throw error;
+        }
+      },
+
+      writeLabel: async (rawLabel: Label) => {
+        // A group's members change over time, so a label made against one records the
+        // devices it described. Stamped here rather than at each call site, because
+        // marking a single fix on a group as an outlier built its label without members
+        // and was then refused for missing them.
+        let label = rawLabel;
+        if (label.deviceId < 0 && !label.memberDeviceIds?.length) {
+          const members = get().entities[label.deviceId]?.memberDeviceIds;
+          if (members?.length) label = { ...label, memberDeviceIds: members };
+        }
+
+        const all = get().labelsByEntity[label.deviceId] ?? [];
+        const existing = all.find(other => other.id === label.id) ?? null;
+
+        // Decided here so an overlapping label never reaches local state. Letting the
+        // optimistic apply run and reverting on the server's refusal painted the label
+        // for a frame or two before removing it.
+        const placement = checkPlacement(all.filter(other => other.id !== label.id), label);
+        if (!placement.ok) {
+          set({ labelError: placement.reason });
+          return;
+        }
+
+        const op: LabelOp = existing
+          ? { kind: 'update', before: existing, after: label }
+          : { kind: 'add', label };
+        await get().runLabelOp(op);
+        set(state => ({ labelHistory: pushOp(state.labelHistory, op) }));
+      },
+
+      deleteLabel: async (entityId: number, id: string) => {
+        const existing = (get().labelsByEntity[entityId] ?? []).find(other => other.id === id);
+        if (!existing) return;
+        const op: LabelOp = { kind: 'remove', label: existing };
+        await get().runLabelOp(op);
+        set(state => ({ labelHistory: pushOp(state.labelHistory, op) }));
+      },
+
+      undoLabel: async () => {
+        const { op, history } = popUndo(get().labelHistory);
+        if (!op) return;
+        await get().runLabelOp(invertOp(op));
+        set({ labelHistory: history });
       },
 
       setEditingTarget: (target) => {

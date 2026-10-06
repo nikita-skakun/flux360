@@ -43,7 +43,6 @@ Copy `.env.example` to `.env` and configure the environment variables:
 - `MAPTILER_API_KEY`: [MapTiler](https://www.maptiler.com) API key.
 - `TRACCAR_API_TOKEN`: admin token for the Traccar server.
 - `HISTORY_DAYS`: days of history to retain. This is the single source of truth for retention: position pruning, event pruning, the timeline window, and the client all derive from it.
-- `TRUSTED_HOST`: optional `host:port` used to validate websocket origins when the server is not on `localhost`.
 
 Install dependencies:
 ```bash
@@ -62,16 +61,6 @@ State lives in three places, each with one job:
 - **Traccar** is the system of record for raw GPS positions. Flux360 stores no copy of them. It keeps only a two hour hot window in RAM for deduplication and incremental ingest, and fetches any other range from `fetchHistory`.
 - **`events`** holds derived stationary and motion events as rows, indexed by entity and time range. This is the only state that cannot be re-derived, because Traccar does not know what the engine concluded.
 - **`engine_checkpoints`** holds only the in-progress event plus a timestamp, one small snapshot per entity per interval.
-
-A group checkpoint also records its member list, so a restart with unchanged membership reuses the group's derived events instead of re-deriving them.
-
-When a needed range is not resident, the engine records a history request rather than feeding itself a hole. The server loop drains those requests, coalesces them per device, and fetches them sequentially so a burst of out-of-order points cannot stampede the Traccar API.
-
-An out-of-order observation older than the hot window queues a rebuild from Traccar rather than discarding the entity's history. Derived events stay durable in the `events` table while that fetch is in flight.
-
-The database runs in WAL mode with `synchronous = NORMAL`, because a full fsync per position batch otherwise shows up as sporadic 150 to 200 ms stalls.
-
-Coordinates are stored as Web Mercator, but every distance, radius, velocity and variance the engine compares against a threshold is in metres. Web Mercator is conformal, so ground distance is planar distance multiplied by `cos(latitude)`; `metricDistance` and `cosLatitude` in `src/util/webMercator.ts` are the only places that conversion should happen. Mixing the two spaces makes thresholds silently latitude dependent.
 
 ## Development
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LabelSchema, StripFixSchema } from "@/labels/types";
 
 const Vec2Schema = z.tuple([z.number(), z.number()]);
 export type Vec2 = z.infer<typeof Vec2Schema>;
@@ -219,6 +220,16 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("share_success"), deviceId: z.number(), sharedWith: z.string(), requestId: z.string() }),
   z.object({ type: z.literal("unshare_success"), deviceId: z.number(), username: z.string(), requestId: z.string() }),
   z.object({ type: z.literal("shares_list"), payload: z.array(DeviceShareSchema), requestId: z.string() }),
+  z.object({
+    type: z.literal("history_chunk"),
+    payload: z.object({ entityId: z.number(), fixes: z.array(StripFixSchema) }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("labels_list"),
+    payload: z.object({ entityId: z.number(), labels: z.array(LabelSchema) }),
+    requestId: z.string()
+  }),
   z.object({ type: z.literal("error"), message: z.string(), requestId: z.string().optional() }),
   z.object({ type: z.literal("ping"), requestId: z.never().optional() }),
 ]);
@@ -278,6 +289,26 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("get_shares"),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("list_labels"),
+    payload: z.object({ entityId: z.number() }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("get_history"),
+    payload: z.object({ entityId: z.number(), from: z.number(), to: z.number() }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("set_label"),
+    payload: z.object({ label: LabelSchema }),
+    requestId: z.string()
+  }),
+  z.object({
+    type: z.literal("remove_label"),
+    payload: z.object({ entityId: z.number(), id: z.string() }),
     requestId: z.string()
   }),
   z.object({ type: z.literal("pong"), requestId: z.never().optional() }),

@@ -115,6 +115,53 @@ export class ServerState {
     }
   }
 
+  /**
+   * Writes a checkpoint for every engine that has advanced past its newest one.
+   *
+   * Boot only has to replay from the newest checkpoint, so checkpoints are the whole
+   * reason a restart is cheap. `force` ignores the interval gate, which is what makes
+   * the last few minutes of state survive a shutdown instead of being recomputed from
+   * Traccar on the next start.
+   */
+  private checkpointEngines(force: boolean): void {
+    const pending: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
+
+    for (const [id, engine] of numericEntries(this.engines)) {
+      if (!engine.lastTimestamp) continue;
+      const checkpoints = this.engineCheckpoints[id] ?? [];
+      const lastCp = checkpoints[checkpoints.length - 1];
+      if (lastCp && lastCp.timestamp >= engine.lastTimestamp) continue;
+      if (!force && lastCp && (engine.lastTimestamp - lastCp.timestamp) <= CHECKPOINT_INTERVAL_MS) continue;
+      const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
+      checkpoints.push(cp);
+      this.engineCheckpoints[id] = checkpoints;
+      pending.push({ id, cp });
+
+      if (checkpoints.length > MAX_CHECKPOINTS) {
+        const oldest = checkpoints.shift();
+        if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ? AND timestamp = ?`, [id, oldest.timestamp]);
+      }
+    }
+
+    if (pending.length === 0) return;
+    const stmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (deviceId, timestamp, snapshotJson) VALUES (?, ?, ?)`);
+    db.transaction(() => pending.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
+  }
+
+  /**
+   * Hands the engines and the database to disk before the process exits.
+   *
+   * Events are normally synced right after the batch that produced them, but doing it
+   * again here costs nothing when there is nothing pending and guarantees the events
+   * table matches the engines at the moment of exit.
+   */
+  flush(): void {
+    for (const [id, engine] of numericEntries(this.engines)) {
+      if (engine.consumeChanged()) this.syncEventsForEntity(id, engine);
+    }
+    this.checkpointEngines(true);
+  }
+
   private loadEventRows() {
     this.eventRows = {};
     const rows = db.query(`SELECT id, entityId, type, start, end FROM events`).all() as
@@ -385,8 +432,11 @@ export class ServerState {
 
     for (const raw of Object.values(this.rawTraccarDevices)) {
       const id = raw.id;
+      // Every device Traccar reports is listed, however long ago it last reported.
+      // History retention below governs how much history the engine keeps, and using it
+      // to decide visibility hid devices that had merely been offline, which is exactly
+      // when knowing the last seen time matters most.
       const lastSeen = raw.lastUpdate ? Date.parse(raw.lastUpdate) : null;
-      if (lastSeen && lastSeen < Date.now() - this.historyMs) continue;
 
       const metadata = this.deviceMetadataById[id] ?? {
         icon: null,
@@ -836,29 +886,7 @@ export class ServerState {
       if (engine.consumeChanged()) this.syncEventsForEntity(id, engine);
     }
 
-    // Prune and Checkpoint
-    const pendingCheckpointWrites: { id: number, cp: { timestamp: number, snapshot: EngineState } }[] = [];
-
-    for (const [id, engine] of numericEntries(this.engines)) {
-      if (!engine.lastTimestamp) continue;
-      const checkpoints = this.engineCheckpoints[id] ?? [];
-      const lastCp = checkpoints[checkpoints.length - 1];
-      if (lastCp && (engine.lastTimestamp - lastCp.timestamp) <= CHECKPOINT_INTERVAL_MS) continue;
-      const cp = { timestamp: engine.lastTimestamp, snapshot: engine.createSnapshot() };
-      checkpoints.push(cp);
-      this.engineCheckpoints[id] = checkpoints;
-      pendingCheckpointWrites.push({ id, cp });
-
-      if (checkpoints.length > MAX_CHECKPOINTS) {
-        const oldest = checkpoints.shift();
-        if (oldest) db.run(`DELETE FROM engine_checkpoints WHERE deviceId = ? AND timestamp = ?`, [id, oldest.timestamp]);
-      }
-    }
-
-    if (pendingCheckpointWrites.length) {
-      const stmt = db.prepare(`INSERT OR REPLACE INTO engine_checkpoints (deviceId, timestamp, snapshotJson) VALUES (?, ?, ?)`);
-      db.transaction(() => pendingCheckpointWrites.forEach(item => stmt.run(item.id, item.cp.timestamp, JSON.stringify(item.cp.snapshot))))();
-    }
+    this.checkpointEngines(false);
 
     Object.assign(this.activePointsByDevice, result.positionsByDevice);
     Object.assign(this.eventsByDevice, result.eventsByDevice);

@@ -2,27 +2,28 @@ import { handleResponse, setWebSocket } from '@/wsRPC';
 import { ServerMessageSchema } from '@/types';
 import { useEffect, useRef } from 'react';
 import { useStore } from '@/store';
+import { isSessionRejection, reconnectDelayMs } from './reconnect';
 import type { ClientMessage } from '@/types';
-
-const AUTH_RETRY_DELAY_MS = 500;
-const RECONNECT_DELAY_MS = 5000;
 
 export function useServerConnection() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // -1 means auth succeeded for current socket, >=0 counts pre-auth closes.
-  const preAuthRetryCountRef = useRef(0);
+  const attemptRef = useRef(0);
 
   const isAuthenticated = useStore((state) => state.auth.isAuthenticated);
 
   useEffect(() => {
+    let disposed = false;
+
     const connect = () => {
+      if (disposed) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/ws`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        attemptRef.current = 0;
         setWebSocket(ws);
 
         const state = useStore.getState();
@@ -65,7 +66,6 @@ export function useServerConnection() {
         const store = useStore.getState();
         switch (message.type) {
           case 'auth_success':
-            preAuthRetryCountRef.current = -1;
             store.setOwnedDeviceIds(message.payload.ownedDeviceIds);
             break;
           case 'initial_state':
@@ -87,31 +87,21 @@ export function useServerConnection() {
 
       ws.onclose = (event) => {
         setWebSocket(null);
+        if (disposed) return;
 
-        if (event.code === 1008) {
-          console.error('WebSocket closed with policy violation (auth failed). Logging out...');
+        // The only thing that ends a session is the server saying so. Reconnects are
+        // unbounded, because being unable to reach the server is not evidence about
+        // whether the session is still good.
+        if (isSessionRejection(event.code)) {
+          console.error('Server rejected the session. Logging out...');
           useStore.getState().logout();
           return;
         }
 
-        // If we were previously authenticated, reset the fast-retry counter for this new failure cycle.
-        if (preAuthRetryCountRef.current === -1) preAuthRetryCountRef.current = 0;
-
-        // Always attempt reconnect unless component is unmounting
-        if (preAuthRetryCountRef.current >= 0 && preAuthRetryCountRef.current < 2) {
-          preAuthRetryCountRef.current += 1;
-          reconnectTimeoutRef.current = setTimeout(connect, AUTH_RETRY_DELAY_MS);
-          return;
-        }
-
-        // If we've reached the limit and were supposed to be authenticated, force a logout to resolve the stale session.
-        if (useStore.getState().auth.isAuthenticated) {
-          console.error('Handshake failed repeatedly. Session state may be invalid. Logging out...');
-          useStore.getState().logout();
-          return;
-        }
-
-        reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_DELAY_MS);
+        const authenticated = useStore.getState().auth.isAuthenticated;
+        const delay = reconnectDelayMs(attemptRef.current, authenticated);
+        attemptRef.current += 1;
+        reconnectTimeoutRef.current = setTimeout(connect, delay);
       };
 
       ws.onerror = (error) => {
@@ -124,6 +114,7 @@ export function useServerConnection() {
     connect();
 
     return () => {
+      disposed = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;

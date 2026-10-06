@@ -26,6 +26,7 @@
         "zustand": "^5.0.15",
       },
       "devDependencies": {
+        "@maplibre/maplibre-gl-style-spec": "^24.8.1",
         "@types/bun": "1.4.2",
         "@types/color-hash": "^2.0.0",
         "@types/react": "^19.3.0",

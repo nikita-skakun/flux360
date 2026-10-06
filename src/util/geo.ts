@@ -1,8 +1,31 @@
-import type { Bounds, Vec2 } from "@/types";
+import { cosLatitude, fromWebMercator } from "@/util/webMercator";
+import type { Bounds, RawGpsCoord, Vec2, WebMercatorCoord } from "@/types";
 
 /** Radius in metres, since variance is metres squared. */
 export function getRadiusFromVariance(variance: number): number {
   return Math.sqrt(Math.max(1e-6, variance));
+}
+
+const ACCURACY_CIRCLE_SIDES = 64;
+
+/**
+ * A circle of a given ground radius, as lng/lat ring coordinates.
+ *
+ * Mercator stretches distances by sec(latitude), so a ground radius of R metres is
+ * R / cos(lat) projected units. Drawing the metre value directly renders a circle
+ * smaller than the accuracy it claims by a factor of cos(latitude), which is about a
+ * third at temperate latitudes. Scaling here keeps the drawn circle consistent with
+ * metricDistance, which is the codebase's metre invariant.
+ */
+export function buildAccuracyCircleCoords(center: WebMercatorCoord, radiusMeters: number): RawGpsCoord[] {
+  const projectedRadius = radiusMeters / Math.max(1e-6, cosLatitude(center[1]));
+  return Array.from({ length: ACCURACY_CIRCLE_SIDES + 1 }, (_, index) => {
+    const angle = (index * 2 * Math.PI) / ACCURACY_CIRCLE_SIDES;
+    return fromWebMercator([
+      center[0] + projectedRadius * Math.cos(angle),
+      center[1] + projectedRadius * Math.sin(angle),
+    ]);
+  });
 }
 
 export function computeBounds(points: Vec2[]): Bounds {

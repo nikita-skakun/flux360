@@ -5,6 +5,8 @@ import { join } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "flux360-test-"));
 process.env["FLUX360_DB_PATH"] = join(dir, "test.sqlite");
 
+import type { EngineEvent } from "@/types";
+
 export const { db } = await import("@/server/db");
 export const { ServerState } = await import("@/server/serverState");
 
@@ -39,6 +41,10 @@ export function countRowsFor(table: string, column: string, value: number): numb
 export type State = InstanceType<typeof ServerState>;
 
 export type EventRow = { type: string; start: number; end: number; isDraft?: boolean };
+
+export function closedEngineEventsFor(state: State, id: number): EngineEvent[] {
+  return (state as unknown as { engines: Record<number, { closed: EngineEvent[] }> }).engines[id]?.closed.filter(e => !e.isDraft) ?? [];
+}
 
 export function closedEventsFor(state: State, id: number): EventRow[] {
   return ((state.eventsByDevice[id] ?? []) as EventRow[]).filter(e => !e.isDraft);

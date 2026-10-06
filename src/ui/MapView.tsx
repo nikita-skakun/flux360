@@ -2,21 +2,39 @@ import "@maptiler/sdk/dist/maptiler-sdk.css";
 import { CLUSTER_DISTANCE_PX, computeClusters } from "@/util/clustering";
 import { ClusterPopup } from "./ClusterPopup";
 import { colorForDeltaSeconds, getColorForDevice } from "@/util/color";
+import { LABEL_COLORS, cssColor } from "@/labels/palette";
+import { fixAtPoint, kindsAtFixes, mergeAccuracyCircles } from "@/labels/fixes";
 import { computeBestFitMotionPath } from "@/util/motionBestFit";
-import { getRadiusFromVariance } from "@/util/geo";
+import { MIN_LABEL_CIRCLE_RADIUS_PX, labelCirclePaint, metresPerPixel } from "./labeling/labelLayers";
+import { buildAccuracyCircleCoords, getRadiusFromVariance } from "@/util/geo";
 import { drawPin, PIN_R } from "@/util/rendering";
 import { distance } from "@/util/vec2";
-import { fromWebMercator } from "@/util/webMercator";
+import { fromWebMercator, toWebMercator } from "@/util/webMercator";
 import { GeoJSONSource, Map as MaptilerMap, config, MapMouseEvent } from "@maptiler/sdk";
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { AppDevice, DevicePoint, Vec2, EngineEvent } from "@/types";
+import type { Label, LabelKind, StripFix } from "@/labels/types";
 import type { Color } from "@/util/color";
 import type { DrawItem } from "@/util/clustering";
 import type { Feature, Point, Polygon } from "geojson";
 
+/**
+ * Merged into neighbourhoods before they reach the map. Drawing one feature per fix
+ * makes a parked cluster accumulate into a solid disc, because the map composites each
+ * feature separately.
+ */
+function accuracyCircles(fixes: StripFix[], color: string): Feature<Point>[] {
+  return mergeAccuracyCircles(fixes).map(blob => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: blob.geo },
+    properties: { radiusMeters: blob.radiusMeters, lat: blob.geo[1], color },
+  }));
+}
+
 export type MapViewHandle = {
   flyToDevice: (id: number) => void;
   flyToBounds: (bounds: [Vec2, Vec2]) => void;
+  focusFixes: (fixes: StripFix[]) => void;
 };
 
 type Props = {
@@ -29,6 +47,11 @@ type Props = {
   darkMode: boolean;
   pulsingDeviceIds: number[];
   selectedHistoryItem: EngineEvent | null;
+  labelFixes: StripFix[];
+  labels: Label[];
+  labelHoveredFix: StripFix | null;
+  labelSelectedFixes: StripFix[];
+  onPickFix: (fix: StripFix) => void;
 };
 const STYLE_LIGHT = "dataviz";
 const STYLE_DARK = "019d01fb-0333-7f54-9107-395c4e551160";
@@ -43,6 +66,11 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   darkMode,
   pulsingDeviceIds,
   selectedHistoryItem,
+  labelFixes,
+  labels,
+  labelHoveredFix,
+  labelSelectedFixes,
+  onPickFix,
 }, ref) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MaptilerMap | null>(null);
@@ -107,9 +135,40 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
     map.fitBounds(bounds, { padding: 80, maxZoom: 18, duration: 1000 });
   }, []);
 
+  /**
+   * Frames whatever is selected. One fix frames that fix at a zoom chosen from its
+   * accuracy; several fixes frame the whole group, because framing only the last
+   * clicked one hides the rest of the selection.
+   */
+  const focusFixes = useCallback((fixes: StripFix[]) => {
+    const map = mapRef.current;
+    const only = fixes.length === 1 ? fixes[0] : undefined;
+    if (!map) return;
+    if (only) {
+      map.flyTo({ center: only.geo, zoom: only.accuracy > 40 ? 16 : 17, duration: 800 });
+      return;
+    }
+    if (fixes.length < 2) return;
+
+    let west = Infinity;
+    let east = -Infinity;
+    let south = Infinity;
+    let north = -Infinity;
+    for (const fix of fixes) {
+      const [lng, lat] = fix.geo;
+      const pad = fix.accuracy / 111_320;
+      if (lng - pad < west) west = lng - pad;
+      if (lng + pad > east) east = lng + pad;
+      if (lat - pad < south) south = lat - pad;
+      if (lat + pad > north) north = lat + pad;
+    }
+    map.fitBounds([[west, south], [east, north]], { padding: 80, maxZoom: 18, duration: 800 });
+  }, []);
+
   useImperativeHandle(ref, () => ({
     flyToDevice,
     flyToBounds,
+    focusFixes,
   }));
 
   useEffect(() => {
@@ -123,16 +182,6 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   useEffect(() => {
     onSelectDeviceRef.current = onSelectDevice;
   }, [onSelectDevice]);
-
-  const buildAccuracyCircleCoords = (center: Vec2, radius: number, sides = 64): Vec2[] => {
-    return Array.from({ length: sides + 1 }, (_, j) => {
-      const angle = (j * 2 * Math.PI) / sides;
-      return fromWebMercator([
-        center[0] + radius * Math.cos(angle),
-        center[1] + radius * Math.sin(angle),
-      ]);
-    });
-  };
 
   const renderPinImage = (imageKey: string, iconText: string, color: Color, label?: string) => {
     const map = mapRef.current;
@@ -148,6 +197,37 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (imageData) map.addImage(imageKey, imageData);
     }
   };
+
+  /**
+   * The hovered fix is held in a ref as well as a prop. updateLayers reads the ref so
+   * that a hover change does not appear in its dependency list; otherwise every pixel
+   * of cursor movement would rebuild every cluster and pin on the map.
+   */
+  const labelHoveredFixRef = useRef<StripFix | null>(labelHoveredFix);
+  useEffect(() => {
+    labelHoveredFixRef.current = labelHoveredFix;
+  }, [labelHoveredFix]);
+
+  const labelFixesRef = useRef<StripFix[]>(labelFixes);
+  useEffect(() => {
+    labelFixesRef.current = labelFixes;
+  }, [labelFixes]);
+
+  const onPickFixRef = useRef(onPickFix);
+  useEffect(() => {
+    onPickFixRef.current = onPickFix;
+  }, [onPickFix]);
+
+  const buildLabelHoverData = useCallback((fix: StripFix | null) => ({
+    type: 'FeatureCollection' as const,
+    features: fix
+      ? [{
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: fix.geo },
+        properties: { radiusMeters: fix.accuracy, lat: fix.geo[1] },
+      }]
+      : [],
+  }), []);
 
   const updateLayers = useCallback(() => {
     const map = mapRef.current;
@@ -228,6 +308,30 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         });
       }
     });
+
+    // Deliberately neutral for an unlabelled fix. These mark raw fixes rather than
+    // findings, and an accent colour competes with the device colours already on the map.
+    const labelBaseColor = darkMode ? '#cbd5e1' : '#334155';
+    const labelHoverColor = darkMode ? '#ffffff' : '#0f172a';
+    const colorForKind = (kind: LabelKind | null) => kind === null ? labelBaseColor : cssColor(LABEL_COLORS[kind]);
+
+    // Grouped by colour before merging, so a circle never mixes two labels into one
+    // shade that means neither of them.
+    const byColor = new Map<string, StripFix[]>();
+    const kinds = kindsAtFixes(labelFixes, labels);
+    labelFixes.forEach((fix, index) => {
+      const color = colorForKind(kinds[index] ?? null);
+      const group = byColor.get(color);
+      if (group) group.push(fix);
+      else byColor.set(color, [fix]);
+    });
+
+    const labelSelectedFeatures = accuracyCircles(labelSelectedFixes, '#22d3ee');
+
+    // Raw fixes loaded for the labelling strip. These are history, not engine output,
+    // so they are drawn independently of activePoints.
+    const labelAccuracyFeatures = [...byColor].flatMap(([color, group]) => accuracyCircles(group, color));
+
 
     // Process clusters (separate pass after all devices are evaluated)
     clusters.filter(cl => cl.size > 1).forEach(cl => {
@@ -326,6 +430,45 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
         });
       } else {
         (map.getSource('accuracy-source') as GeoJSONSource).setData(accData);
+      }
+
+      const labelData = { type: 'FeatureCollection' as const, features: labelAccuracyFeatures };
+      if (!map.getSource('label-accuracy-source')) {
+        map.addSource('label-accuracy-source', { type: 'geojson', data: labelData });
+        map.addLayer({
+          id: 'label-accuracy-layer',
+          type: 'circle',
+          source: 'label-accuracy-source',
+          paint: labelCirclePaint({ color: ['get', 'color'], fillOpacity: 0.10, strokeWidth: 1, strokeOpacity: 0.35 }),
+        }, 'dots-layer');
+      } else {
+        (map.getSource('label-accuracy-source') as GeoJSONSource).setData(labelData);
+      }
+
+      const labelSelectedData = { type: 'FeatureCollection' as const, features: labelSelectedFeatures };
+      if (!map.getSource('label-selected-source')) {
+        map.addSource('label-selected-source', { type: 'geojson', data: labelSelectedData });
+        map.addLayer({
+          id: 'label-selected-layer',
+          type: 'circle',
+          source: 'label-selected-source',
+          paint: labelCirclePaint({ color: '#22d3ee', fillOpacity: 0.16, strokeWidth: 1.5, strokeOpacity: 0.9 }),
+        }, 'dots-layer');
+      } else {
+        (map.getSource('label-selected-source') as GeoJSONSource).setData(labelSelectedData);
+      }
+
+      const labelHoverData = buildLabelHoverData(labelHoveredFixRef.current);
+      if (!map.getSource('label-hover-source')) {
+        map.addSource('label-hover-source', { type: 'geojson', data: labelHoverData });
+        map.addLayer({
+          id: 'label-hover-layer',
+          type: 'circle',
+          source: 'label-hover-source',
+          paint: labelCirclePaint({ color: labelHoverColor, fillOpacity: 0.20, strokeWidth: 2, strokeOpacity: 0.9 }),
+        }, 'dots-layer');
+      } else {
+        (map.getSource('label-hover-source') as GeoJSONSource).setData(labelHoverData);
       }
 
       const indData = { type: 'FeatureCollection' as const, features: individualsFeatures };
@@ -501,7 +644,15 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       if (e instanceof Error && e.message.includes("Style is not done loading")) return;
       throw e;
     }
-  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem]);
+  }, [activePoints, entities, darkMode, selectedDeviceId, clusterPopup, pulsingDeviceIds, selectedHistoryItem, labelFixes, labels, labelSelectedFixes, buildLabelHoverData]);
+
+  // Hover only touches the one source it owns.
+  useEffect(() => {
+    const map = mapRef.current;
+    const source = map?.getSource('label-hover-source');
+    if (!map || !source) return;
+    (source as GeoJSONSource).setData(buildLabelHoverData(labelHoveredFix));
+  }, [labelHoveredFix, buildLabelHoverData]);
 
   const listenersAttached = useRef(false);
   const currentStyleRef = useRef<string>(darkMode ? STYLE_DARK : STYLE_LIGHT);
@@ -694,6 +845,18 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
       map.on('click', 'clusters-layer', onClusterClick);
       map.on('click', onMapClick);
 
+      // Registered last so a device dot under the cursor wins and sets defaultPrevented.
+      map.on('click', (event: MapMouseEvent) => {
+        if (event.defaultPrevented) return;
+        const fixes = labelFixesRef.current;
+        if (fixes.length === 0) return;
+        const minReach = MIN_LABEL_CIRCLE_RADIUS_PX * metresPerPixel(map.getZoom(), event.lngLat.lat);
+        const picked = fixAtPoint(fixes, toWebMercator([event.lngLat.lng, event.lngLat.lat]), minReach);
+        if (!picked) return;
+        event.preventDefault();
+        onPickFixRef.current(picked);
+      });
+
       ['individuals-layer', 'clusters-layer'].forEach(layer => {
         map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
         map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
@@ -720,7 +883,7 @@ const MapViewComponent = React.forwardRef<MapViewHandle, Props>(({
   // Data update effect
   useEffect(() => {
     if (mapRef.current) updateLayers();
-  }, [activePoints, entities, darkMode, selectedDeviceId, updateLayers]);
+  }, [activePoints, entities, darkMode, selectedDeviceId, labelFixes, updateLayers]);
 
   useEffect(() => {
     const map = mapRef.current;

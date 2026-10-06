@@ -1,4 +1,6 @@
 import type { AppDevice, DevicePoint, EngineEvent, InitialStatePayload, DeviceShare, DeviceMetadata } from '@/types';
+import type { Label, StripFix } from '@/labels/types';
+import type { LabelOp } from '@/labels/undo';
 
 export type ThemeOptions = 'Light' | 'Dark' | 'Auto';
 
@@ -27,6 +29,7 @@ export type StoreState = {
     selectedDeviceId: number | null;
     isSidePanelOpen: boolean;
     editingTarget: { type: 'device' | 'group', id: number } | null;
+    isLabelMode: boolean;
   };
 
   // Map marker points and engine states
@@ -34,6 +37,14 @@ export type StoreState = {
 
   // Engine events (Stationary/Motion)
   eventsByDevice: Record<number, EngineEvent[]>;
+
+  // Hand-authored ground truth, keyed by entity (groups are negative ids)
+  labelsByEntity: Record<number, Label[]>;
+  // Raw fixes loaded for the labelling strip, never engine output
+  historyFixesByEntity: Record<number, StripFix[]>;
+  // Session undo history. Labels write immediately, so undo reverses an operation
+  labelHistory: LabelOp[];
+  labelError: string | null;
 };
 
 type StoreActions = {
@@ -59,6 +70,16 @@ type StoreActions = {
   setSelectedDeviceId: (id: number | null) => void;
   setIsSidePanelOpen: (open: boolean) => void;
   setEditingTarget: (target: { type: 'device' | 'group'; id: number } | null) => void;
+
+  // Labelling
+  setLabelMode: (enabled: boolean) => void;
+  loadLabels: (entityId: number) => Promise<void>;
+  loadHistory: (entityId: number, from: number, to: number) => Promise<void>;
+  writeLabel: (label: Label) => Promise<void>;
+  deleteLabel: (entityId: number, id: string) => Promise<void>;
+  undoLabel: () => Promise<void>;
+  runLabelOp: (op: LabelOp) => Promise<void>;
+  setLabelError: (message: string | null) => void;
 
   // Sharing
   shareDevice: (deviceId: number, username: string) => Promise<void>;

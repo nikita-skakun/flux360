@@ -8,14 +8,20 @@ import { HistoryObservationBar } from "./ui/HistoryObservationBar";
 import { LoginPage } from "./ui/LoginPage";
 import { MapView } from "./ui/MapView";
 import { parseDecodedMotionEvent } from "./util/motionEventCodec";
+import { LabelModeToggle } from '@/ui/labeling/LabelModeToggle';
+import { LabelingLayer } from '@/ui/labeling/LabelingLayer';
+import type { Label, StripFix } from '@/labels/types';
+import type { PickedFix } from '@/ui/labeling/LabelingLayer';
 import { SettingsPanel } from "./ui/SettingsPanel";
 import { TimelinePanel } from "./ui/TimelinePanel";
 import { UnifiedEditModal } from "./ui/UnifiedEditModal";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerConnection } from "./hooks/useServerConnection";
 import { useStore } from "./store";
 import type { MapViewHandle } from "./ui/MapView";
 import type { TimelineEvent } from "./ui/TimelinePanel";
+
+const NO_LABELS: Label[] = [];
 
 export function App() {
   const createGroup = useStore(state => state.createGroup);
@@ -60,8 +66,38 @@ export function App() {
   useServerConnection();
 
   const [pulsingDeviceIds, setPulsingDeviceIds] = useState<number[]>([]);
+  const [labelFixes, setLabelFixes] = useState<StripFix[]>([]);
+  const [labelHoveredFix, setLabelHoveredFix] = useState<StripFix | null>(null);
+  const [labelSelectedFixes, setLabelSelectedFixes] = useState<StripFix[]>([]);
+  const [labelPicked, setLabelPicked] = useState<PickedFix | null>(null);
+
+  const labels = useStore(state =>
+    selectedDeviceId === null ? NO_LABELS : state.labelsByEntity[selectedDeviceId] ?? NO_LABELS
+  );
+
+  // Stable identities, because the labelling layer reports its view from an effect and
+  // an inline callback would re-fire that effect on every render.
+  const handleLabelViewChange = useCallback((fixes: StripFix[], hovered: StripFix | null) => {
+    setLabelFixes(fixes);
+    setLabelHoveredFix(hovered);
+  }, []);
+
+  const pickSeq = useRef(0);
+  const handlePickFix = useCallback((fix: StripFix) => {
+    pickSeq.current += 1;
+    setLabelPicked({ fix, seq: pickSeq.current });
+  }, []);
+
+  const handleFocusSelection = useCallback((fixes: StripFix[]) => {
+    mapViewRef.current?.focusFixes(fixes);
+  }, []);
+
+  const handleSelectedChange = useCallback((fixes: StripFix[]) => {
+    setLabelSelectedFixes(fixes);
+  }, []);
 
   const activePointsByDevice = useStore(state => state.activePointsByDevice);
+  const isLabelMode = useStore(state => state.ui.isLabelMode);
   const eventsByDevice = useStore(state => state.eventsByDevice);
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -185,11 +221,18 @@ export function App() {
         darkMode={isDark}
         pulsingDeviceIds={pulsingDeviceIds}
         selectedHistoryItem={selectedTimelineEvent?.item ?? null}
+        labelFixes={labelFixes}
+        labels={labels}
+        onPickFix={handlePickFix}
+        labelHoveredFix={labelHoveredFix}
+        labelSelectedFixes={labelSelectedFixes}
         overlay={
           <div className="flex flex-col gap-2 w-[280px]">
             <SettingsPanel
               onLogout={logout}
             />
+
+            <LabelModeToggle />
 
             <DeviceOverlay
               selectedDeviceId={selectedDeviceId}
@@ -201,30 +244,38 @@ export function App() {
               onFlyToDevice={(id) => mapViewRef.current?.flyToDevice(id)}
             />
 
-            <TimelinePanel
-              selectedDeviceId={selectedDeviceId}
-              eventsByDevice={eventsByDevice}
-              historyDays={historyDays}
-              onSelectEvent={(event) => {
-                setSelectedTimelineEvent(event);
+            {!isLabelMode && (
+              <TimelinePanel
+                selectedDeviceId={selectedDeviceId}
+                eventsByDevice={eventsByDevice}
+                historyDays={historyDays}
+                onSelectEvent={(event) => {
+                  setSelectedTimelineEvent(event);
 
-                if (event.item.type === "stationary") {
-                  const mean = fromWebMercator(event.item.mean);
-                  mapViewRef.current?.flyToBounds(paddedLngLatBounds(mean, mean));
-                } else {
-                  const s = event.item;
-                  mapViewRef.current?.flyToBounds(
-                    paddedLngLatBounds(
-                      fromWebMercator([s.bounds.minX, s.bounds.minY]),
-                      fromWebMercator([s.bounds.maxX, s.bounds.maxY])
-                    )
-                  );
-                }
-              }}
-              selectedEventId={selectedTimelineEvent?.id ?? null}
-            />
+                  if (event.item.type === "stationary") {
+                    const mean = fromWebMercator(event.item.mean);
+                    mapViewRef.current?.flyToBounds(paddedLngLatBounds(mean, mean));
+                  } else {
+                    const s = event.item;
+                    mapViewRef.current?.flyToBounds(
+                      paddedLngLatBounds(
+                        fromWebMercator([s.bounds.minX, s.bounds.minY]),
+                        fromWebMercator([s.bounds.maxX, s.bounds.maxY])
+                      )
+                    );
+                  }
+                }}
+                selectedEventId={selectedTimelineEvent?.id ?? null}
+              />
+            )}
           </div>
         }
+      />
+      <LabelingLayer
+        onViewChange={handleLabelViewChange}
+        picked={labelPicked}
+        onFocusSelection={handleFocusSelection}
+        onSelectedChange={handleSelectedChange}
       />
       {editingTarget && (
         <UnifiedEditModal
