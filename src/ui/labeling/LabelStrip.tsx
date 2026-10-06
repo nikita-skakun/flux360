@@ -48,12 +48,13 @@ type Props = {
   onVisibleRangeChange: (first: number, last: number) => void;
   onRequestOlder: () => void;
   onFocusSelection: (fixes: StripFix[]) => void;
+  deviceName: (deviceId: number) => string | null;
 };
 
 export function LabelStrip({
   fixes, labels, selection, hoveredIndex, scrollIndex, loading,
   scrollSnap,
-  onSelectionChange, onHover, onScrollChange, onVisibleRangeChange, onRequestOlder, onFocusSelection,
+  onSelectionChange, onHover, onScrollChange, onVisibleRangeChange, onRequestOlder, onFocusSelection, deviceName,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hoverCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -338,8 +339,8 @@ export function LabelStrip({
   const readout = useMemo(() => {
     if (loading && fixes.length === 0) return "Loading fixes…";
     if (fixes.length === 0) return "No fixes in this window";
-    return describeFix(info, fixes, hoveredIndex) ?? describeSelection(selectionWindow(selection, fixes));
-  }, [loading, fixes, info, hoveredIndex, selection]);
+    return describeFix(info, fixes, hoveredIndex, deviceName) ?? describeSelection(selectionWindow(selection, fixes));
+  }, [loading, fixes, info, hoveredIndex, selection, deviceName]);
 
   const arrowClass = "absolute top-1/2 -translate-y-1/2 z-10 h-9 w-8 rounded text-lg leading-none transition-colors";
 
@@ -412,7 +413,8 @@ export function LabelStrip({
 function describeFix(
   info: { fix: StripFix; label: Label | null; isOutlier: boolean } | null,
   fixes: StripFix[],
-  index: number | null
+  index: number | null,
+  deviceName: (deviceId: number) => string | null
 ): string | null {
   if (info === null) return null;
 
@@ -427,8 +429,9 @@ function describeFix(
   const previous = index === null ? undefined : fixes[index - 1];
   const gap = previous ? `+${Math.round((fix.timestamp - previous.timestamp) / 1000)}s since previous` : "";
   const kind = isOutlier ? "outlier" : label?.kind ?? "unlabeled";
+  const name = deviceName(fix.device) ?? fix.device;
 
-  return [time, `device ${fix.device}`, `±${fix.accuracy.toFixed(0)}m`, kind, gap].filter(Boolean).join("  ·  ");
+  return [time, `device ${name}`, `±${fix.accuracy.toFixed(0)}m`, kind, gap].filter(Boolean).join("  ·  ");
 }
 
 function describeSelection(

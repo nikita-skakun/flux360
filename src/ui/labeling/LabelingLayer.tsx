@@ -179,6 +179,8 @@ export function LabelingLayer({ onViewChange, onFocusSelection, onSelectedChange
     setSelection(next);
   }, []);
 
+  const deviceName = useCallback((deviceId: number) => useStore.getState().entities[deviceId]?.name ?? null, []);
+
   const onVisibleRangeChange = useCallback((first: number, last: number) => {
     setRange(current => (current && current.first === first && current.last === last ? current : { first, last }));
   }, []);
@@ -298,6 +300,7 @@ export function LabelingLayer({ onViewChange, onFocusSelection, onSelectedChange
           onVisibleRangeChange={onVisibleRangeChange}
           onRequestOlder={requestOlder}
           onFocusSelection={onFocusSelection}
+          deviceName={deviceName}
         />
       </div>
     </>
